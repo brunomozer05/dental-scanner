@@ -70,7 +70,74 @@ O workflow em `.github/workflows/ios-build.yml`:
 - gera o projeto
 - roda build
 - roda testes
-- arquiva artefatos em `main`
+- gera `.ipa` assinado quando os secrets de assinatura estiverem configurados
+
+## Gerar `.ipa` no GitHub Actions
+
+Para o artifact sair como `.ipa` instalavel no iPhone, o build precisa ser assinado. IPA sem assinatura valida nao instala em dispositivo real.
+
+### Secrets obrigatorios
+
+Cadastre em `Settings > Secrets and variables > Actions`:
+
+- `BUILD_CERTIFICATE_BASE64`: conteudo Base64 do certificado `.p12`
+- `P12_PASSWORD`: senha do `.p12`
+- `BUILD_PROVISION_PROFILE_BASE64`: conteudo Base64 do `.mobileprovision`
+- `KEYCHAIN_PASSWORD`: senha temporaria do keychain usado no runner
+- `APPLE_TEAM_ID`: Team ID da sua conta Apple Developer
+
+### Variable opcional
+
+Cadastre em `Settings > Secrets and variables > Actions > Variables`:
+
+- `IOS_EXPORT_METHOD`: `development` ou `ad-hoc`
+
+Se nada for definido, o workflow usa `development`.
+
+### Como converter os arquivos para Base64
+
+No Mac:
+
+```bash
+base64 -i Certificates.p12 | pbcopy
+base64 -i Profile.mobileprovision | pbcopy
+```
+
+No Windows PowerShell:
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("Certificates.p12"))
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("Profile.mobileprovision"))
+```
+
+### Requisitos para instalar no celular
+
+- o `Bundle Identifier` do app precisa bater com o provisioning profile
+- o iPhone precisa estar incluido no profile se o metodo for `development` ou `ad-hoc`
+- o certificado precisa pertencer ao mesmo time Apple do profile
+
+### Onde baixar o `.ipa`
+
+Depois do workflow terminar:
+
+1. abra a execucao no GitHub Actions
+2. entre em `Artifacts`
+3. baixe `DentalScanner-IPA`
+
+O artifact inclui:
+
+- `DentalScanner.ipa`
+- plist(s) de exportacao
+- `DentalScanner.xcarchive`
+
+### Como instalar
+
+Com o `.ipa` assinado em maos, voce pode instalar via:
+
+- Xcode
+- Apple Configurator 2
+- MDM
+- TestFlight, se depois trocar o metodo para distribuicao adequada
 
 ## Como calibrar a camera
 
