@@ -1,0 +1,77 @@
+name: iOS Build and Test
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "15.2"
+
+      - name: Cache DerivedData and SPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Developer/Xcode/DerivedData
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-xcode-${{ hashFiles('project.yml') }}
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Resolve package dependencies
+        run: xcodebuild -resolvePackageDependencies -project DentalScanner.xcodeproj -scheme DentalScanner
+
+      - name: Build
+        run: |
+          xcodebuild clean build \
+            -project DentalScanner.xcodeproj \
+            -scheme DentalScanner \
+            -configuration Debug \
+            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Test
+        run: |
+          xcodebuild test \
+            -project DentalScanner.xcodeproj \
+            -scheme DentalScanner \
+            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest'
+
+      - name: Archive
+        if: github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p build
+          xcodebuild archive \
+            -project DentalScanner.xcodeproj \
+            -scheme DentalScanner \
+            -configuration Release \
+            -archivePath $PWD/build/DentalScanner.xcarchive \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload artifact
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: DentalScanner-Build
+          path: build/
+

@@ -1,0 +1,71 @@
+name: DentalScanner
+options:
+  minimumXcodeGenVersion: 2.38.0
+  deploymentTarget:
+    iOS: 15.0
+settings:
+  base:
+    SWIFT_VERSION: 5.9
+    DEVELOPMENT_TEAM: ""
+targets:
+  DentalScannerKit:
+    type: framework
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: DentalScanner/Core
+      - path: DentalScanner/ArUco
+      - path: DentalScanner/Photogrammetry
+      - path: DentalScanner/Export
+      - path: DentalScanner/Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.DentalScannerKit
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: YES
+  DentalScanner:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: DentalScanner/App
+      - path: DentalScanner/UI
+    dependencies:
+      - target: DentalScannerKit
+    info:
+      path: DentalScanner/Support/Info.plist
+      properties:
+        CFBundleDisplayName: DentalScanner
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        NSCameraUsageDescription: Captura de imagens de alta resolucao para reconstrucao 3D odontologica.
+        NSPhotoLibraryAddUsageDescription: Exporta malhas STL/OBJ e relatorios de medicao.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.DentalScanner
+        TARGETED_DEVICE_FAMILY: "1"
+        PRODUCT_NAME: DentalScanner
+  DentalScannerTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: Tests/DentalScannerTests
+    dependencies:
+      - target: DentalScannerKit
+    info:
+      path: Tests/Support/Tests-Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.DentalScannerTests
+        GENERATE_INFOPLIST_FILE: NO
+schemes:
+  DentalScanner:
+    build:
+      targets:
+        DentalScanner: all
+        DentalScannerKit: all
+    test:
+      targets:
+        - DentalScannerTests

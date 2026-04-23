@@ -1,0 +1,35 @@
+{
+  "datasetName": "sample-calibration-dataset",
+  "checkerboard": {
+    "columns": 10,
+    "rows": 7,
+    "squareSizeMM": 1.5
+  },
+  "captureGuidelines": {
+    "recommendedImageCount": 40,
+    "targetReprojectionErrorPixels": 0.3,
+    "notes": [
+      "Capture angulos frontais, obliquos e laterais.",
+      "Varie a distancia sem cortar o tabuleiro.",
+      "Use iluminacao difusa e evite reflexos."
+    ]
+  },
+  "exampleFrames": [
+    {
+      "file": "IMG_0001.jpg",
+      "poseHint": "fronto-parallel",
+      "distanceMM": 120
+    },
+    {
+      "file": "IMG_0012.jpg",
+      "poseHint": "left-oblique",
+      "distanceMM": 140
+    },
+    {
+      "file": "IMG_0027.jpg",
+      "poseHint": "high-angle",
+      "distanceMM": 135
+    }
+  ]
+}
+
