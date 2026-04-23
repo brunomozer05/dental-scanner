@@ -70,11 +70,17 @@ O workflow em `.github/workflows/ios-build.yml`:
 - gera o projeto
 - roda build
 - roda testes
-- gera `.ipa` assinado quando os secrets de assinatura estiverem configurados
+- gera sempre um `.ipa` unsigned como artifact
+- gera tambem um `.ipa` assinado quando os secrets de assinatura estiverem configurados
 
 ## Gerar `.ipa` no GitHub Actions
 
-Para o artifact sair como `.ipa` instalavel no iPhone, o build precisa ser assinado. IPA sem assinatura valida nao instala em dispositivo real.
+Agora existem dois formatos de artifact:
+
+- `DentalScanner-IPA`: sempre gerado, no mesmo estilo do seu outro projeto, com `.ipa` unsigned
+- `DentalScanner-Signed-IPA`: opcional, apenas quando os secrets de assinatura estiverem configurados
+
+Importante: o `.ipa` unsigned serve para baixar o arquivo pronto do GitHub, mas nao instala diretamente no iPhone sem assinatura posterior.
 
 ### Secrets obrigatorios
 
@@ -122,17 +128,21 @@ Depois do workflow terminar:
 
 1. abra a execucao no GitHub Actions
 2. entre em `Artifacts`
-3. baixe `DentalScanner-IPA`
+3. baixe `DentalScanner-IPA` para o `.ipa` unsigned
+4. se houver, baixe `DentalScanner-Signed-IPA` para o build assinado
 
 O artifact inclui:
 
 - um `.zip` gerado automaticamente pelo GitHub Actions
-- `DentalScanner.xcarchive`
 
 Dentro do `.zip` do artifact ficam:
 
 - `DentalScanner.ipa`
+
+No artifact assinado tambem pode haver:
+
 - plist(s) de exportacao
+- `DentalScanner.xcarchive`
 
 ### Como instalar
 
