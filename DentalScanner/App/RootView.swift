@@ -1,24 +1,26 @@
 import SwiftUI
 
+@MainActor
 struct RootView: View {
     @StateObject private var viewModel = CaptureViewModel()
 
     var body: some View {
         TabView {
-            NavigationStack {
+            NavigationView {
                 CaptureView(viewModel: viewModel)
             }
+            .navigationViewStyle(.stack)
             .tabItem {
                 Label("Captura", systemImage: "camera.viewfinder")
             }
 
-            NavigationStack {
+            NavigationView {
                 PreviewView(viewModel: viewModel)
             }
+            .navigationViewStyle(.stack)
             .tabItem {
                 Label("Preview", systemImage: "cube.transparent")
             }
         }
     }
 }
-

@@ -1,4 +1,5 @@
 import DentalScannerKit
+import Foundation
 import SwiftUI
 
 struct QualityIndicators: View {
@@ -42,4 +43,3 @@ private struct MetricCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
-
