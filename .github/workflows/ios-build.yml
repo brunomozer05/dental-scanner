@@ -200,16 +200,26 @@ jobs:
             -exportPath $PWD/build/export \
             -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist
 
+      - name: Prepare IPA artifact contents
+        if: steps.signing.outputs.ready == 'true'
+        shell: bash
+        run: |
+          mkdir -p build/package
+          cp build/export/*.ipa build/package/
+          cp build/export/*.plist build/package/ 2>/dev/null || true
+
       - name: Upload IPA artifact
         if: steps.signing.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: DentalScanner-IPA
           path: |
-            build/export/*.ipa
-            build/export/*.plist
+            build/package
             build/DentalScanner.xcarchive
 
-      - name: Skip IPA export notice
+      - name: Fail if signing is missing
         if: steps.signing.outputs.ready != 'true'
-        run: echo "IPA export skipped because signing secrets are missing."
+        run: |
+          echo "IPA export failed because signing secrets are missing."
+          echo "Required secrets: BUILD_CERTIFICATE_BASE64, P12_PASSWORD, BUILD_PROVISION_PROFILE_BASE64, KEYCHAIN_PASSWORD, APPLE_TEAM_ID"
+          exit 1

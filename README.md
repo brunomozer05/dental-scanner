@@ -126,9 +126,13 @@ Depois do workflow terminar:
 
 O artifact inclui:
 
+- um `.zip` gerado automaticamente pelo GitHub Actions
+- `DentalScanner.xcarchive`
+
+Dentro do `.zip` do artifact ficam:
+
 - `DentalScanner.ipa`
 - plist(s) de exportacao
-- `DentalScanner.xcarchive`
 
 ### Como instalar
 
