@@ -20,8 +20,7 @@ final class CaptureViewModel: ObservableObject {
     @Published var reportText = "Nenhum relatorio gerado."
 
     private let sessionManager = SessionManager()
-    private let sfmEngine = SfMEngine()
-    private let bundleAdjustment = BundleAdjustment()
+    private let markerSceneReconstructor = MarkerSceneReconstructor()
     private let meshReconstructor = MeshReconstructor()
     private let reportGenerator = MeasurementReportGenerator()
     private var frameCounter = 0
@@ -102,14 +101,12 @@ final class CaptureViewModel: ObservableObject {
     }
 
     func reconstruct() {
-        guard let calibration = sessionManager.state.calibration else {
+        guard sessionManager.state.calibration != nil else {
             return
         }
 
         sessionManager.markProcessingStarted()
-        var reconstruction = sfmEngine.bootstrap(with: sessionManager.state.frames, intrinsics: calibration)
-        reconstruction = sfmEngine.densify(reconstruction)
-        reconstruction = bundleAdjustment.refine(reconstruction, anchors: sessionManager.state.frames.flatMap(\.markers))
+        let reconstruction = markerSceneReconstructor.reconstruct(from: sessionManager.state.frames)
         let mesh = meshReconstructor.reconstruct(from: reconstruction)
 
         sessionManager.completeReconstruction(reconstruction, mesh: mesh)
@@ -151,4 +148,3 @@ final class CaptureViewModel: ObservableObject {
         }
     }
 }
-

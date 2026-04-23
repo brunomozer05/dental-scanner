@@ -73,7 +73,7 @@ struct CaptureView: View {
                     .buttonStyle(.borderedProminent)
                 }
 
-                Button("Reconstruir Malha") {
+                Button("Gerar STL das Tags") {
                     viewModel.reconstruct()
                 }
                 .buttonStyle(.borderedProminent)
@@ -81,6 +81,6 @@ struct CaptureView: View {
             }
             .padding()
         }
-        .navigationTitle("Captura Guiada")
+        .navigationTitle("Captura ArUco")
     }
 }

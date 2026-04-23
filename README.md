@@ -1,17 +1,28 @@
 # DentalScanner
 
-Aplicativo iOS nativo em Swift para escaneamento 3D de abutments dentarios usando fotogrametria + marcadores ArUco, sem dependencia de LiDAR.
+Aplicativo iOS nativo em Swift para capturar tags ArUco com a camera do iPhone, estimar a pose 3D dessas tags via fotogrametria/visao computacional e gerar um arquivo `.stl` com a posicao final das tags no espaco.
 
 Este repositorio agora contem a fundacao do projeto:
 
-- Arquitetura modular alinhada ao pipeline pedido
+- Arquitetura modular alinhada a captura ArUco + export STL
 - App iOS em SwiftUI com fluxo demo de captura guiada
 - Camada `DentalScannerKit` com Core, ArUco, Photogrammetry e Export
-- Testes unitarios iniciais para validacao de sessao, tags, STL e acuracia
+- Testes unitarios iniciais para validacao de sessao, tags, STL e fusao das poses
 - GitHub Actions com geracao de projeto via XcodeGen
 - Documentacao tecnica e assets de calibracao
 
-Importante: esta primeira iteracao prioriza arquitetura, contratos e automacao. O backend real de deteccao ArUco via OpenCV e a reconstrucao SfM/MVS de producao ainda precisam ser conectados.
+Importante: esta primeira iteracao prioriza arquitetura, contratos e automacao. O backend real de deteccao ArUco via OpenCV e a estimacao/fusao de poses em producao ainda precisam ser conectados.
+
+## Objetivo real do app
+
+Fluxo esperado:
+
+1. O usuario aponta a camera do iPhone para um conjunto de tags ArUco.
+2. O app detecta as tags quadro a quadro.
+3. O pipeline estima a pose 3D das tags e funde observacoes de multiplas vistas.
+4. Ao finalizar, o app gera um `.stl` contendo a representacao 3D das tags nas posicoes estimadas.
+
+Este projeto nao esta sendo tratado, neste momento, como uma reconstrucao detalhada de uma superficie odontologica. O foco da base atual passou a ser mapa 3D das tags ArUco.
 
 ## Requisitos de produto
 
@@ -179,12 +190,12 @@ Assets de apoio:
 ## Fluxo de captura planejado
 
 1. Carregar calibracao valida.
-2. Posicionar o objeto com tags visiveis.
-3. Capturar de 15 a 30 poses ao redor do abutment.
+2. Posicionar o setup com as tags visiveis.
+3. Capturar de 15 a 30 poses ao redor do conjunto de tags.
 4. Garantir sobreposicao de 70-80% entre frames consecutivos.
 5. Validar nitidez, blur, iluminacao e visibilidade de tags em tempo real.
-6. Rodar SfM incremental, ajuste global e densificacao.
-7. Gerar malha e exportar STL/OBJ + relatorio.
+6. Estimar e fundir as poses 3D das tags entre multiplos frames.
+7. Gerar STL com a posicao final das tags + relatorio.
 
 ## Estado atual da implementacao
 
@@ -195,17 +206,18 @@ Ja implementado:
 - `SessionManager` com cobertura angular, quality gates e progresso
 - `ArUcoDetector` com interface pronta para backend OpenCV
 - `TagValidator` e `PoseEstimator`
-- `SfMEngine`, `BundleAdjustment`, `MeshReconstructor` e `AccuracyValidator` em modo scaffold
+- `MarkerSceneReconstructor` para fundir observacoes por ID de tag
+- `MeshReconstructor` configurado para gerar malha STL das tags
 - `STLExporter` e `MeasurementReportGenerator`
 - UI demo em SwiftUI para provar o fluxo
 
 Proximo passo tecnico obrigatorio:
 
 - integrar um backend real de OpenCV para deteccao ArUco e `solvePnP`
-- implementar ORB/SIFT + matching robusto com RANSAC
-- substituir o SfM scaffold por pipeline incremental real
-- adicionar MVS e malha de producao
-- validar com corpo de prova e ICP contra CAD de referencia
+- estimar pose 6DoF real por tag com intrinsecos calibrados
+- fundir as poses entre multiplas imagens com rejeicao de outliers
+- exportar o STL final direto no iPhone
+- validar a consistencia espacial entre tags
 
 ## Debug mode recomendado
 
@@ -255,8 +267,8 @@ Manter um modo debug com:
 
 ## Roadmap sugerido
 
-1. MVP com precisao de ~500 um
-2. Integracao OpenCV + ArUco real
-3. SfM incremental com bundle adjustment global
-4. Validacao com fixture de referencia
-5. Refinamento para meta de +-100 um
+1. MVP com deteccao ArUco e STL basico das tags
+2. Integracao OpenCV + pose 6DoF real
+3. Fusao robusta de poses entre multiplas vistas
+4. Exportacao STL final no aparelho
+5. Refinamento de precisao para meta de +-100 um

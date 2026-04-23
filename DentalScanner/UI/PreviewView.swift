@@ -7,11 +7,11 @@ struct PreviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 if let mesh = viewModel.mesh {
-                    GroupBox("Resumo da Malha") {
+                    GroupBox("Resumo do STL") {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Vertices: \(mesh.vertices.count)")
                             Text("Faces: \(mesh.faces.count)")
-                            Text("Escala absoluta ancorada por tags ArUco no pipeline planejado.")
+                            Text("O STL representa os volumes e poses estimadas das tags ArUco detectadas.")
                                 .foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -24,14 +24,13 @@ struct PreviewView: View {
                     }
                 } else {
                     GroupBox("Preview indisponivel") {
-                        Text("Conclua a captura e execute a reconstrucao para visualizar a malha e o relatorio.")
+                        Text("Conclua a captura e gere o STL das tags para visualizar a malha e o relatorio.")
                             .foregroundStyle(.secondary)
                     }
                 }
             }
             .padding()
         }
-        .navigationTitle("Preview 3D")
+        .navigationTitle("Preview STL")
     }
 }
-

@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-Reconstruir um abutment dentario com escala absoluta, orientacao global e qualidade suficiente para convergir de um MVP de ~500 um para uma meta de +-100 um.
+Reconstruir a pose espacial de um conjunto de tags ArUco com escala absoluta, orientacao global e qualidade suficiente para convergir de um MVP de ~500 um para uma meta de +-100 um.
 
 ## 1. Aquisicao
 
@@ -75,17 +75,16 @@ Pipeline alvo:
 
 No estado atual do repositorio, `SfMEngine` e `BundleAdjustment` funcionam como scaffold de arquitetura e precisam ser substituidos por implementacao de producao.
 
-## 6. Densificacao e malha
+## 6. Malha STL das tags
 
 Fase desejada:
 
-- Multi-View Stereo para nuvem densa
-- filtragem de outliers
-- suavizacao controlada
-- reconstrucao de malha
-- exportacao STL/OBJ
+- fusao das poses por ID de tag
+- rejeicao de outliers entre vistas
+- geracao de volumes simples representando cada tag no espaco
+- exportacao STL final
 
-O `MeshReconstructor` atual apenas fecha o contrato de API e a exportacao.
+O `MeshReconstructor` atual gera volumes simples orientados pelas poses das tags.
 
 ## 7. Validacao final
 
@@ -103,4 +102,3 @@ Validacao final recomendada:
 - RMS em micrometros
 - percentual de pontos abaixo de 100 um
 - heatmap de erro
-

@@ -118,7 +118,7 @@ public final class SessionManager {
         let coveragePercent = Double(coverageMap.filter { $0 }.count) / Double(max(1, coverageMap.count))
 
         if coveragePercent < 0.80 {
-            recommendations.append("Continue a orbita ao redor do abutment ate cobrir pelo menos 80% dos angulos.")
+            recommendations.append("Continue a orbita ao redor do conjunto de tags ate cobrir pelo menos 80% dos angulos.")
         }
 
         if let latestFrame, latestFrame.metrics.detectedTagCount < configuration.requiredVisibleTags {
@@ -135,7 +135,7 @@ public final class SessionManager {
 
         if let latestFrame,
            latestFrame.metrics.lightingDeviation > latestFrame.metrics.lightingMean * configuration.maximumLightingDeviationRatio {
-            recommendations.append("Uniformize a iluminacao e reduza sombras duras sobre a superficie metalica.")
+            recommendations.append("Uniformize a iluminacao e reduza sombras duras sobre as tags e o suporte.")
         }
 
         if recommendations.isEmpty {
@@ -180,4 +180,3 @@ private extension CaptureFrame {
         return copy
     }
 }
-

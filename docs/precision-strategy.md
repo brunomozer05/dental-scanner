@@ -67,12 +67,11 @@ O criterio recomendado para aceite:
 2. Entrega 2: deteccao ArUco real e pose 6DoF
 3. Entrega 3: matching robusto e SfM incremental
 4. Entrega 4: bundle adjustment global + validacao de escala
-5. Entrega 5: MVS, malha e validacao clinica/laboratorial
+5. Entrega 5: STL final das tags e validacao clinica/laboratorial
 
 ## 7. Limitacoes conhecidas
 
-- superficies metalicas e polidas geram reflexos que degradam matching
+- reflexos e sombras duras sobre tags ou suporte degradam a deteccao
 - distancia camera-objeto fora da faixa util reduz nitidez e cobertura
 - sem fixture estavel, a repetibilidade cai
 - a meta de 100 um exige validacao com referencia fisica, nao apenas inspecao visual
-
