@@ -3,7 +3,7 @@ import XCTest
 @testable import DentalScannerKit
 
 final class MarkerSceneReconstructorTests: XCTestCase {
-    func testReconstructorFusesObservationsByMarkerID() {
+    func testReconstructorFusesObservationsByMarkerID() throws {
         let reconstructor = MarkerSceneReconstructor()
 
         let frames = [
@@ -32,10 +32,11 @@ final class MarkerSceneReconstructorTests: XCTestCase {
         XCTAssertEqual(reconstruction.anchorMarkers.count, 2)
         XCTAssertEqual(reconstruction.sparsePoints.count, 2)
 
-        let marker7 = reconstruction.anchorMarkers.first { $0.id == 7 }
-        XCTAssertEqual(marker7?.pose?.translation.x, 11, accuracy: 0.0001)
-        XCTAssertEqual(marker7?.pose?.translation.y, 21, accuracy: 0.0001)
-        XCTAssertEqual(marker7?.pose?.translation.z, 31, accuracy: 0.0001)
+        let marker7 = try XCTUnwrap(reconstruction.anchorMarkers.first { $0.id == 7 })
+        let pose = try XCTUnwrap(marker7.pose)
+        XCTAssertEqual(pose.translation.x, Float(11), accuracy: Float(0.0001))
+        XCTAssertEqual(pose.translation.y, Float(21), accuracy: Float(0.0001))
+        XCTAssertEqual(pose.translation.z, Float(31), accuracy: Float(0.0001))
     }
 
     private func makeMetrics() -> FrameQualityMetrics {
