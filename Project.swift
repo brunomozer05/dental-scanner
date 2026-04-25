@@ -26,8 +26,14 @@ private enum OpenCV {
         .sdk(name: "c++", type: .library, status: .required)
     ]
 
-    static let headerSearchPaths = "$(inherited) $(SRCROOT)/ThirdParty/OpenCV/opencv2.xcframework/**"
-    static let frameworkSearchPaths = "$(inherited) $(SRCROOT)/ThirdParty/OpenCV"
+    static let headerSearchPaths: SettingValue = .array([
+        "$(inherited)",
+        "$(SRCROOT)/ThirdParty/OpenCV/opencv2.xcframework/**"
+    ])
+    static let frameworkSearchPaths: SettingValue = .array([
+        "$(inherited)",
+        "$(SRCROOT)/ThirdParty/OpenCV"
+    ])
 }
 
 let project = Project(
@@ -38,16 +44,19 @@ let project = Project(
     ),
     settings: .settings(
         base: [
-            "MARKETING_VERSION": "0.1.0",
-            "CURRENT_PROJECT_VERSION": "1",
-            "SWIFT_VERSION": "5.0",
-            "SWIFT_OBJC_BRIDGING_HEADER": "DentalScanner/DentalScanner-Bridging-Header.h",
-            "CLANG_CXX_LANGUAGE_STANDARD": "gnu++17",
-            "CLANG_CXX_LIBRARY": "libc++",
-            "GCC_ENABLE_CPP_EXCEPTIONS": "YES",
+            "MARKETING_VERSION": .string("0.1.0"),
+            "CURRENT_PROJECT_VERSION": .string("1"),
+            "SWIFT_VERSION": .string("5.0"),
+            "SWIFT_OBJC_BRIDGING_HEADER": .string("DentalScanner/DentalScanner-Bridging-Header.h"),
+            "CLANG_CXX_LANGUAGE_STANDARD": .string("gnu++17"),
+            "CLANG_CXX_LIBRARY": .string("libc++"),
+            "GCC_ENABLE_CPP_EXCEPTIONS": .string("YES"),
             "HEADER_SEARCH_PATHS": OpenCV.headerSearchPaths,
             "FRAMEWORK_SEARCH_PATHS": OpenCV.frameworkSearchPaths,
-            "LD_RUNPATH_SEARCH_PATHS": "$(inherited) @executable_path/Frameworks"
+            "LD_RUNPATH_SEARCH_PATHS": .array([
+                "$(inherited)",
+                "@executable_path/Frameworks"
+            ])
         ]
     ),
     targets: [
