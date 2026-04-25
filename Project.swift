@@ -14,7 +14,7 @@ let project = Project(
         ]
     ),
     targets: [
-        Target.target(
+        Target(
             name: "DentalScanner",
             destinations: Destinations.iOS,
             product: Product.app,
