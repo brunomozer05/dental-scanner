@@ -13,6 +13,7 @@
 #endif
 
 NSErrorDomain const OpenCVArucoPoseBridgeErrorDomain = @"OpenCVArucoPoseBridgeErrorDomain";
+static NSString * const OpenCVArucoDictionaryName = @"DICT_4X4_50";
 
 static void SetBridgeError(NSError **error, OpenCVArucoPoseBridgeError code, NSString *description) {
     if (error == NULL) {
@@ -55,6 +56,37 @@ static void SetBridgeError(NSError **error, OpenCVArucoPoseBridgeError code, NSS
 
 @end
 
+@implementation OpenCVArucoDetectionDiagnostics
+
+- (instancetype)initWithDictionaryName:(NSString *)dictionaryName
+                            frameWidth:(NSInteger)frameWidth
+                           frameHeight:(NSInteger)frameHeight
+                           bytesPerRow:(NSInteger)bytesPerRow
+                           pixelFormat:(OSType)pixelFormat
+                     inputChannelCount:(NSInteger)inputChannelCount
+                   convertedToGrayscale:(BOOL)convertedToGrayscale
+                  grayscaleChannelCount:(NSInteger)grayscaleChannelCount
+                    detectedMarkerCount:(NSInteger)detectedMarkerCount
+                 rejectedCandidateCount:(NSInteger)rejectedCandidateCount {
+    self = [super init];
+    if (self) {
+        _dictionaryName = [dictionaryName copy];
+        _frameWidth = frameWidth;
+        _frameHeight = frameHeight;
+        _bytesPerRow = bytesPerRow;
+        _pixelFormat = pixelFormat;
+        _inputChannelCount = inputChannelCount;
+        _convertedToGrayscale = convertedToGrayscale;
+        _grayscaleChannelCount = grayscaleChannelCount;
+        _detectedMarkerCount = detectedMarkerCount;
+        _rejectedCandidateCount = rejectedCandidateCount;
+    }
+
+    return self;
+}
+
+@end
+
 #if DENTAL_SCANNER_HAS_OPENCV
 namespace {
 
@@ -79,13 +111,17 @@ private:
     bool isLocked_;
 };
 
-static void DetectAruco4x4Markers(const cv::Mat &grayImage,
-                                  std::vector<std::vector<cv::Point2f>> &corners,
-                                  std::vector<int> &ids) {
+static size_t DetectAruco4x4Markers(const cv::Mat &grayImage,
+                                    std::vector<std::vector<cv::Point2f>> &corners,
+                                    std::vector<int> &ids) {
     cv::aruco::Dictionary dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
     cv::aruco::DetectorParameters parameters;
     cv::aruco::ArucoDetector detector(dictionary, parameters);
-    detector.detectMarkers(grayImage, corners, ids);
+
+    std::vector<std::vector<cv::Point2f>> rejectedCorners;
+    detector.detectMarkers(grayImage, corners, ids, rejectedCorners);
+
+    return rejectedCorners.size();
 }
 
 static NSArray<OpenCVArucoImagePoint *> *BuildImagePoints(const std::vector<cv::Point2f> &corners) {
@@ -102,6 +138,12 @@ static NSArray<OpenCVArucoImagePoint *> *BuildImagePoints(const std::vector<cv::
 } // namespace
 #endif
 
+@interface OpenCVArucoPoseBridge ()
+
+@property (nonatomic, strong, readwrite, nullable) OpenCVArucoDetectionDiagnostics *lastDiagnostics;
+
+@end
+
 @implementation OpenCVArucoPoseBridge
 
 - (BOOL)isOpenCVAvailable {
@@ -116,6 +158,7 @@ static NSArray<OpenCVArucoImagePoint *> *BuildImagePoints(const std::vector<cv::
                                                                                  error:(NSError **)error {
 #if DENTAL_SCANNER_HAS_OPENCV
     if (pixelBuffer == NULL) {
+        self.lastDiagnostics = nil;
         SetBridgeError(error,
                        OpenCVArucoPoseBridgeErrorInvalidPixelBuffer,
                        @"Pixel buffer is nil.");
@@ -123,7 +166,22 @@ static NSArray<OpenCVArucoImagePoint *> *BuildImagePoints(const std::vector<cv::
     }
 
     OSType pixelFormat = CVPixelBufferGetPixelFormatType(pixelBuffer);
+    size_t width = CVPixelBufferGetWidth(pixelBuffer);
+    size_t height = CVPixelBufferGetHeight(pixelBuffer);
+    size_t bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer);
+
     if (pixelFormat != kCVPixelFormatType_32BGRA) {
+        self.lastDiagnostics =
+            [[OpenCVArucoDetectionDiagnostics alloc] initWithDictionaryName:OpenCVArucoDictionaryName
+                                                                 frameWidth:static_cast<NSInteger>(width)
+                                                                frameHeight:static_cast<NSInteger>(height)
+                                                                bytesPerRow:static_cast<NSInteger>(bytesPerRow)
+                                                                pixelFormat:pixelFormat
+                                                          inputChannelCount:0
+                                                        convertedToGrayscale:NO
+                                                       grayscaleChannelCount:0
+                                                         detectedMarkerCount:0
+                                                      rejectedCandidateCount:0];
         SetBridgeError(error,
                        OpenCVArucoPoseBridgeErrorUnsupportedPixelFormat,
                        @"OpenCV bridge currently expects kCVPixelFormatType_32BGRA.");
@@ -132,6 +190,7 @@ static NSArray<OpenCVArucoImagePoint *> *BuildImagePoints(const std::vector<cv::
 
     PixelBufferReadLock lock(pixelBuffer);
     if (!lock.isLocked()) {
+        self.lastDiagnostics = nil;
         SetBridgeError(error,
                        OpenCVArucoPoseBridgeErrorPixelBufferLockFailed,
                        @"Unable to lock pixel buffer for reading.");
@@ -140,15 +199,12 @@ static NSArray<OpenCVArucoImagePoint *> *BuildImagePoints(const std::vector<cv::
 
     void *baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer);
     if (baseAddress == NULL) {
+        self.lastDiagnostics = nil;
         SetBridgeError(error,
                        OpenCVArucoPoseBridgeErrorPixelBufferMissingBaseAddress,
                        @"Pixel buffer is missing a base address.");
         return nil;
     }
-
-    size_t width = CVPixelBufferGetWidth(pixelBuffer);
-    size_t height = CVPixelBufferGetHeight(pixelBuffer);
-    size_t bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer);
 
     try {
         cv::Mat bgraImage(static_cast<int>(height),
@@ -161,7 +217,19 @@ static NSArray<OpenCVArucoImagePoint *> *BuildImagePoints(const std::vector<cv::
 
         std::vector<int> ids;
         std::vector<std::vector<cv::Point2f>> corners;
-        DetectAruco4x4Markers(grayImage, corners, ids);
+        size_t rejectedCandidateCount = DetectAruco4x4Markers(grayImage, corners, ids);
+
+        self.lastDiagnostics =
+            [[OpenCVArucoDetectionDiagnostics alloc] initWithDictionaryName:OpenCVArucoDictionaryName
+                                                                 frameWidth:static_cast<NSInteger>(width)
+                                                                frameHeight:static_cast<NSInteger>(height)
+                                                                bytesPerRow:static_cast<NSInteger>(bytesPerRow)
+                                                                pixelFormat:pixelFormat
+                                                          inputChannelCount:bgraImage.channels()
+                                                        convertedToGrayscale:YES
+                                                       grayscaleChannelCount:grayImage.channels()
+                                                         detectedMarkerCount:static_cast<NSInteger>(ids.size())
+                                                      rejectedCandidateCount:static_cast<NSInteger>(rejectedCandidateCount)];
 
         NSMutableArray<OpenCVArucoMarkerDetection *> *detections = [NSMutableArray arrayWithCapacity:ids.size()];
         for (size_t index = 0; index < ids.size(); index += 1) {
@@ -174,11 +242,13 @@ static NSArray<OpenCVArucoImagePoint *> *BuildImagePoints(const std::vector<cv::
 
         return [detections copy];
     } catch (const cv::Exception &exception) {
+        self.lastDiagnostics = nil;
         NSString *description = [NSString stringWithFormat:@"OpenCV ArUco detection failed: %s", exception.what()];
         SetBridgeError(error, OpenCVArucoPoseBridgeErrorDetectionFailed, description);
         return nil;
     }
 #else
+    self.lastDiagnostics = nil;
     SetBridgeError(error,
                    OpenCVArucoPoseBridgeErrorOpenCVUnavailable,
                    @"OpenCV headers are not available to this target.");

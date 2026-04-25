@@ -1,5 +1,6 @@
 import AVFoundation
 import Combine
+import CoreVideo
 import Foundation
 
 final class ScannerViewModel: ObservableObject {
@@ -26,6 +27,16 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var detectedMarkerCount: Int = 0
     @Published private(set) var detectedMarkerIds: [Int] = []
     @Published private(set) var arucoErrorMessage: String?
+    @Published private(set) var hasFrameReachedArucoDetector: Bool = false
+    @Published private(set) var arucoDetectionCallCount: Int = 0
+    @Published private(set) var arucoFrameResolution: FrameResolution?
+    @Published private(set) var arucoFramePixelFormat: String = "-"
+    @Published private(set) var arucoBytesPerRow: Int?
+    @Published private(set) var arucoDictionaryName: String = ArUcoDetector.dictionaryName
+    @Published private(set) var arucoPreprocessingDescription: String = ArUcoDetector.preprocessingDescription
+    @Published private(set) var arucoInputChannelCount: Int?
+    @Published private(set) var arucoGrayscaleChannelCount: Int?
+    @Published private(set) var arucoRejectedCandidateCount: Int?
     @Published private(set) var errorMessage: String?
 
     private let cameraService: CameraFrameService
@@ -133,6 +144,16 @@ final class ScannerViewModel: ObservableObject {
             self.detectedMarkerCount = arucoMetrics.detectedMarkerCount
             self.detectedMarkerIds = arucoMetrics.detectedMarkerIds
             self.arucoErrorMessage = arucoMetrics.errorMessage
+            self.hasFrameReachedArucoDetector = arucoMetrics.hasFrameReachedDetector
+            self.arucoDetectionCallCount = arucoMetrics.detectionCallCount
+            self.arucoFrameResolution = arucoMetrics.frameResolution
+            self.arucoFramePixelFormat = arucoMetrics.pixelFormat
+            self.arucoBytesPerRow = arucoMetrics.bytesPerRow
+            self.arucoDictionaryName = arucoMetrics.dictionaryName
+            self.arucoPreprocessingDescription = arucoMetrics.preprocessingDescription
+            self.arucoInputChannelCount = arucoMetrics.inputChannelCount
+            self.arucoGrayscaleChannelCount = arucoMetrics.grayscaleChannelCount
+            self.arucoRejectedCandidateCount = arucoMetrics.rejectedCandidateCount
         }
     }
 
@@ -151,34 +172,84 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private func detectArucoMarkers(in frame: CameraFrame) -> ArucoMetrics {
-        let isOpenCVAvailable = arUcoDetector.isOpenCVAvailable
-        guard isOpenCVAvailable else {
-            return ArucoMetrics(
-                isOpenCVAvailable: false,
-                detectedMarkerCount: 0,
-                detectedMarkerIds: [],
-                errorMessage: nil
-            )
-        }
-
         do {
             let detections = try arUcoDetector.detectMarkers(in: frame)
             let markerIds = detections.map(\.markerId).sorted()
 
             return ArucoMetrics(
-                isOpenCVAvailable: true,
+                isOpenCVAvailable: arUcoDetector.isOpenCVAvailable,
                 detectedMarkerCount: detections.count,
                 detectedMarkerIds: markerIds,
-                errorMessage: nil
+                errorMessage: arUcoDetector.lastErrorMessage,
+                hasFrameReachedDetector: arUcoDetector.hasReceivedFrame,
+                detectionCallCount: arUcoDetector.detectionCallCount,
+                frameResolution: makeArucoFrameResolution(),
+                pixelFormat: formatPixelFormat(arUcoDetector.lastPixelFormat),
+                bytesPerRow: arUcoDetector.lastBytesPerRow,
+                dictionaryName: ArUcoDetector.dictionaryName,
+                preprocessingDescription: formatArucoPreprocessing(),
+                inputChannelCount: arUcoDetector.lastInputChannelCount,
+                grayscaleChannelCount: arUcoDetector.lastGrayscaleChannelCount,
+                rejectedCandidateCount: arUcoDetector.lastRejectedCandidateCount
             )
         } catch {
+            let errorDescription = error.localizedDescription
+            let detectorErrorMessage = errorDescription.isEmpty ? arUcoDetector.lastErrorMessage : errorDescription
+
             return ArucoMetrics(
-                isOpenCVAvailable: true,
-                detectedMarkerCount: 0,
+                isOpenCVAvailable: arUcoDetector.isOpenCVAvailable,
+                detectedMarkerCount: arUcoDetector.lastDetectedMarkerCount,
                 detectedMarkerIds: [],
-                errorMessage: error.localizedDescription
+                errorMessage: detectorErrorMessage,
+                hasFrameReachedDetector: arUcoDetector.hasReceivedFrame,
+                detectionCallCount: arUcoDetector.detectionCallCount,
+                frameResolution: makeArucoFrameResolution(),
+                pixelFormat: formatPixelFormat(arUcoDetector.lastPixelFormat),
+                bytesPerRow: arUcoDetector.lastBytesPerRow,
+                dictionaryName: ArUcoDetector.dictionaryName,
+                preprocessingDescription: formatArucoPreprocessing(),
+                inputChannelCount: arUcoDetector.lastInputChannelCount,
+                grayscaleChannelCount: arUcoDetector.lastGrayscaleChannelCount,
+                rejectedCandidateCount: arUcoDetector.lastRejectedCandidateCount
             )
         }
+    }
+
+    private func makeArucoFrameResolution() -> FrameResolution? {
+        guard let width = arUcoDetector.lastFrameWidth,
+              let height = arUcoDetector.lastFrameHeight
+        else {
+            return nil
+        }
+
+        return FrameResolution(width: width, height: height)
+    }
+
+    private func formatPixelFormat(_ pixelFormat: OSType?) -> String {
+        guard let pixelFormat else {
+            return "-"
+        }
+
+        switch pixelFormat {
+        case kCVPixelFormatType_32BGRA:
+            return "32BGRA"
+        default:
+            return "\(pixelFormat)"
+        }
+    }
+
+    private func formatArucoPreprocessing() -> String {
+        guard arUcoDetector.lastConvertedToGrayscale else {
+            return "Nao aplicada"
+        }
+
+        guard let inputChannelCount = arUcoDetector.lastInputChannelCount,
+              let grayscaleChannelCount = arUcoDetector.lastGrayscaleChannelCount
+        else {
+            return ArUcoDetector.preprocessingDescription
+        }
+
+        return "\(ArUcoDetector.preprocessingDescription) (\(inputChannelCount) -> \(grayscaleChannelCount) canais)"
     }
 
     private func updateEstimatedFPS(with timestamp: Double) -> Double {
@@ -225,6 +296,16 @@ final class ScannerViewModel: ObservableObject {
         let detectedMarkerCount: Int
         let detectedMarkerIds: [Int]
         let errorMessage: String?
+        let hasFrameReachedDetector: Bool
+        let detectionCallCount: Int
+        let frameResolution: FrameResolution?
+        let pixelFormat: String
+        let bytesPerRow: Int?
+        let dictionaryName: String
+        let preprocessingDescription: String
+        let inputChannelCount: Int?
+        let grayscaleChannelCount: Int?
+        let rejectedCandidateCount: Int?
     }
 
     private func makeErrorMessage(from error: Error) -> String {
