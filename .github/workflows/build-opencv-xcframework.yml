@@ -1,0 +1,88 @@
+name: Build OpenCV XCFramework
+
+on:
+  workflow_dispatch:
+    inputs:
+      opencv_version:
+        description: OpenCV/opencv_contrib tag to build.
+        required: true
+        default: "4.13.0"
+      retention_days:
+        description: Artifact retention in days.
+        required: true
+        default: "7"
+
+permissions:
+  contents: read
+
+jobs:
+  build-opencv-xcframework:
+    runs-on: macos-latest
+    timeout-minutes: 360
+
+    env:
+      OPENCV_VERSION: ${{ inputs.opencv_version }}
+      BUILD_ROOT: ${{ runner.temp }}/opencv-ios-xcframework
+      OUTPUT_DIR: ${{ runner.temp }}/opencv-ios-xcframework/output
+
+    steps:
+      - name: Show build environment
+        run: |
+          sw_vers
+          xcodebuild -version
+          python3 --version
+          cmake --version || true
+
+      - name: Install build tools
+        run: |
+          if ! command -v cmake >/dev/null 2>&1; then
+            brew install cmake
+          fi
+
+      - name: Clone OpenCV and opencv_contrib
+        run: |
+          mkdir -p "$BUILD_ROOT"
+          cd "$BUILD_ROOT"
+
+          git clone \
+            --branch "$OPENCV_VERSION" \
+            --depth 1 \
+            https://github.com/opencv/opencv.git
+
+          git clone \
+            --branch "$OPENCV_VERSION" \
+            --depth 1 \
+            https://github.com/opencv/opencv_contrib.git
+
+      - name: Build opencv2.xcframework with contrib modules
+        run: |
+          cd "$BUILD_ROOT"
+
+          python3 opencv/platforms/apple/build_xcframework.py \
+            --out "$OUTPUT_DIR" \
+            --framework_name opencv2 \
+            --iphoneos_archs arm64 \
+            --iphonesimulator_archs arm64,x86_64 \
+            --build_only_specified_archs \
+            --contrib "$BUILD_ROOT/opencv_contrib" \
+            --without objc
+
+      - name: Validate ArUco headers
+        run: |
+          test -d "$OUTPUT_DIR/opencv2.xcframework"
+          find "$OUTPUT_DIR/opencv2.xcframework" -name aruco.hpp -print -quit | grep -q aruco.hpp
+          find "$OUTPUT_DIR/opencv2.xcframework" -name calib3d.hpp -print -quit | grep -q calib3d.hpp
+          du -sh "$OUTPUT_DIR/opencv2.xcframework"
+
+      - name: Package XCFramework
+        run: |
+          cd "$OUTPUT_DIR"
+          zip -qry "opencv2-${OPENCV_VERSION}-ios-xcframework.zip" opencv2.xcframework
+
+      - name: Upload opencv2.xcframework artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: opencv2-${{ inputs.opencv_version }}-ios-xcframework
+          path: ${{ env.OUTPUT_DIR }}/opencv2-${{ inputs.opencv_version }}-ios-xcframework.zip
+          if-no-files-found: error
+          retention-days: ${{ fromJSON(inputs.retention_days) }}
