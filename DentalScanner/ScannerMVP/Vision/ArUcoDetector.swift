@@ -20,6 +20,10 @@ final class ArUcoDetector {
         self.bridge = bridge
     }
 
+    var isOpenCVAvailable: Bool {
+        bridge.isOpenCVAvailable
+    }
+
     func detectMarkers(in frame: CameraFrame) throws -> [ArUcoDetectionResult] {
         guard bridge.isOpenCVAvailable else {
             return []

@@ -20,9 +20,18 @@ struct ScannerView: View {
                 metricRow(title: "FPS estimado", value: String(format: "%.1f", viewModel.estimatedFPS))
                 metricRow(title: "Resolucao", value: formattedResolution)
                 metricRow(title: "Matriz intrinseca", value: viewModel.isIntrinsicMatrixAvailable ? "Disponivel" : "Indisponivel")
+                metricRow(title: "OpenCV disponivel", value: viewModel.isOpenCVAvailable ? "true" : "false")
+                metricRow(title: "Marcadores detectados", value: "\(viewModel.detectedMarkerCount)")
+                metricRow(title: "IDs detectados", value: formattedDetectedMarkerIds)
 
                 if let lastFrameTimestamp = viewModel.lastFrameTimestamp {
                     metricRow(title: "Ultimo timestamp", value: String(format: "%.3f s", lastFrameTimestamp))
+                }
+
+                if let arucoErrorMessage = viewModel.arucoErrorMessage {
+                    Text(arucoErrorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
                 }
 
                 if let errorMessage = viewModel.errorMessage {
@@ -68,6 +77,14 @@ struct ScannerView: View {
         return "\(resolution.width) x \(resolution.height)"
     }
 
+    private var formattedDetectedMarkerIds: String {
+        guard !viewModel.detectedMarkerIds.isEmpty else {
+            return "-"
+        }
+
+        return viewModel.detectedMarkerIds.map(String.init).joined(separator: ", ")
+    }
+
     private var cameraStateBadge: some View {
         Text(formattedCameraState)
             .font(.caption.weight(.semibold))
@@ -78,14 +95,19 @@ struct ScannerView: View {
     }
 
     private func metricRow(title: String, value: String) -> some View {
-        HStack {
+        HStack(alignment: .top) {
             Text(title)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
 
             Spacer()
 
             Text(value)
                 .monospacedDigit()
+                .multilineTextAlignment(.trailing)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+                .layoutPriority(1)
         }
         .font(.body)
     }

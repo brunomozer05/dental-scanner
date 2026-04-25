@@ -22,9 +22,14 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var lastFrameTimestamp: Double?
     @Published private(set) var frameResolution: FrameResolution?
     @Published private(set) var isIntrinsicMatrixAvailable: Bool = false
+    @Published private(set) var isOpenCVAvailable: Bool = false
+    @Published private(set) var detectedMarkerCount: Int = 0
+    @Published private(set) var detectedMarkerIds: [Int] = []
+    @Published private(set) var arucoErrorMessage: String?
     @Published private(set) var errorMessage: String?
 
     private let cameraService: CameraFrameService
+    private let arUcoDetector: ArUcoDetector
     private var shouldRunCamera = false
     private var totalFramesCounter: Int = 0
     private var recentFrameTimestamps: [Double] = []
@@ -33,8 +38,13 @@ final class ScannerViewModel: ObservableObject {
         cameraService.captureSession
     }
 
-    init(cameraService: CameraFrameService = CameraFrameService()) {
+    init(
+        cameraService: CameraFrameService = CameraFrameService(),
+        arUcoDetector: ArUcoDetector = ArUcoDetector()
+    ) {
         self.cameraService = cameraService
+        self.arUcoDetector = arUcoDetector
+        self.isOpenCVAvailable = arUcoDetector.isOpenCVAvailable
         bindCameraCallbacks()
     }
 
@@ -110,6 +120,7 @@ final class ScannerViewModel: ObservableObject {
 
     private func handleFrame(_ frame: CameraFrame) {
         let metrics = buildFrameMetrics(from: frame)
+        let arucoMetrics = detectArucoMarkers(in: frame)
 
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -118,6 +129,10 @@ final class ScannerViewModel: ObservableObject {
             self.lastFrameTimestamp = metrics.lastFrameTimestamp
             self.frameResolution = metrics.frameResolution
             self.isIntrinsicMatrixAvailable = metrics.isIntrinsicMatrixAvailable
+            self.isOpenCVAvailable = arucoMetrics.isOpenCVAvailable
+            self.detectedMarkerCount = arucoMetrics.detectedMarkerCount
+            self.detectedMarkerIds = arucoMetrics.detectedMarkerIds
+            self.arucoErrorMessage = arucoMetrics.errorMessage
         }
     }
 
@@ -133,6 +148,37 @@ final class ScannerViewModel: ObservableObject {
             frameResolution: FrameResolution(width: frame.width, height: frame.height),
             isIntrinsicMatrixAvailable: frame.metadata.intrinsicMatrix != nil
         )
+    }
+
+    private func detectArucoMarkers(in frame: CameraFrame) -> ArucoMetrics {
+        let isOpenCVAvailable = arUcoDetector.isOpenCVAvailable
+        guard isOpenCVAvailable else {
+            return ArucoMetrics(
+                isOpenCVAvailable: false,
+                detectedMarkerCount: 0,
+                detectedMarkerIds: [],
+                errorMessage: nil
+            )
+        }
+
+        do {
+            let detections = try arUcoDetector.detectMarkers(in: frame)
+            let markerIds = detections.map(\.markerId).sorted()
+
+            return ArucoMetrics(
+                isOpenCVAvailable: true,
+                detectedMarkerCount: detections.count,
+                detectedMarkerIds: markerIds,
+                errorMessage: nil
+            )
+        } catch {
+            return ArucoMetrics(
+                isOpenCVAvailable: true,
+                detectedMarkerCount: 0,
+                detectedMarkerIds: [],
+                errorMessage: error.localizedDescription
+            )
+        }
     }
 
     private func updateEstimatedFPS(with timestamp: Double) -> Double {
@@ -172,6 +218,13 @@ final class ScannerViewModel: ObservableObject {
         let lastFrameTimestamp: Double
         let frameResolution: FrameResolution
         let isIntrinsicMatrixAvailable: Bool
+    }
+
+    private struct ArucoMetrics {
+        let isOpenCVAvailable: Bool
+        let detectedMarkerCount: Int
+        let detectedMarkerIds: [Int]
+        let errorMessage: String?
     }
 
     private func makeErrorMessage(from error: Error) -> String {
