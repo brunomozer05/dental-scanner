@@ -1,7 +1,9 @@
 #import "OpenCVArucoPoseBridge.h"
 
-#if __has_include(<opencv2/opencv.hpp>) && __has_include(<opencv2/aruco.hpp>) && __has_include(<opencv2/imgproc.hpp>)
+#if __has_include(<opencv2/core.hpp>) && __has_include(<opencv2/imgproc.hpp>) && __has_include(<opencv2/aruco.hpp>) && __has_include(<opencv2/calib3d.hpp>) && __has_include(<opencv2/opencv.hpp>)
 #import <opencv2/aruco.hpp>
+#import <opencv2/calib3d.hpp>
+#import <opencv2/core.hpp>
 #import <opencv2/imgproc.hpp>
 #import <opencv2/opencv.hpp>
 #define DENTAL_SCANNER_HAS_OPENCV 1
@@ -115,14 +117,14 @@ static NSArray<OpenCVArucoImagePoint *> *BuildImagePoints(const std::vector<cv::
 #endif
 }
 
-- (NSArray<OpenCVArucoMarkerDetection *> *)detectAruco4x4MarkersInPixelBuffer:(CVPixelBufferRef)pixelBuffer
-                                                                        error:(NSError **)error {
+- (nullable NSArray<OpenCVArucoMarkerDetection *> *)detectAruco4x4MarkersInPixelBuffer:(CVPixelBufferRef)pixelBuffer
+                                                                                 error:(NSError **)error {
 #if DENTAL_SCANNER_HAS_OPENCV
     if (pixelBuffer == NULL) {
         SetBridgeError(error,
                        OpenCVArucoPoseBridgeErrorInvalidPixelBuffer,
                        @"Pixel buffer is nil.");
-        return @[];
+        return nil;
     }
 
     OSType pixelFormat = CVPixelBufferGetPixelFormatType(pixelBuffer);
@@ -130,7 +132,7 @@ static NSArray<OpenCVArucoImagePoint *> *BuildImagePoints(const std::vector<cv::
         SetBridgeError(error,
                        OpenCVArucoPoseBridgeErrorUnsupportedPixelFormat,
                        @"OpenCV bridge currently expects kCVPixelFormatType_32BGRA.");
-        return @[];
+        return nil;
     }
 
     PixelBufferReadLock lock(pixelBuffer);
@@ -138,7 +140,7 @@ static NSArray<OpenCVArucoImagePoint *> *BuildImagePoints(const std::vector<cv::
         SetBridgeError(error,
                        OpenCVArucoPoseBridgeErrorPixelBufferLockFailed,
                        @"Unable to lock pixel buffer for reading.");
-        return @[];
+        return nil;
     }
 
     void *baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer);
@@ -146,7 +148,7 @@ static NSArray<OpenCVArucoImagePoint *> *BuildImagePoints(const std::vector<cv::
         SetBridgeError(error,
                        OpenCVArucoPoseBridgeErrorPixelBufferMissingBaseAddress,
                        @"Pixel buffer is missing a base address.");
-        return @[];
+        return nil;
     }
 
     size_t width = CVPixelBufferGetWidth(pixelBuffer);
@@ -179,13 +181,13 @@ static NSArray<OpenCVArucoImagePoint *> *BuildImagePoints(const std::vector<cv::
     } catch (const cv::Exception &exception) {
         NSString *description = [NSString stringWithFormat:@"OpenCV ArUco detection failed: %s", exception.what()];
         SetBridgeError(error, OpenCVArucoPoseBridgeErrorDetectionFailed, description);
-        return @[];
+        return nil;
     }
 #else
     SetBridgeError(error,
                    OpenCVArucoPoseBridgeErrorOpenCVUnavailable,
                    @"OpenCV headers are not available to this target.");
-    return @[];
+    return nil;
 #endif
 }
 

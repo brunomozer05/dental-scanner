@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+        with:
+          lfs: true
 
       - name: Set up mise
         uses: jdx/mise-action@v3

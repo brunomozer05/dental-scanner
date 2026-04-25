@@ -1,5 +1,5 @@
-#import <CoreVideo/CoreVideo.h>
 #import <Foundation/Foundation.h>
+#import <CoreVideo/CoreVideo.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -41,8 +41,9 @@ typedef NS_ERROR_ENUM(OpenCVArucoPoseBridgeErrorDomain, OpenCVArucoPoseBridgeErr
 
 @property (nonatomic, readonly) BOOL isOpenCVAvailable;
 
-- (NSArray<OpenCVArucoMarkerDetection *> *)detectAruco4x4MarkersInPixelBuffer:(CVPixelBufferRef)pixelBuffer
-                                                                        error:(NSError * _Nullable * _Nullable)error;
+- (nullable NSArray<OpenCVArucoMarkerDetection *> *)detectAruco4x4MarkersInPixelBuffer:(CVPixelBufferRef)pixelBuffer
+                                                                                 error:(NSError * _Nullable * _Nullable)error
+    NS_SWIFT_NAME(detectAruco4x4Markers(in:));
 
 @end
 

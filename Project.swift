@@ -1,4 +1,34 @@
 import ProjectDescription
+import Foundation
+
+private enum OpenCV {
+    static let xcframeworkPath = "ThirdParty/OpenCV/opencv2.xcframework"
+
+    static var dependencies: [TargetDependency] {
+        let hasXCFramework = FileManager.default.fileExists(atPath: xcframeworkPath)
+
+        guard hasXCFramework else {
+            return systemDependencies
+        }
+
+        return [
+            .xcframework(path: .relativeToRoot(xcframeworkPath), status: .required)
+        ] + systemDependencies
+    }
+
+    static let systemDependencies: [TargetDependency] = [
+        .sdk(name: "Accelerate", type: .framework, status: .required),
+        .sdk(name: "AVFoundation", type: .framework, status: .required),
+        .sdk(name: "CoreGraphics", type: .framework, status: .required),
+        .sdk(name: "CoreMedia", type: .framework, status: .required),
+        .sdk(name: "CoreVideo", type: .framework, status: .required),
+        .sdk(name: "UIKit", type: .framework, status: .required),
+        .sdk(name: "c++", type: .library, status: .required)
+    ]
+
+    static let headerSearchPaths = "$(inherited) $(SRCROOT)/ThirdParty/OpenCV/opencv2.xcframework/**"
+    static let frameworkSearchPaths = "$(inherited) $(SRCROOT)/ThirdParty/OpenCV"
+}
 
 let project = Project(
     name: "DentalScanner",
@@ -10,7 +40,14 @@ let project = Project(
         base: [
             "MARKETING_VERSION": "0.1.0",
             "CURRENT_PROJECT_VERSION": "1",
-            "SWIFT_VERSION": "5.0"
+            "SWIFT_VERSION": "5.0",
+            "SWIFT_OBJC_BRIDGING_HEADER": "DentalScanner/DentalScanner-Bridging-Header.h",
+            "CLANG_CXX_LANGUAGE_STANDARD": "gnu++17",
+            "CLANG_CXX_LIBRARY": "libc++",
+            "GCC_ENABLE_CPP_EXCEPTIONS": "YES",
+            "HEADER_SEARCH_PATHS": OpenCV.headerSearchPaths,
+            "FRAMEWORK_SEARCH_PATHS": OpenCV.frameworkSearchPaths,
+            "LD_RUNPATH_SEARCH_PATHS": "$(inherited) @executable_path/Frameworks"
         ]
     ),
     targets: [
@@ -22,9 +59,11 @@ let project = Project(
             deploymentTargets: DeploymentTargets.iOS("17.0"),
             infoPlist: InfoPlist.file(path: "DentalScanner/Info.plist"),
             sources: [
-                "DentalScanner/**/*.swift"
+                "DentalScanner/**/*.swift",
+                "DentalScanner/**/*.mm"
             ],
-            resources: []
+            resources: [],
+            dependencies: OpenCV.dependencies
         )
     ]
 )
