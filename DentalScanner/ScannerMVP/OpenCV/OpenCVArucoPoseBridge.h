@@ -11,7 +11,9 @@ typedef NS_ERROR_ENUM(OpenCVArucoPoseBridgeErrorDomain, OpenCVArucoPoseBridgeErr
     OpenCVArucoPoseBridgeErrorUnsupportedPixelFormat,
     OpenCVArucoPoseBridgeErrorPixelBufferLockFailed,
     OpenCVArucoPoseBridgeErrorPixelBufferMissingBaseAddress,
-    OpenCVArucoPoseBridgeErrorDetectionFailed
+    OpenCVArucoPoseBridgeErrorDetectionFailed,
+    OpenCVArucoPoseBridgeErrorInvalidPoseInput,
+    OpenCVArucoPoseBridgeErrorPoseEstimationFailed
 };
 
 @interface OpenCVArucoImagePoint : NSObject
@@ -34,6 +36,21 @@ typedef NS_ERROR_ENUM(OpenCVArucoPoseBridgeErrorDomain, OpenCVArucoPoseBridgeErr
 - (instancetype)initWithMarkerId:(NSInteger)markerId
                          corners:(NSArray<OpenCVArucoImagePoint *> *)corners
                       confidence:(double)confidence NS_DESIGNATED_INITIALIZER;
+
+@end
+
+@interface OpenCVArucoPoseResult : NSObject
+
+@property (nonatomic, copy, readonly) NSArray<NSNumber *> *rotationVector;
+@property (nonatomic, copy, readonly) NSArray<NSNumber *> *translationVector;
+@property (nonatomic, readonly) double distanceMm;
+@property (nonatomic, readonly) double reprojectionError;
+
+- (instancetype)init NS_UNAVAILABLE;
+- (instancetype)initWithRotationVector:(NSArray<NSNumber *> *)rotationVector
+                     translationVector:(NSArray<NSNumber *> *)translationVector
+                            distanceMm:(double)distanceMm
+                     reprojectionError:(double)reprojectionError NS_DESIGNATED_INITIALIZER;
 
 @end
 
@@ -72,6 +89,15 @@ typedef NS_ERROR_ENUM(OpenCVArucoPoseBridgeErrorDomain, OpenCVArucoPoseBridgeErr
 - (nullable NSArray<OpenCVArucoMarkerDetection *> *)detectAruco4x4MarkersInPixelBuffer:(CVPixelBufferRef)pixelBuffer
                                                                                  error:(NSError * _Nullable * _Nullable)error
     NS_SWIFT_NAME(detectAruco4x4Markers(in:));
+
+- (nullable OpenCVArucoPoseResult *)estimatePoseForCorners:(NSArray<OpenCVArucoImagePoint *> *)corners
+                                    markerSizeMillimeters:(double)markerSizeMillimeters
+                                             focalLengthX:(double)focalLengthX
+                                             focalLengthY:(double)focalLengthY
+                                          principalPointX:(double)principalPointX
+                                          principalPointY:(double)principalPointY
+                                                    error:(NSError * _Nullable * _Nullable)error
+    NS_SWIFT_NAME(estimatePose(corners:markerSizeMillimeters:focalLengthX:focalLengthY:principalPointX:principalPointY:));
 
 @end
 

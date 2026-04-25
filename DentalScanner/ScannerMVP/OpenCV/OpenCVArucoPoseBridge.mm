@@ -1,10 +1,12 @@
 #import "OpenCVArucoPoseBridge.h"
 
-#if __has_include(<opencv2/core.hpp>) && __has_include(<opencv2/imgproc.hpp>) && __has_include(<opencv2/objdetect/aruco_detector.hpp>)
+#if __has_include(<opencv2/core.hpp>) && __has_include(<opencv2/imgproc.hpp>) && __has_include(<opencv2/objdetect/aruco_detector.hpp>) && __has_include(<opencv2/calib3d.hpp>)
+#include <opencv2/calib3d.hpp>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/objdetect/aruco_detector.hpp>
 
+#include <cmath>
 #include <vector>
 
 #define DENTAL_SCANNER_HAS_OPENCV 1
@@ -49,6 +51,25 @@ static void SetBridgeError(NSError **error, OpenCVArucoPoseBridgeError code, NSS
         _markerId = markerId;
         _corners = [corners copy];
         _confidence = confidence;
+    }
+
+    return self;
+}
+
+@end
+
+@implementation OpenCVArucoPoseResult
+
+- (instancetype)initWithRotationVector:(NSArray<NSNumber *> *)rotationVector
+                     translationVector:(NSArray<NSNumber *> *)translationVector
+                            distanceMm:(double)distanceMm
+                     reprojectionError:(double)reprojectionError {
+    self = [super init];
+    if (self) {
+        _rotationVector = [rotationVector copy];
+        _translationVector = [translationVector copy];
+        _distanceMm = distanceMm;
+        _reprojectionError = reprojectionError;
     }
 
     return self;
@@ -133,6 +154,52 @@ static NSArray<OpenCVArucoImagePoint *> *BuildImagePoints(const std::vector<cv::
     }
 
     return [points copy];
+}
+
+static double VectorValue(const cv::Mat &vector, int index) {
+    if (vector.rows == 1) {
+        return vector.at<double>(0, index);
+    }
+
+    return vector.at<double>(index, 0);
+}
+
+static NSArray<NSNumber *> *BuildVector3(const cv::Mat &vector) {
+    return @[
+        @(VectorValue(vector, 0)),
+        @(VectorValue(vector, 1)),
+        @(VectorValue(vector, 2))
+    ];
+}
+
+static std::vector<cv::Point3f> BuildMarkerObjectPoints(double markerSizeMillimeters) {
+    float halfSize = static_cast<float>(markerSizeMillimeters / 2.0);
+
+    return {
+        cv::Point3f(-halfSize, halfSize, 0.0f),
+        cv::Point3f(halfSize, halfSize, 0.0f),
+        cv::Point3f(halfSize, -halfSize, 0.0f),
+        cv::Point3f(-halfSize, -halfSize, 0.0f)
+    };
+}
+
+static double ComputeRMSReprojectionError(const std::vector<cv::Point2f> &imagePoints,
+                                          const std::vector<cv::Point2f> &projectedPoints) {
+    if (imagePoints.empty() || imagePoints.size() != projectedPoints.size()) {
+        return 0.0;
+    }
+
+    double squaredErrorSum = 0.0;
+    for (size_t index = 0; index < imagePoints.size(); index += 1) {
+        cv::Point2f difference = imagePoints[index] - projectedPoints[index];
+        squaredErrorSum += difference.x * difference.x + difference.y * difference.y;
+    }
+
+    return std::sqrt(squaredErrorSum / static_cast<double>(imagePoints.size()));
+}
+
+static bool IsFinitePositive(double value) {
+    return std::isfinite(value) && value > 0.0;
 }
 
 } // namespace
@@ -249,6 +316,86 @@ static NSArray<OpenCVArucoImagePoint *> *BuildImagePoints(const std::vector<cv::
     }
 #else
     self.lastDiagnostics = nil;
+    SetBridgeError(error,
+                   OpenCVArucoPoseBridgeErrorOpenCVUnavailable,
+                   @"OpenCV headers are not available to this target.");
+    return nil;
+#endif
+}
+
+- (nullable OpenCVArucoPoseResult *)estimatePoseForCorners:(NSArray<OpenCVArucoImagePoint *> *)corners
+                                    markerSizeMillimeters:(double)markerSizeMillimeters
+                                             focalLengthX:(double)focalLengthX
+                                             focalLengthY:(double)focalLengthY
+                                          principalPointX:(double)principalPointX
+                                          principalPointY:(double)principalPointY
+                                                    error:(NSError **)error {
+#if DENTAL_SCANNER_HAS_OPENCV
+    if (corners.count != 4 ||
+        !IsFinitePositive(markerSizeMillimeters) ||
+        !IsFinitePositive(focalLengthX) ||
+        !IsFinitePositive(focalLengthY) ||
+        !std::isfinite(principalPointX) ||
+        !std::isfinite(principalPointY)) {
+        SetBridgeError(error,
+                       OpenCVArucoPoseBridgeErrorInvalidPoseInput,
+                       @"Pose estimation requires 4 corners, positive marker size, and valid camera intrinsics.");
+        return nil;
+    }
+
+    std::vector<cv::Point2f> imagePoints;
+    imagePoints.reserve(4);
+    for (OpenCVArucoImagePoint *corner in corners) {
+        imagePoints.push_back(cv::Point2f(static_cast<float>(corner.x),
+                                          static_cast<float>(corner.y)));
+    }
+
+    try {
+        std::vector<cv::Point3f> objectPoints = BuildMarkerObjectPoints(markerSizeMillimeters);
+        cv::Mat cameraMatrix = (cv::Mat_<double>(3, 3) <<
+            focalLengthX, 0.0, principalPointX,
+            0.0, focalLengthY, principalPointY,
+            0.0, 0.0, 1.0);
+        cv::Mat distCoeffs = cv::Mat::zeros(1, 5, CV_64F);
+        cv::Mat rotationVector;
+        cv::Mat translationVector;
+
+        bool didSolve = cv::solvePnP(objectPoints,
+                                     imagePoints,
+                                     cameraMatrix,
+                                     distCoeffs,
+                                     rotationVector,
+                                     translationVector,
+                                     false,
+                                     cv::SOLVEPNP_IPPE_SQUARE);
+        if (!didSolve) {
+            SetBridgeError(error,
+                           OpenCVArucoPoseBridgeErrorPoseEstimationFailed,
+                           @"OpenCV solvePnP did not return a valid pose.");
+            return nil;
+        }
+
+        std::vector<cv::Point2f> projectedPoints;
+        cv::projectPoints(objectPoints,
+                          rotationVector,
+                          translationVector,
+                          cameraMatrix,
+                          distCoeffs,
+                          projectedPoints);
+
+        double distanceMm = cv::norm(translationVector);
+        double reprojectionError = ComputeRMSReprojectionError(imagePoints, projectedPoints);
+
+        return [[OpenCVArucoPoseResult alloc] initWithRotationVector:BuildVector3(rotationVector)
+                                                   translationVector:BuildVector3(translationVector)
+                                                          distanceMm:distanceMm
+                                                   reprojectionError:reprojectionError];
+    } catch (const cv::Exception &exception) {
+        NSString *description = [NSString stringWithFormat:@"OpenCV solvePnP failed: %s", exception.what()];
+        SetBridgeError(error, OpenCVArucoPoseBridgeErrorPoseEstimationFailed, description);
+        return nil;
+    }
+#else
     SetBridgeError(error,
                    OpenCVArucoPoseBridgeErrorOpenCVUnavailable,
                    @"OpenCV headers are not available to this target.");

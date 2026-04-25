@@ -8,6 +8,10 @@ final class ScannerViewModel: ObservableObject {
         static let timeout: Double = 0.2
     }
 
+    private enum PoseConfiguration {
+        static let markerSizeMillimeters: Double = 8.0
+    }
+
     enum CameraState: Equatable {
         case idle
         case preparing
@@ -43,12 +47,18 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var arucoInputChannelCount: Int?
     @Published private(set) var arucoGrayscaleChannelCount: Int?
     @Published private(set) var arucoRejectedCandidateCount: Int?
+    @Published private(set) var poseMarkerId: Int?
+    @Published private(set) var poseDistanceMm: Double?
+    @Published private(set) var poseReprojectionError: Double?
+    @Published private(set) var poseErrorMessage: String?
+    @Published private(set) var poseMarkerSizeMillimeters: Double = PoseConfiguration.markerSizeMillimeters
     @Published private(set) var isTorchAvailable: Bool = false
     @Published private(set) var isTorchEnabled: Bool = false
     @Published private(set) var errorMessage: String?
 
     private let cameraService: CameraFrameService
     private let arUcoDetector: ArUcoDetector
+    private let poseEstimator: PoseEstimator
     private var shouldRunCamera = false
     private var totalFramesCounter: Int = 0
     private var recentFrameTimestamps: [Double] = []
@@ -61,10 +71,12 @@ final class ScannerViewModel: ObservableObject {
 
     init(
         cameraService: CameraFrameService = CameraFrameService(),
-        arUcoDetector: ArUcoDetector = ArUcoDetector()
+        arUcoDetector: ArUcoDetector = ArUcoDetector(),
+        poseEstimator: PoseEstimator = PoseEstimator()
     ) {
         self.cameraService = cameraService
         self.arUcoDetector = arUcoDetector
+        self.poseEstimator = poseEstimator
         self.isOpenCVAvailable = arUcoDetector.isOpenCVAvailable
         bindCameraCallbacks()
     }
@@ -172,6 +184,7 @@ final class ScannerViewModel: ObservableObject {
             from: arucoMetrics.detections,
             timestamp: metrics.lastFrameTimestamp
         )
+        let poseMetrics = estimatePose(from: arucoMetrics.detections, in: frame)
 
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -196,6 +209,10 @@ final class ScannerViewModel: ObservableObject {
             self.arucoInputChannelCount = arucoMetrics.inputChannelCount
             self.arucoGrayscaleChannelCount = arucoMetrics.grayscaleChannelCount
             self.arucoRejectedCandidateCount = arucoMetrics.rejectedCandidateCount
+            self.poseMarkerId = poseMetrics.markerId
+            self.poseDistanceMm = poseMetrics.distanceMm
+            self.poseReprojectionError = poseMetrics.reprojectionError
+            self.poseErrorMessage = poseMetrics.errorMessage
         }
     }
 
@@ -283,6 +300,37 @@ final class ScannerViewModel: ObservableObject {
                 inputChannelCount: arUcoDetector.lastInputChannelCount,
                 grayscaleChannelCount: arUcoDetector.lastGrayscaleChannelCount,
                 rejectedCandidateCount: arUcoDetector.lastRejectedCandidateCount
+            )
+        }
+    }
+
+    private func estimatePose(from detections: [ArUcoDetectionResult], in frame: CameraFrame) -> PoseMetrics {
+        guard !detections.isEmpty else {
+            return PoseMetrics(markerId: nil, distanceMm: nil, reprojectionError: nil, errorMessage: nil)
+        }
+
+        do {
+            let poses = try poseEstimator.estimatePoses(
+                for: detections,
+                in: frame,
+                markerSizeMillimeters: PoseConfiguration.markerSizeMillimeters
+            )
+            guard let pose = poses.first else {
+                return PoseMetrics(markerId: nil, distanceMm: nil, reprojectionError: nil, errorMessage: nil)
+            }
+
+            return PoseMetrics(
+                markerId: pose.markerId,
+                distanceMm: pose.distanceMm,
+                reprojectionError: pose.reprojectionError,
+                errorMessage: nil
+            )
+        } catch {
+            return PoseMetrics(
+                markerId: nil,
+                distanceMm: nil,
+                reprojectionError: nil,
+                errorMessage: error.localizedDescription
             )
         }
     }
@@ -379,6 +427,13 @@ final class ScannerViewModel: ObservableObject {
         let inputChannelCount: Int?
         let grayscaleChannelCount: Int?
         let rejectedCandidateCount: Int?
+    }
+
+    private struct PoseMetrics {
+        let markerId: Int?
+        let distanceMm: Double?
+        let reprojectionError: Double?
+        let errorMessage: String?
     }
 
     private func makeErrorMessage(from error: Error) -> String {

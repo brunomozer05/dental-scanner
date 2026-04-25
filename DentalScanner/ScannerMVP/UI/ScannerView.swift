@@ -44,8 +44,13 @@ struct ScannerView: View {
                     metricRow(title: "Conversao OpenCV", value: viewModel.arucoPreprocessingDescription)
                     metricRow(title: "Marcadores detectados", value: "\(viewModel.detectedMarkerCount)")
                     metricRow(title: "IDs detectados", value: formattedDetectedMarkerIds)
+                    metricRow(title: "Marcador pose", value: formattedPoseMarkerId)
+                    metricRow(title: "Tamanho marcador", value: String(format: "%.1f mm", viewModel.poseMarkerSizeMillimeters))
+                    metricRow(title: "Distancia camera", value: formattedPoseDistance)
+                    metricRow(title: "Erro reprojecao", value: formattedPoseReprojectionError)
                     metricRow(title: "Candidatos rejeitados", value: formattedRejectedCandidates)
                     metricRow(title: "Ultimo erro detector", value: formattedArucoErrorMessage)
+                    metricRow(title: "Ultimo erro pose", value: formattedPoseErrorMessage)
 
                     if let lastFrameTimestamp = viewModel.lastFrameTimestamp {
                         metricRow(title: "Ultimo timestamp", value: String(format: "%.3f s", lastFrameTimestamp))
@@ -131,6 +136,34 @@ struct ScannerView: View {
         }
 
         return "\(rejectedCandidateCount)"
+    }
+
+    private var formattedPoseMarkerId: String {
+        guard let poseMarkerId = viewModel.poseMarkerId else {
+            return "-"
+        }
+
+        return "\(poseMarkerId)"
+    }
+
+    private var formattedPoseDistance: String {
+        guard let poseDistanceMm = viewModel.poseDistanceMm else {
+            return "-"
+        }
+
+        return String(format: "%.1f mm", poseDistanceMm)
+    }
+
+    private var formattedPoseReprojectionError: String {
+        guard let poseReprojectionError = viewModel.poseReprojectionError else {
+            return "-"
+        }
+
+        return String(format: "%.2f px", poseReprojectionError)
+    }
+
+    private var formattedPoseErrorMessage: String {
+        viewModel.poseErrorMessage ?? "Nenhum"
     }
 
     private var formattedArucoErrorMessage: String {
