@@ -72,9 +72,9 @@ final class ScannerViewModel: ObservableObject {
 
         let startContext = await MainActor.run { (cameraState, shouldRunCamera) }
         let preparedState = startContext.0
-        let shouldRunCamera = startContext.1
+        let shouldContinueRunning = startContext.1
 
-        guard shouldRunCamera, !Task.isCancelled else {
+        guard shouldContinueRunning, !Task.isCancelled else {
             return
         }
 
