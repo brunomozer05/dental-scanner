@@ -22,8 +22,6 @@ jobs:
 
     env:
       OPENCV_VERSION: ${{ inputs.opencv_version }}
-      BUILD_ROOT: ${{ runner.temp }}/opencv-ios-xcframework
-      OUTPUT_DIR: ${{ runner.temp }}/opencv-ios-xcframework/output
 
     steps:
       - name: Show build environment
@@ -40,6 +38,8 @@ jobs:
           fi
 
       - name: Clone OpenCV and opencv_contrib
+        env:
+          BUILD_ROOT: ${{ runner.temp }}/opencv-ios-xcframework
         run: |
           mkdir -p "$BUILD_ROOT"
           cd "$BUILD_ROOT"
@@ -55,6 +55,9 @@ jobs:
             https://github.com/opencv/opencv_contrib.git
 
       - name: Build opencv2.xcframework with contrib modules
+        env:
+          BUILD_ROOT: ${{ runner.temp }}/opencv-ios-xcframework
+          OUTPUT_DIR: ${{ runner.temp }}/opencv-ios-xcframework/output
         run: |
           cd "$BUILD_ROOT"
 
@@ -68,6 +71,8 @@ jobs:
             --without objc
 
       - name: Validate ArUco headers
+        env:
+          OUTPUT_DIR: ${{ runner.temp }}/opencv-ios-xcframework/output
         run: |
           test -d "$OUTPUT_DIR/opencv2.xcframework"
           find "$OUTPUT_DIR/opencv2.xcframework" -name aruco.hpp -print -quit | grep -q aruco.hpp
@@ -75,6 +80,8 @@ jobs:
           du -sh "$OUTPUT_DIR/opencv2.xcframework"
 
       - name: Package XCFramework
+        env:
+          OUTPUT_DIR: ${{ runner.temp }}/opencv-ios-xcframework/output
         run: |
           cd "$OUTPUT_DIR"
           zip -qry "opencv2-${OPENCV_VERSION}-ios-xcframework.zip" opencv2.xcframework
@@ -83,6 +90,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: opencv2-${{ inputs.opencv_version }}-ios-xcframework
-          path: ${{ env.OUTPUT_DIR }}/opencv2-${{ inputs.opencv_version }}-ios-xcframework.zip
+          path: ${{ runner.temp }}/opencv-ios-xcframework/output/opencv2-${{ inputs.opencv_version }}-ios-xcframework.zip
           if-no-files-found: error
           retention-days: ${{ fromJSON(inputs.retention_days) }}
