@@ -26,12 +26,18 @@ final class CameraFrameService: NSObject {
         case cameraPermissionDenied
         case restrictedAuthorization
         case cameraUnavailable
+        case torchUnavailable
         case unableToCreateInput(Error)
         case unableToAddInput
         case unableToAddOutput
         case deviceConfigurationFailed(Error)
         case sessionNotPrepared
         case missingPixelBuffer
+    }
+
+    struct TorchState {
+        let isAvailable: Bool
+        let isEnabled: Bool
     }
 
     private let configuration: Configuration
@@ -127,6 +133,58 @@ final class CameraFrameService: NSObject {
                     continuation.resume(returning: ())
                 } catch {
                     continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    func fetchTorchState() async -> TorchState {
+        await withCheckedContinuation { continuation in
+            sessionQueue.async { [weak self] in
+                guard let self, let device = self.activeDevice else {
+                    continuation.resume(returning: TorchState(isAvailable: false, isEnabled: false))
+                    return
+                }
+
+                let isAvailable = self.isTorchSupported(on: device)
+                let isEnabled = isAvailable && device.torchMode == .on
+                continuation.resume(returning: TorchState(isAvailable: isAvailable, isEnabled: isEnabled))
+            }
+        }
+    }
+
+    func setTorchEnabled(_ isEnabled: Bool) async throws -> TorchState {
+        try await withCheckedThrowingContinuation { continuation in
+            sessionQueue.async { [weak self] in
+                guard let self else {
+                    continuation.resume(returning: TorchState(isAvailable: false, isEnabled: false))
+                    return
+                }
+
+                guard let device = self.activeDevice else {
+                    continuation.resume(throwing: ServiceError.cameraUnavailable)
+                    return
+                }
+
+                guard self.isTorchSupported(on: device) else {
+                    continuation.resume(returning: TorchState(isAvailable: false, isEnabled: false))
+                    return
+                }
+
+                do {
+                    try device.lockForConfiguration()
+                    defer { device.unlockForConfiguration() }
+
+                    device.torchMode = isEnabled ? .on : .off
+
+                    continuation.resume(
+                        returning: TorchState(
+                            isAvailable: true,
+                            isEnabled: device.torchMode == .on
+                        )
+                    )
+                } catch {
+                    continuation.resume(throwing: ServiceError.deviceConfigurationFailed(error))
                 }
             }
         }
@@ -290,6 +348,10 @@ final class CameraFrameService: NSObject {
         } catch {
             throw ServiceError.deviceConfigurationFailed(error)
         }
+    }
+
+    private func isTorchSupported(on device: AVCaptureDevice) -> Bool {
+        device.hasTorch && device.isTorchModeSupported(.on) && device.isTorchModeSupported(.off)
     }
 
     private func buildFrame(from sampleBuffer: CMSampleBuffer, connection: AVCaptureConnection) -> CameraFrame? {

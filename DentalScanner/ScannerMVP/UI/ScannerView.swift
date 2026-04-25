@@ -10,7 +10,7 @@ struct ScannerView: View {
                     CameraPreviewView(session: viewModel.captureSession)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     ArUcoOverlayView(
-                        detections: viewModel.detectedMarkers,
+                        detections: viewModel.overlayMarkers,
                         frameResolution: viewModel.arucoFrameResolution ?? viewModel.frameResolution
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -18,6 +18,10 @@ struct ScannerView: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 360)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(alignment: .topTrailing) {
+                    torchButton
+                        .padding(12)
+                }
                 .overlay(alignment: .bottomLeading) {
                     cameraStateBadge
                         .padding(12)
@@ -25,6 +29,7 @@ struct ScannerView: View {
 
                 VStack(alignment: .leading, spacing: 12) {
                     metricRow(title: "Estado da camera", value: formattedCameraState)
+                    metricRow(title: "Lanterna", value: formattedTorchState)
                     metricRow(title: "Frames recebidos", value: "\(viewModel.totalFramesReceived)")
                     metricRow(title: "FPS estimado", value: String(format: "%.1f", viewModel.estimatedFPS))
                     metricRow(title: "Resolucao", value: formattedResolution)
@@ -88,6 +93,14 @@ struct ScannerView: View {
         return "\(resolution.width) x \(resolution.height)"
     }
 
+    private var formattedTorchState: String {
+        guard viewModel.isTorchAvailable else {
+            return "Indisponivel"
+        }
+
+        return viewModel.isTorchEnabled ? "Ligada" : "Desligada"
+    }
+
     private var formattedArucoFrameResolution: String {
         guard let resolution = viewModel.arucoFrameResolution else {
             return "-"
@@ -131,6 +144,25 @@ struct ScannerView: View {
             .padding(.vertical, 6)
             .background(.ultraThinMaterial)
             .clipShape(Capsule())
+    }
+
+    private var torchButton: some View {
+        Button {
+            viewModel.toggleTorch()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: viewModel.isTorchEnabled ? "flashlight.on.fill" : "flashlight.off.fill")
+                Text(viewModel.isTorchEnabled ? "Lanterna on" : "Lanterna off")
+            }
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .foregroundStyle(viewModel.isTorchAvailable ? Color.primary : Color.secondary)
+            .background(.ultraThinMaterial)
+            .clipShape(Capsule())
+        }
+        .disabled(!viewModel.isTorchAvailable)
+        .opacity(viewModel.isTorchAvailable ? 1 : 0.65)
     }
 
     private func metricRow(title: String, value: String) -> some View {

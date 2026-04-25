@@ -4,6 +4,10 @@ import CoreVideo
 import Foundation
 
 final class ScannerViewModel: ObservableObject {
+    private enum OverlayStabilization {
+        static let timeout: Double = 0.2
+    }
+
     enum CameraState: Equatable {
         case idle
         case preparing
@@ -27,6 +31,7 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var detectedMarkerCount: Int = 0
     @Published private(set) var detectedMarkerIds: [Int] = []
     @Published private(set) var detectedMarkers: [ArUcoDetectionResult] = []
+    @Published private(set) var overlayMarkers: [ArUcoDetectionResult] = []
     @Published private(set) var arucoErrorMessage: String?
     @Published private(set) var hasFrameReachedArucoDetector: Bool = false
     @Published private(set) var arucoDetectionCallCount: Int = 0
@@ -38,6 +43,8 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var arucoInputChannelCount: Int?
     @Published private(set) var arucoGrayscaleChannelCount: Int?
     @Published private(set) var arucoRejectedCandidateCount: Int?
+    @Published private(set) var isTorchAvailable: Bool = false
+    @Published private(set) var isTorchEnabled: Bool = false
     @Published private(set) var errorMessage: String?
 
     private let cameraService: CameraFrameService
@@ -45,6 +52,8 @@ final class ScannerViewModel: ObservableObject {
     private var shouldRunCamera = false
     private var totalFramesCounter: Int = 0
     private var recentFrameTimestamps: [Double] = []
+    private var lastValidOverlayDetections: [ArUcoDetectionResult] = []
+    private var lastValidOverlayTimestamp: Double?
 
     var captureSession: AVCaptureSession {
         cameraService.captureSession
@@ -73,8 +82,11 @@ final class ScannerViewModel: ObservableObject {
 
         do {
             try await cameraService.prepare()
+            let torchState = await cameraService.fetchTorchState()
             await MainActor.run {
                 cameraState = .ready
+                isTorchAvailable = torchState.isAvailable
+                isTorchEnabled = torchState.isEnabled
             }
         } catch {
             await MainActor.run {
@@ -118,6 +130,29 @@ final class ScannerViewModel: ObservableObject {
         cameraState = .ready
     }
 
+    @MainActor
+    func toggleTorch() {
+        guard isTorchAvailable else { return }
+
+        let targetState = !isTorchEnabled
+        Task { [weak self] in
+            guard let self else { return }
+
+            do {
+                let torchState = try await self.cameraService.setTorchEnabled(targetState)
+                await MainActor.run {
+                    self.isTorchAvailable = torchState.isAvailable
+                    self.isTorchEnabled = torchState.isEnabled
+                    self.errorMessage = nil
+                }
+            } catch {
+                await MainActor.run {
+                    self.errorMessage = self.makeErrorMessage(from: error)
+                }
+            }
+        }
+    }
+
     private func bindCameraCallbacks() {
         cameraService.onFrame = { [weak self] frame in
             self?.handleFrame(frame)
@@ -133,6 +168,10 @@ final class ScannerViewModel: ObservableObject {
     private func handleFrame(_ frame: CameraFrame) {
         let metrics = buildFrameMetrics(from: frame)
         let arucoMetrics = detectArucoMarkers(in: frame)
+        let overlayMarkers = stabilizedOverlayDetections(
+            from: arucoMetrics.detections,
+            timestamp: metrics.lastFrameTimestamp
+        )
 
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -145,6 +184,7 @@ final class ScannerViewModel: ObservableObject {
             self.detectedMarkerCount = arucoMetrics.detectedMarkerCount
             self.detectedMarkerIds = arucoMetrics.detectedMarkerIds
             self.detectedMarkers = arucoMetrics.detections
+            self.overlayMarkers = overlayMarkers
             self.arucoErrorMessage = arucoMetrics.errorMessage
             self.hasFrameReachedArucoDetector = arucoMetrics.hasFrameReachedDetector
             self.arucoDetectionCallCount = arucoMetrics.detectionCallCount
@@ -171,6 +211,34 @@ final class ScannerViewModel: ObservableObject {
             frameResolution: FrameResolution(width: frame.width, height: frame.height),
             isIntrinsicMatrixAvailable: frame.metadata.intrinsicMatrix != nil
         )
+    }
+
+    private func stabilizedOverlayDetections(
+        from detections: [ArUcoDetectionResult],
+        timestamp: Double
+    ) -> [ArUcoDetectionResult] {
+        guard timestamp.isFinite else {
+            return detections
+        }
+
+        if !detections.isEmpty {
+            lastValidOverlayDetections = detections
+            lastValidOverlayTimestamp = timestamp
+            return detections
+        }
+
+        guard let lastValidOverlayTimestamp else {
+            lastValidOverlayDetections = []
+            return []
+        }
+
+        if timestamp - lastValidOverlayTimestamp <= OverlayStabilization.timeout {
+            return lastValidOverlayDetections
+        }
+
+        lastValidOverlayDetections = []
+        self.lastValidOverlayTimestamp = nil
+        return []
     }
 
     private func detectArucoMarkers(in frame: CameraFrame) -> ArucoMetrics {
@@ -325,6 +393,8 @@ final class ScannerViewModel: ObservableObject {
             return "Camera access is restricted on this device."
         case .cameraUnavailable:
             return "Back camera is unavailable."
+        case .torchUnavailable:
+            return "Torch is unavailable on this device."
         case .unableToCreateInput:
             return "Unable to create camera input."
         case .unableToAddInput:
