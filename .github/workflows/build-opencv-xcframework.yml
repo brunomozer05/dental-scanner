@@ -79,35 +79,28 @@ jobs:
           xcframework="$OUTPUT_DIR/opencv2.xcframework"
           test -d "$xcframework"
 
-          for framework in "$xcframework"/*/opencv2.framework; do
+          for slice in ios-arm64 ios-arm64_x86_64-simulator; do
+            framework="$xcframework/$slice/opencv2.framework"
             version_dir="$framework/Versions/A"
+            resources_dir="$version_dir/Resources"
+
+            test -d "$framework"
             test -d "$version_dir"
+            test -f "$version_dir/opencv2"
+            test -d "$version_dir/Headers"
+            test -f "$resources_dir/Info.plist"
 
-            flat_framework="${framework}.flat"
-            rm -rf "$flat_framework"
-            mkdir -p "$flat_framework"
+            cd "$framework"
 
-            cp "$version_dir/opencv2" "$flat_framework/opencv2"
-            cp -R "$version_dir/Headers" "$flat_framework/Headers"
+            rm -rf opencv2 Headers Modules Resources Info.plist
 
-            if [ -d "$version_dir/Resources" ]; then
-              cp -R "$version_dir/Resources" "$flat_framework/Resources"
-            fi
+            cp Versions/A/opencv2 opencv2
+            cp -R Versions/A/Headers Headers
+            cp -R Versions/A/Modules Modules || true
+            cp -R Versions/A/Resources Resources || true
+            cp Versions/A/Resources/Info.plist Info.plist
 
-            if [ -f "$version_dir/Resources/Info.plist" ]; then
-              cp "$version_dir/Resources/Info.plist" "$flat_framework/Info.plist"
-            fi
-
-            if [ -d "$version_dir/Modules" ]; then
-              cp -R "$version_dir/Modules" "$flat_framework/Modules"
-            fi
-
-            test -f "$flat_framework/opencv2"
-            test -d "$flat_framework/Headers"
-            test -f "$flat_framework/Info.plist"
-
-            rm -rf "$framework"
-            mv "$flat_framework" "$framework"
+            rm -rf Versions
           done
 
           /usr/libexec/PlistBuddy \
@@ -128,12 +121,27 @@ jobs:
           xcframework="$OUTPUT_DIR/opencv2.xcframework"
           test -d "$xcframework"
 
-          for framework in "$xcframework"/*/opencv2.framework; do
+          for slice in ios-arm64 ios-arm64_x86_64-simulator; do
+            framework="$xcframework/$slice/opencv2.framework"
+            binary_size="$(stat -f%z "$framework/opencv2")"
+
             test -f "$framework/opencv2"
             test -d "$framework/Headers"
             test -f "$framework/Info.plist"
             find "$framework/Headers" -name aruco.hpp -print -quit | grep -q aruco.hpp
             find "$framework/Headers" -name calib3d.hpp -print -quit | grep -q calib3d.hpp
+
+            if [ "$binary_size" -le 1048576 ]; then
+              echo "$framework/opencv2 is unexpectedly small: $binary_size bytes"
+              exit 1
+            fi
+
+            symlink_path="$(find "$framework" -type l -print -quit)"
+            if [ -n "$symlink_path" ]; then
+              echo "$framework still contains symlinks"
+              echo "$symlink_path"
+              exit 1
+            fi
           done
 
           /usr/libexec/PlistBuddy \
@@ -150,9 +158,7 @@ jobs:
           OUTPUT_DIR: ${{ runner.temp }}/opencv-ios-xcframework/output
         run: |
           cd "$OUTPUT_DIR"
-          ditto -c -k --sequesterRsrc --keepParent \
-            opencv2.xcframework \
-            "opencv2-${OPENCV_VERSION}-ios-xcframework.zip"
+          zip -qr "opencv2-${OPENCV_VERSION}-ios-xcframework.zip" opencv2.xcframework
 
       - name: Upload opencv2.xcframework artifact
         uses: actions/upload-artifact@v7
