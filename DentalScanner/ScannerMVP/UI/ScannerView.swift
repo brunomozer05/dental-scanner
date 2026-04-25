@@ -46,8 +46,10 @@ struct ScannerView: View {
                     metricRow(title: "IDs detectados", value: formattedDetectedMarkerIds)
                     metricRow(title: "Marcador pose", value: formattedPoseMarkerId)
                     metricRow(title: "Tamanho marcador", value: String(format: "%.1f mm", viewModel.poseMarkerSizeMillimeters))
-                    metricRow(title: "Distancia camera", value: formattedPoseDistance)
+                    metricRow(title: "Distancia bruta", value: formattedRawPoseDistance)
+                    metricRow(title: "Distancia estavel", value: formattedStablePoseDistance)
                     metricRow(title: "Erro reprojecao", value: formattedPoseReprojectionError)
+                    metricRow(title: "Status pose", value: viewModel.poseStabilityStatus)
                     metricRow(title: "Candidatos rejeitados", value: formattedRejectedCandidates)
                     metricRow(title: "Ultimo erro detector", value: formattedArucoErrorMessage)
                     metricRow(title: "Ultimo erro pose", value: formattedPoseErrorMessage)
@@ -139,23 +141,31 @@ struct ScannerView: View {
     }
 
     private var formattedPoseMarkerId: String {
-        guard let poseMarkerId = viewModel.poseMarkerId else {
+        guard let poseMarkerId = viewModel.rawPoseResult?.markerId ?? viewModel.stablePoseResult?.markerId else {
             return "-"
         }
 
         return "\(poseMarkerId)"
     }
 
-    private var formattedPoseDistance: String {
-        guard let poseDistanceMm = viewModel.poseDistanceMm else {
+    private var formattedRawPoseDistance: String {
+        guard let distanceMm = viewModel.rawPoseResult?.distanceMm else {
             return "-"
         }
 
-        return String(format: "%.1f mm", poseDistanceMm)
+        return String(format: "%.1f mm", distanceMm)
+    }
+
+    private var formattedStablePoseDistance: String {
+        guard let distanceMm = viewModel.stablePoseResult?.distanceMm else {
+            return "-"
+        }
+
+        return String(format: "%.1f mm", distanceMm)
     }
 
     private var formattedPoseReprojectionError: String {
-        guard let poseReprojectionError = viewModel.poseReprojectionError else {
+        guard let poseReprojectionError = viewModel.rawPoseResult?.reprojectionError else {
             return "-"
         }
 

@@ -2,6 +2,7 @@ import AVFoundation
 import Combine
 import CoreVideo
 import Foundation
+import simd
 
 final class ScannerViewModel: ObservableObject {
     private enum OverlayStabilization {
@@ -10,6 +11,14 @@ final class ScannerViewModel: ObservableObject {
 
     private enum PoseConfiguration {
         static let markerSizeMillimeters: Double = 8.0
+    }
+
+    private enum PoseFilterConfiguration {
+        static let smoothingAlpha: Double = 0.35
+        static let outlierDistanceDeltaMm: Double = 80.0
+        static let outlierResetFrameCount: Int = 3
+        static let stableFrameCount: Int = 3
+        static let stableReprojectionError: Double = 2.0
     }
 
     enum CameraState: Equatable {
@@ -47,6 +56,9 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var arucoInputChannelCount: Int?
     @Published private(set) var arucoGrayscaleChannelCount: Int?
     @Published private(set) var arucoRejectedCandidateCount: Int?
+    @Published private(set) var rawPoseResult: PoseResult?
+    @Published private(set) var stablePoseResult: PoseResult?
+    @Published private(set) var poseStabilityStatus: String = "Sem pose"
     @Published private(set) var poseMarkerId: Int?
     @Published private(set) var poseDistanceMm: Double?
     @Published private(set) var poseReprojectionError: Double?
@@ -64,6 +76,9 @@ final class ScannerViewModel: ObservableObject {
     private var recentFrameTimestamps: [Double] = []
     private var lastValidOverlayDetections: [ArUcoDetectionResult] = []
     private var lastValidOverlayTimestamp: Double?
+    private var filteredPoseResult: PoseResult?
+    private var acceptedPoseFrameCount = 0
+    private var consecutivePoseOutlierCount = 0
 
     var captureSession: AVCaptureSession {
         cameraService.captureSession
@@ -209,9 +224,12 @@ final class ScannerViewModel: ObservableObject {
             self.arucoInputChannelCount = arucoMetrics.inputChannelCount
             self.arucoGrayscaleChannelCount = arucoMetrics.grayscaleChannelCount
             self.arucoRejectedCandidateCount = arucoMetrics.rejectedCandidateCount
-            self.poseMarkerId = poseMetrics.markerId
-            self.poseDistanceMm = poseMetrics.distanceMm
-            self.poseReprojectionError = poseMetrics.reprojectionError
+            self.rawPoseResult = poseMetrics.rawPoseResult
+            self.stablePoseResult = poseMetrics.stablePoseResult
+            self.poseStabilityStatus = poseMetrics.stabilityStatus
+            self.poseMarkerId = poseMetrics.stablePoseResult?.markerId ?? poseMetrics.rawPoseResult?.markerId
+            self.poseDistanceMm = poseMetrics.stablePoseResult?.distanceMm
+            self.poseReprojectionError = poseMetrics.rawPoseResult?.reprojectionError
             self.poseErrorMessage = poseMetrics.errorMessage
         }
     }
@@ -306,7 +324,13 @@ final class ScannerViewModel: ObservableObject {
 
     private func estimatePose(from detections: [ArUcoDetectionResult], in frame: CameraFrame) -> PoseMetrics {
         guard !detections.isEmpty else {
-            return PoseMetrics(markerId: nil, distanceMm: nil, reprojectionError: nil, errorMessage: nil)
+            resetPoseFilter()
+            return PoseMetrics(
+                rawPoseResult: nil,
+                stablePoseResult: nil,
+                stabilityStatus: "Sem pose",
+                errorMessage: nil
+            )
         }
 
         do {
@@ -316,23 +340,92 @@ final class ScannerViewModel: ObservableObject {
                 markerSizeMillimeters: PoseConfiguration.markerSizeMillimeters
             )
             guard let pose = poses.first else {
-                return PoseMetrics(markerId: nil, distanceMm: nil, reprojectionError: nil, errorMessage: nil)
+                resetPoseFilter()
+                return PoseMetrics(
+                    rawPoseResult: nil,
+                    stablePoseResult: nil,
+                    stabilityStatus: "Sem pose",
+                    errorMessage: nil
+                )
             }
 
+            let filterResult = stabilizePose(pose)
+
             return PoseMetrics(
-                markerId: pose.markerId,
-                distanceMm: pose.distanceMm,
-                reprojectionError: pose.reprojectionError,
+                rawPoseResult: pose,
+                stablePoseResult: filterResult.pose,
+                stabilityStatus: filterResult.stabilityStatus,
                 errorMessage: nil
             )
         } catch {
+            resetPoseFilter()
             return PoseMetrics(
-                markerId: nil,
-                distanceMm: nil,
-                reprojectionError: nil,
+                rawPoseResult: nil,
+                stablePoseResult: nil,
+                stabilityStatus: "Instavel",
                 errorMessage: error.localizedDescription
             )
         }
+    }
+
+    private func stabilizePose(_ rawPose: PoseResult) -> (pose: PoseResult, stabilityStatus: String) {
+        guard let filteredPoseResult else {
+            self.filteredPoseResult = rawPose
+            acceptedPoseFrameCount = 1
+            consecutivePoseOutlierCount = 0
+            return (rawPose, "Instavel")
+        }
+
+        guard filteredPoseResult.markerId == rawPose.markerId else {
+            self.filteredPoseResult = rawPose
+            acceptedPoseFrameCount = 1
+            consecutivePoseOutlierCount = 0
+            return (rawPose, "Instavel")
+        }
+
+        let distanceDelta = abs(rawPose.distanceMm - filteredPoseResult.distanceMm)
+        if distanceDelta > PoseFilterConfiguration.outlierDistanceDeltaMm {
+            consecutivePoseOutlierCount += 1
+            acceptedPoseFrameCount = 0
+
+            if consecutivePoseOutlierCount >= PoseFilterConfiguration.outlierResetFrameCount {
+                self.filteredPoseResult = rawPose
+                acceptedPoseFrameCount = 1
+                consecutivePoseOutlierCount = 0
+                return (rawPose, "Instavel")
+            }
+
+            return (filteredPoseResult, "Instavel")
+        }
+
+        consecutivePoseOutlierCount = 0
+        acceptedPoseFrameCount += 1
+
+        let smoothedPose = blendPose(previous: filteredPoseResult, current: rawPose)
+        self.filteredPoseResult = smoothedPose
+
+        let isStable = acceptedPoseFrameCount >= PoseFilterConfiguration.stableFrameCount &&
+            rawPose.reprojectionError <= PoseFilterConfiguration.stableReprojectionError
+        return (smoothedPose, isStable ? "Estavel" : "Instavel")
+    }
+
+    private func blendPose(previous: PoseResult, current: PoseResult) -> PoseResult {
+        let alpha = PoseFilterConfiguration.smoothingAlpha
+        let retained = 1.0 - alpha
+
+        return PoseResult(
+            markerId: current.markerId,
+            rotationVector: previous.rotationVector * retained + current.rotationVector * alpha,
+            translationVector: previous.translationVector * retained + current.translationVector * alpha,
+            distanceMm: previous.distanceMm * retained + current.distanceMm * alpha,
+            reprojectionError: previous.reprojectionError * retained + current.reprojectionError * alpha
+        )
+    }
+
+    private func resetPoseFilter() {
+        filteredPoseResult = nil
+        acceptedPoseFrameCount = 0
+        consecutivePoseOutlierCount = 0
     }
 
     private func makeArucoFrameResolution() -> FrameResolution? {
@@ -430,9 +523,9 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private struct PoseMetrics {
-        let markerId: Int?
-        let distanceMm: Double?
-        let reprojectionError: Double?
+        let rawPoseResult: PoseResult?
+        let stablePoseResult: PoseResult?
+        let stabilityStatus: String
         let errorMessage: String?
     }
 
