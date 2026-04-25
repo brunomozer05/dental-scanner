@@ -1,0 +1,63 @@
+name: Build Unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-unsigned-ipa:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up mise
+        uses: jdx/mise-action@v3
+        with:
+          version: 2026.4.17
+          install: true
+
+      - name: Show tool versions
+        run: |
+          mise --version
+          mise exec tuist -- tuist version
+          xcodebuild -version
+
+      - name: Generate Xcode workspace
+        run: |
+          mise exec tuist -- tuist fetch
+          mise exec tuist -- tuist generate
+
+      - name: Build app for iphoneos
+        run: |
+          xcodebuild \
+            -workspace DentalScanner.xcworkspace \
+            -scheme DentalScanner \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination generic/platform=iOS \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p build/Payload
+          cp -R build/Build/Products/Release-iphoneos/DentalScanner.app build/Payload/
+          cd build
+          ditto -c -k --sequesterRsrc --keepParent Payload DentalScanner.ipa
+
+      - name: Upload unsigned IPA artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: DentalScanner-unsigned-ipa
+          path: build/DentalScanner.ipa
+          if-no-files-found: error
