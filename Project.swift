@@ -50,9 +50,18 @@ let project = Project(
             "SWIFT_OBJC_BRIDGING_HEADER": .string("DentalScanner/DentalScanner-Bridging-Header.h"),
             "CLANG_CXX_LANGUAGE_STANDARD": .string("gnu++17"),
             "CLANG_CXX_LIBRARY": .string("libc++"),
+            "CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER": .string("NO"),
             "GCC_ENABLE_CPP_EXCEPTIONS": .string("YES"),
             "HEADER_SEARCH_PATHS": OpenCV.headerSearchPaths,
             "FRAMEWORK_SEARCH_PATHS": OpenCV.frameworkSearchPaths,
+            "OTHER_CFLAGS": .array([
+                "$(inherited)",
+                "-Wno-quoted-include-in-framework-header"
+            ]),
+            "OTHER_CPLUSPLUSFLAGS": .array([
+                "$(inherited)",
+                "-Wno-quoted-include-in-framework-header"
+            ]),
             "LD_RUNPATH_SEARCH_PATHS": .array([
                 "$(inherited)",
                 "@executable_path/Frameworks"

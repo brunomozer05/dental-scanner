@@ -1,11 +1,12 @@
 #import "OpenCVArucoPoseBridge.h"
 
-#if __has_include(<opencv2/core.hpp>) && __has_include(<opencv2/imgproc.hpp>) && __has_include(<opencv2/aruco.hpp>) && __has_include(<opencv2/calib3d.hpp>) && __has_include(<opencv2/opencv.hpp>)
-#import <opencv2/aruco.hpp>
-#import <opencv2/calib3d.hpp>
-#import <opencv2/core.hpp>
-#import <opencv2/imgproc.hpp>
-#import <opencv2/opencv.hpp>
+#if __has_include(<opencv2/core.hpp>) && __has_include(<opencv2/imgproc.hpp>) && __has_include(<opencv2/objdetect/aruco_detector.hpp>)
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/objdetect/aruco_detector.hpp>
+
+#include <vector>
+
 #define DENTAL_SCANNER_HAS_OPENCV 1
 #else
 #define DENTAL_SCANNER_HAS_OPENCV 0
@@ -81,16 +82,10 @@ private:
 static void DetectAruco4x4Markers(const cv::Mat &grayImage,
                                   std::vector<std::vector<cv::Point2f>> &corners,
                                   std::vector<int> &ids) {
-#if CV_VERSION_MAJOR > 4 || (CV_VERSION_MAJOR == 4 && CV_VERSION_MINOR >= 7)
     cv::aruco::Dictionary dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
     cv::aruco::DetectorParameters parameters;
     cv::aruco::ArucoDetector detector(dictionary, parameters);
     detector.detectMarkers(grayImage, corners, ids);
-#else
-    cv::Ptr<cv::aruco::Dictionary> dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
-    cv::Ptr<cv::aruco::DetectorParameters> parameters = cv::aruco::DetectorParameters::create();
-    cv::aruco::detectMarkers(grayImage, dictionary, corners, ids, parameters);
-#endif
 }
 
 static NSArray<OpenCVArucoImagePoint *> *BuildImagePoints(const std::vector<cv::Point2f> &corners) {
