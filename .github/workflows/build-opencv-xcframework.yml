@@ -70,21 +70,89 @@ jobs:
             --contrib "$BUILD_ROOT/opencv_contrib" \
             --without objc
 
+      - name: Normalize XCFramework layout for Tuist
+        env:
+          OUTPUT_DIR: ${{ runner.temp }}/opencv-ios-xcframework/output
+        run: |
+          set -euo pipefail
+
+          xcframework="$OUTPUT_DIR/opencv2.xcframework"
+          test -d "$xcframework"
+
+          for framework in "$xcframework"/*/opencv2.framework; do
+            version_dir="$framework/Versions/A"
+            test -d "$version_dir"
+
+            flat_framework="${framework}.flat"
+            rm -rf "$flat_framework"
+            mkdir -p "$flat_framework"
+
+            cp "$version_dir/opencv2" "$flat_framework/opencv2"
+            cp -R "$version_dir/Headers" "$flat_framework/Headers"
+
+            if [ -d "$version_dir/Resources" ]; then
+              cp -R "$version_dir/Resources" "$flat_framework/Resources"
+            fi
+
+            if [ -f "$version_dir/Resources/Info.plist" ]; then
+              cp "$version_dir/Resources/Info.plist" "$flat_framework/Info.plist"
+            fi
+
+            if [ -d "$version_dir/Modules" ]; then
+              cp -R "$version_dir/Modules" "$flat_framework/Modules"
+            fi
+
+            test -f "$flat_framework/opencv2"
+            test -d "$flat_framework/Headers"
+            test -f "$flat_framework/Info.plist"
+
+            rm -rf "$framework"
+            mv "$flat_framework" "$framework"
+          done
+
+          /usr/libexec/PlistBuddy \
+            -c "Set :AvailableLibraries:0:BinaryPath opencv2.framework/opencv2" \
+            "$xcframework/Info.plist"
+          /usr/libexec/PlistBuddy \
+            -c "Set :AvailableLibraries:1:BinaryPath opencv2.framework/opencv2" \
+            "$xcframework/Info.plist"
+
+          plutil -lint "$xcframework/Info.plist"
+
       - name: Validate ArUco headers
         env:
           OUTPUT_DIR: ${{ runner.temp }}/opencv-ios-xcframework/output
         run: |
-          test -d "$OUTPUT_DIR/opencv2.xcframework"
-          find "$OUTPUT_DIR/opencv2.xcframework" -name aruco.hpp -print -quit | grep -q aruco.hpp
-          find "$OUTPUT_DIR/opencv2.xcframework" -name calib3d.hpp -print -quit | grep -q calib3d.hpp
-          du -sh "$OUTPUT_DIR/opencv2.xcframework"
+          set -euo pipefail
+
+          xcframework="$OUTPUT_DIR/opencv2.xcframework"
+          test -d "$xcframework"
+
+          for framework in "$xcframework"/*/opencv2.framework; do
+            test -f "$framework/opencv2"
+            test -d "$framework/Headers"
+            test -f "$framework/Info.plist"
+            find "$framework/Headers" -name aruco.hpp -print -quit | grep -q aruco.hpp
+            find "$framework/Headers" -name calib3d.hpp -print -quit | grep -q calib3d.hpp
+          done
+
+          /usr/libexec/PlistBuddy \
+            -c "Print :AvailableLibraries:0:BinaryPath" \
+            "$xcframework/Info.plist" | grep -q "opencv2.framework/opencv2"
+          /usr/libexec/PlistBuddy \
+            -c "Print :AvailableLibraries:1:BinaryPath" \
+            "$xcframework/Info.plist" | grep -q "opencv2.framework/opencv2"
+
+          du -sh "$xcframework"
 
       - name: Package XCFramework
         env:
           OUTPUT_DIR: ${{ runner.temp }}/opencv-ios-xcframework/output
         run: |
           cd "$OUTPUT_DIR"
-          zip -qry "opencv2-${OPENCV_VERSION}-ios-xcframework.zip" opencv2.xcframework
+          ditto -c -k --sequesterRsrc --keepParent \
+            opencv2.xcframework \
+            "opencv2-${OPENCV_VERSION}-ios-xcframework.zip"
 
       - name: Upload opencv2.xcframework artifact
         uses: actions/upload-artifact@v7
