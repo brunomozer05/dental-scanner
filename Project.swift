@@ -14,13 +14,13 @@ let project = Project(
         ]
     ),
     targets: [
-        .target(
+        Target.target(
             name: "DentalScanner",
-            destinations: .iOS,
-            product: .app,
+            destinations: Destinations.iOS,
+            product: Product.app,
             bundleId: "com.dentalscanner.mvp",
-            deploymentTargets: .iOS("17.0"),
-            infoPlist: .file(path: "DentalScanner/Info.plist"),
+            deploymentTargets: DeploymentTargets.iOS("17.0"),
+            infoPlist: InfoPlist.file(path: "DentalScanner/Info.plist"),
             sources: [
                 "DentalScanner/**/*.swift"
             ],
