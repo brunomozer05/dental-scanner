@@ -6,14 +6,22 @@ struct ScannerView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                CameraPreviewView(session: viewModel.captureSession)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 360)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(alignment: .bottomLeading) {
-                        cameraStateBadge
-                            .padding(12)
-                    }
+                ZStack {
+                    CameraPreviewView(session: viewModel.captureSession)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    ArUcoOverlayView(
+                        detections: viewModel.detectedMarkers,
+                        frameResolution: viewModel.arucoFrameResolution ?? viewModel.frameResolution
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 360)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(alignment: .bottomLeading) {
+                    cameraStateBadge
+                        .padding(12)
+                }
 
                 VStack(alignment: .leading, spacing: 12) {
                     metricRow(title: "Estado da camera", value: formattedCameraState)

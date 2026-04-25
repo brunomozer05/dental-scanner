@@ -26,6 +26,7 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var isOpenCVAvailable: Bool = false
     @Published private(set) var detectedMarkerCount: Int = 0
     @Published private(set) var detectedMarkerIds: [Int] = []
+    @Published private(set) var detectedMarkers: [ArUcoDetectionResult] = []
     @Published private(set) var arucoErrorMessage: String?
     @Published private(set) var hasFrameReachedArucoDetector: Bool = false
     @Published private(set) var arucoDetectionCallCount: Int = 0
@@ -143,6 +144,7 @@ final class ScannerViewModel: ObservableObject {
             self.isOpenCVAvailable = arucoMetrics.isOpenCVAvailable
             self.detectedMarkerCount = arucoMetrics.detectedMarkerCount
             self.detectedMarkerIds = arucoMetrics.detectedMarkerIds
+            self.detectedMarkers = arucoMetrics.detections
             self.arucoErrorMessage = arucoMetrics.errorMessage
             self.hasFrameReachedArucoDetector = arucoMetrics.hasFrameReachedDetector
             self.arucoDetectionCallCount = arucoMetrics.detectionCallCount
@@ -180,6 +182,7 @@ final class ScannerViewModel: ObservableObject {
                 isOpenCVAvailable: arUcoDetector.isOpenCVAvailable,
                 detectedMarkerCount: detections.count,
                 detectedMarkerIds: markerIds,
+                detections: detections,
                 errorMessage: arUcoDetector.lastErrorMessage,
                 hasFrameReachedDetector: arUcoDetector.hasReceivedFrame,
                 detectionCallCount: arUcoDetector.detectionCallCount,
@@ -200,6 +203,7 @@ final class ScannerViewModel: ObservableObject {
                 isOpenCVAvailable: arUcoDetector.isOpenCVAvailable,
                 detectedMarkerCount: arUcoDetector.lastDetectedMarkerCount,
                 detectedMarkerIds: [],
+                detections: [],
                 errorMessage: detectorErrorMessage,
                 hasFrameReachedDetector: arUcoDetector.hasReceivedFrame,
                 detectionCallCount: arUcoDetector.detectionCallCount,
@@ -295,6 +299,7 @@ final class ScannerViewModel: ObservableObject {
         let isOpenCVAvailable: Bool
         let detectedMarkerCount: Int
         let detectedMarkerIds: [Int]
+        let detections: [ArUcoDetectionResult]
         let errorMessage: String?
         let hasFrameReachedDetector: Bool
         let detectionCallCount: Int
