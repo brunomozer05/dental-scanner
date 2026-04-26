@@ -9,53 +9,45 @@ struct ScannerView: View {
     @State private var isDebugPanelExpanded = true
 
     var body: some View {
-        GeometryReader { proxy in
-            let isLandscape = proxy.size.width > proxy.size.height
+        ZStack {
+            CameraPreviewView(
+                session: viewModel.captureSession,
+                orientation: previewOrientation,
+                orientationRevision: previewOrientationRevision
+            )
+            .ignoresSafeArea()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            ZStack {
-                CameraPreviewView(
-                    session: viewModel.captureSession,
-                    orientation: previewOrientation,
-                    orientationRevision: previewOrientationRevision
-                )
-                .frame(width: proxy.size.width, height: proxy.size.height)
-                .ignoresSafeArea()
+            ArUcoOverlayView(
+                detections: viewModel.overlayMarkers,
+                frameResolution: viewModel.arucoFrameResolution ?? viewModel.frameResolution,
+                orientation: previewOrientation
+            )
+            .ignoresSafeArea()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                ArUcoOverlayView(
-                    detections: viewModel.overlayMarkers,
-                    frameResolution: viewModel.arucoFrameResolution ?? viewModel.frameResolution,
-                    orientation: previewOrientation
-                )
-                .frame(width: proxy.size.width, height: proxy.size.height)
-                .ignoresSafeArea()
+            VStack(spacing: 0) {
+                topControlBar
+                    .padding(.horizontal, 12)
+                    .padding(.top, 12)
 
-                VStack(spacing: 0) {
-                    topControlBar
-                        .padding(.horizontal, 12)
-                        .padding(.top, max(proxy.safeAreaInsets.top, 10))
+                Spacer(minLength: 12)
 
-                    Spacer(minLength: 12)
+                if isDebugPanelExpanded {
+                    HStack(alignment: .bottom) {
+                        Spacer(minLength: 0)
 
-                    if isDebugPanelExpanded {
-                        HStack(alignment: .bottom) {
-                            if isLandscape {
-                                Spacer(minLength: 0)
-                            }
-
-                            debugPanel(isLandscape: isLandscape)
-                                .frame(
-                                    width: isLandscape ? min(380, proxy.size.width * 0.42) : nil,
-                                    height: isLandscape ? min(proxy.size.height * 0.78, 420) : nil
-                                )
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.bottom, max(proxy.safeAreaInsets.bottom, 12))
+                        debugPanel(isLandscape: true)
+                            .frame(width: 380)
+                            .frame(maxHeight: 420)
                     }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
                 }
             }
-            .background(Color.black)
-            .ignoresSafeArea()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
         .ignoresSafeArea()
         .task {
             applyLaunchPreviewOrientation()

@@ -7,15 +7,14 @@ struct CameraPreviewView: UIViewRepresentable {
     let orientation: CameraPreviewOrientation
     let orientationRevision: Int
 
-    func makeUIView(context: Context) -> PreviewContainerView {
-        let view = PreviewContainerView()
-        view.previewLayer.videoGravity = .resizeAspectFill
+    func makeUIView(context: Context) -> PreviewView {
+        let view = PreviewView()
         view.previewLayer.session = session
         view.setOrientation(orientation)
         return view
     }
 
-    func updateUIView(_ uiView: PreviewContainerView, context: Context) {
+    func updateUIView(_ uiView: PreviewView, context: Context) {
         if uiView.previewLayer.session !== session {
             uiView.previewLayer.session = session
         }
@@ -25,7 +24,7 @@ struct CameraPreviewView: UIViewRepresentable {
     }
 }
 
-final class PreviewContainerView: UIView {
+final class PreviewView: UIView {
     private var desiredOrientation: CameraPreviewOrientation = .landscapeRight
 
     override class var layerClass: AnyClass {
@@ -33,16 +32,23 @@ final class PreviewContainerView: UIView {
     }
 
     var previewLayer: AVCaptureVideoPreviewLayer {
-        guard let layer = layer as? AVCaptureVideoPreviewLayer else {
-            fatalError("Expected AVCaptureVideoPreviewLayer")
-        }
+        layer as! AVCaptureVideoPreviewLayer
+    }
 
-        return layer
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        configurePreviewLayer()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configurePreviewLayer()
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         previewLayer.frame = bounds
+        previewLayer.videoGravity = .resizeAspectFill
         applyDesiredOrientation()
     }
 
@@ -64,5 +70,10 @@ final class PreviewContainerView: UIView {
         }
 
         connection.videoOrientation = desiredOrientation.captureVideoOrientation
+    }
+
+    private func configurePreviewLayer() {
+        backgroundColor = .black
+        previewLayer.videoGravity = .resizeAspectFill
     }
 }
