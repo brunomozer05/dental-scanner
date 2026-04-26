@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreGraphics
 import CoreMedia
 import CoreVideo
 import Foundation
@@ -87,6 +88,7 @@ final class CameraFrameService: NSObject {
             }
 
             self.session.startRunning()
+            self.applyStartupVideoZoom(to: self.activeDevice)
         }
     }
 
@@ -352,6 +354,24 @@ final class CameraFrameService: NSObject {
 
     private func isTorchSupported(on device: AVCaptureDevice) -> Bool {
         device.hasTorch && device.isTorchModeSupported(.on) && device.isTorchModeSupported(.off)
+    }
+
+    private func applyStartupVideoZoom(to device: AVCaptureDevice?) {
+        guard let device else { return }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try device.lockForConfiguration()
+                defer { device.unlockForConfiguration() }
+
+                let desiredZoom: CGFloat = 1.2
+                let maxZoom = device.activeFormat.videoMaxZoomFactor
+
+                device.videoZoomFactor = min(desiredZoom, maxZoom)
+            } catch {
+                print("Erro ao aplicar zoom: \(error)")
+            }
+        }
     }
 
     private func buildFrame(from sampleBuffer: CMSampleBuffer, connection: AVCaptureConnection) -> CameraFrame? {
