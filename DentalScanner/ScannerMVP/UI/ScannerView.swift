@@ -9,15 +9,9 @@ struct ScannerView: View {
     @State private var isDebugPanelExpanded = true
 
     var body: some View {
-        let screenBounds = UIScreen.main.bounds
-        let screenSize = CGSize(
-            width: max(screenBounds.width, screenBounds.height),
-            height: min(screenBounds.width, screenBounds.height)
-        )
-
         ZStack {
             Color.black
-                .ignoresSafeArea()
+                .ignoresSafeArea(.all)
                 .allowsHitTesting(false)
 
             CameraPreviewView(
@@ -25,9 +19,7 @@ struct ScannerView: View {
                 orientation: previewOrientation,
                 orientationRevision: previewOrientationRevision
             )
-            .frame(width: screenSize.width, height: screenSize.height)
-            .ignoresSafeArea()
-            .scaleEffect(1.2)
+            .ignoresSafeArea(.all)
             .allowsHitTesting(false)
             .zIndex(0)
 
@@ -36,9 +28,7 @@ struct ScannerView: View {
                 frameResolution: viewModel.arucoFrameResolution ?? viewModel.frameResolution,
                 orientation: previewOrientation
             )
-            .frame(width: screenSize.width, height: screenSize.height)
-            .ignoresSafeArea()
-            .scaleEffect(1.2)
+            .ignoresSafeArea(.all)
             .allowsHitTesting(false)
             .zIndex(1)
 
@@ -66,9 +56,8 @@ struct ScannerView: View {
                 .zIndex(2)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
-        .ignoresSafeArea()
+        .ignoresSafeArea(.all)
         .task {
             applyLaunchPreviewOrientation()
             await viewModel.startCamera()

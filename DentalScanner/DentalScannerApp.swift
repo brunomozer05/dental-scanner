@@ -5,7 +5,7 @@ struct DentalScannerApp: App {
     var body: some Scene {
         WindowGroup {
             ScannerView()
-                .ignoresSafeArea()
+                .ignoresSafeArea(.all)
         }
     }
 }
