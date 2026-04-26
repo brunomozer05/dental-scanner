@@ -19,6 +19,7 @@ struct ScannerView: View {
                 orientation: previewOrientation,
                 orientationRevision: previewOrientationRevision
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea(.all)
             .allowsHitTesting(false)
             .zIndex(0)
@@ -28,6 +29,7 @@ struct ScannerView: View {
                 frameResolution: viewModel.arucoFrameResolution ?? viewModel.frameResolution,
                 orientation: previewOrientation
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea(.all)
             .allowsHitTesting(false)
             .zIndex(1)
@@ -56,6 +58,7 @@ struct ScannerView: View {
                 .zIndex(2)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
         .ignoresSafeArea(.all)
         .task {
