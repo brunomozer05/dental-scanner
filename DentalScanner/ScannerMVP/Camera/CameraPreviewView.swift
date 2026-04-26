@@ -49,7 +49,15 @@ final class PreviewView: UIView {
         super.layoutSubviews()
         previewLayer.frame = bounds
         previewLayer.videoGravity = .resizeAspectFill
-        applyDesiredOrientation()
+
+        if let connection = previewLayer.connection {
+            if connection.isVideoOrientationSupported {
+                connection.videoOrientation = .landscapeRight
+            }
+        }
+
+        previewLayer.setNeedsLayout()
+        previewLayer.layoutIfNeeded()
     }
 
     override func didMoveToWindow() {

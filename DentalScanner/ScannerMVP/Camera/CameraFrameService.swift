@@ -6,7 +6,7 @@ import simd
 
 final class CameraFrameService: NSObject {
     struct Configuration {
-        var sessionPreset: AVCaptureSession.Preset = .hd1280x720
+        var sessionPreset: AVCaptureSession.Preset = .high
         var preferredFrameRate: Int32 = 30
         var videoOrientation: AVCaptureVideoOrientation = .portrait
         var alwaysDiscardsLateFrames: Bool = true
