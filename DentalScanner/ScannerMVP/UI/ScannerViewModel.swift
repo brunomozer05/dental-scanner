@@ -10,7 +10,11 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private enum PoseConfiguration {
-        static let markerSizeMillimeters: Double = 8.0
+        static let defaultMarkerSizeMillimeters: Double = 6.9
+        static let minimumMarkerSizeMillimeters: Double = 1.0
+        static let maximumMarkerSizeMillimeters: Double = 50.0
+        static let markerSizeStepMillimeters: Double = 0.1
+        static let isMarkerSizeDebugEditingEnabled = true
     }
 
     private enum ImplantConfiguration {
@@ -71,7 +75,7 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var poseDistanceMm: Double?
     @Published private(set) var poseReprojectionError: Double?
     @Published private(set) var poseErrorMessage: String?
-    @Published private(set) var poseMarkerSizeMillimeters: Double = PoseConfiguration.markerSizeMillimeters
+    @Published private(set) var poseMarkerSizeMillimeters: Double = PoseConfiguration.defaultMarkerSizeMillimeters
     @Published private(set) var implantPoseResults: [ImplantPose] = []
     @Published private(set) var implantPoseResult: ImplantPose?
     @Published private(set) var implantOffsetDescription: String = ScannerViewModel.formatImplantOffset(
@@ -98,6 +102,18 @@ final class ScannerViewModel: ObservableObject {
 
     var captureSession: AVCaptureSession {
         cameraService.captureSession
+    }
+
+    var markerSizeDebugRange: ClosedRange<Double> {
+        PoseConfiguration.minimumMarkerSizeMillimeters...PoseConfiguration.maximumMarkerSizeMillimeters
+    }
+
+    var markerSizeDebugStepMillimeters: Double {
+        PoseConfiguration.markerSizeStepMillimeters
+    }
+
+    var isMarkerSizeDebugEditingEnabled: Bool {
+        PoseConfiguration.isMarkerSizeDebugEditingEnabled
     }
 
     init(
@@ -211,6 +227,18 @@ final class ScannerViewModel: ObservableObject {
         selectedImplantDistanceMm = selectedImplantDistance(in: implantPoseResults)
     }
 
+    @MainActor
+    func setMarkerSizeMillimeters(_ markerSizeMillimeters: Double) {
+        guard markerSizeMillimeters.isFinite else {
+            return
+        }
+
+        poseMarkerSizeMillimeters = min(
+            max(markerSizeMillimeters, PoseConfiguration.minimumMarkerSizeMillimeters),
+            PoseConfiguration.maximumMarkerSizeMillimeters
+        )
+    }
+
     private func bindCameraCallbacks() {
         cameraService.onFrame = { [weak self] frame in
             self?.handleFrame(frame)
@@ -230,7 +258,12 @@ final class ScannerViewModel: ObservableObject {
             from: arucoMetrics.detections,
             timestamp: metrics.lastFrameTimestamp
         )
-        let poseMetrics = estimatePose(from: arucoMetrics.detections, in: frame)
+        let markerSizeMillimeters = poseMarkerSizeMillimeters
+        let poseMetrics = estimatePose(
+            from: arucoMetrics.detections,
+            in: frame,
+            markerSizeMillimeters: markerSizeMillimeters
+        )
         // A geometria do implante usa a pose bruta do frame, nao a pose estabilizada da UI.
         let implantMetrics = estimateImplantPoses(from: poseMetrics.rawPoseResults)
 
@@ -360,7 +393,11 @@ final class ScannerViewModel: ObservableObject {
         }
     }
 
-    private func estimatePose(from detections: [ArUcoDetectionResult], in frame: CameraFrame) -> PoseMetrics {
+    private func estimatePose(
+        from detections: [ArUcoDetectionResult],
+        in frame: CameraFrame,
+        markerSizeMillimeters: Double
+    ) -> PoseMetrics {
         guard !detections.isEmpty else {
             resetPoseFilter()
             return PoseMetrics(
@@ -376,7 +413,7 @@ final class ScannerViewModel: ObservableObject {
             let poses = try poseEstimator.estimatePoses(
                 for: detections,
                 in: frame,
-                markerSizeMillimeters: PoseConfiguration.markerSizeMillimeters
+                markerSizeMillimeters: markerSizeMillimeters
             )
             let sortedPoses = poses.sorted { $0.markerId < $1.markerId }
             guard let pose = sortedPoses.first else {

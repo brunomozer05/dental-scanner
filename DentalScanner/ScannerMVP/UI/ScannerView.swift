@@ -47,6 +47,7 @@ struct ScannerView: View {
                     metricRow(title: "IDs detectados", value: formattedDetectedMarkerIds)
                     metricRow(title: "Marcador pose", value: formattedPoseMarkerId)
                     metricRow(title: "Tamanho marcador", value: String(format: "%.1f mm", viewModel.poseMarkerSizeMillimeters))
+                    markerSizeDebugControl
                     metricRow(title: "Distancia bruta", value: formattedRawPoseDistance)
                     metricRow(title: "Distancia estavel", value: formattedStablePoseDistance)
                     metricRow(title: "Erro reprojecao", value: formattedPoseReprojectionError)
@@ -155,6 +156,13 @@ struct ScannerView: View {
         }
 
         return "\(poseMarkerId)"
+    }
+
+    private var markerSizeBinding: Binding<Double> {
+        Binding(
+            get: { viewModel.poseMarkerSizeMillimeters },
+            set: { viewModel.setMarkerSizeMillimeters($0) }
+        )
     }
 
     private var formattedRawPoseDistance: String {
@@ -364,6 +372,30 @@ struct ScannerView: View {
                     .padding(.vertical, 2)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var markerSizeDebugControl: some View {
+        if viewModel.isMarkerSizeDebugEditingEnabled {
+            Stepper(
+                value: markerSizeBinding,
+                in: viewModel.markerSizeDebugRange,
+                step: viewModel.markerSizeDebugStepMillimeters
+            ) {
+                HStack(alignment: .center) {
+                    Text("Tamanho marcador debug")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.8)
+
+                    Spacer()
+
+                    Text(String(format: "%.1f mm", viewModel.poseMarkerSizeMillimeters))
+                        .monospacedDigit()
+                }
+            }
+            .font(.body)
         }
     }
 
