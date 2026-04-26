@@ -12,6 +12,7 @@ struct ScannerView: View {
         ZStack {
             Color.black
                 .ignoresSafeArea()
+                .allowsHitTesting(false)
 
             CameraPreviewView(
                 session: viewModel.captureSession,
@@ -20,6 +21,8 @@ struct ScannerView: View {
             )
             .ignoresSafeArea()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .allowsHitTesting(false)
+            .zIndex(0)
 
             ArUcoOverlayView(
                 detections: viewModel.overlayMarkers,
@@ -28,6 +31,8 @@ struct ScannerView: View {
             )
             .ignoresSafeArea()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .allowsHitTesting(false)
+            .zIndex(1)
 
             VStack {
                 topControlBar
@@ -36,6 +41,7 @@ struct ScannerView: View {
 
                 Spacer()
             }
+            .zIndex(3)
 
             if isDebugPanelExpanded {
                 VStack {
@@ -45,11 +51,11 @@ struct ScannerView: View {
                         Spacer()
 
                         debugPanel(isLandscape: true)
-                            .frame(width: 380)
-                            .frame(maxHeight: 420)
+                            .frame(width: 320)
                             .padding(12)
                     }
                 }
+                .zIndex(2)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -143,7 +149,7 @@ struct ScannerView: View {
                 }
                 .padding(.trailing, 2)
             }
-            .frame(maxHeight: isLandscape ? .infinity : 360)
+            .frame(maxHeight: isLandscape ? 260 : 360)
         }
         .padding(12)
         .background(.ultraThinMaterial)
