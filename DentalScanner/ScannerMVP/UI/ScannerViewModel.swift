@@ -13,6 +13,13 @@ final class ScannerViewModel: ObservableObject {
         static let markerSizeMillimeters: Double = 8.0
     }
 
+    private enum ImplantConfiguration {
+        static let transform = MarkerToImplantTransform(
+            translationMm: SIMD3<Double>(0.0, 0.0, 0.0),
+            rotationVector: SIMD3<Double>(0.0, 0.0, 0.0)
+        )
+    }
+
     private enum PoseFilterConfiguration {
         static let smoothingAlpha: Double = 0.35
         static let outlierDistanceDeltaMm: Double = 80.0
@@ -64,6 +71,10 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var poseReprojectionError: Double?
     @Published private(set) var poseErrorMessage: String?
     @Published private(set) var poseMarkerSizeMillimeters: Double = PoseConfiguration.markerSizeMillimeters
+    @Published private(set) var implantPoseResult: ImplantPose?
+    @Published private(set) var implantOffsetDescription: String = ScannerViewModel.formatImplantOffset(
+        ImplantConfiguration.transform
+    )
     @Published private(set) var isTorchAvailable: Bool = false
     @Published private(set) var isTorchEnabled: Bool = false
     @Published private(set) var errorMessage: String?
@@ -200,6 +211,8 @@ final class ScannerViewModel: ObservableObject {
             timestamp: metrics.lastFrameTimestamp
         )
         let poseMetrics = estimatePose(from: arucoMetrics.detections, in: frame)
+        // A geometria do implante usa a pose bruta do frame, nao a pose estabilizada da UI.
+        let implantMetrics = estimateImplantPose(from: poseMetrics.rawPoseResult)
 
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -231,6 +244,7 @@ final class ScannerViewModel: ObservableObject {
             self.poseDistanceMm = poseMetrics.stablePoseResult?.distanceMm
             self.poseReprojectionError = poseMetrics.rawPoseResult?.reprojectionError
             self.poseErrorMessage = poseMetrics.errorMessage
+            self.implantPoseResult = implantMetrics.implantPoseResult
         }
     }
 
@@ -366,6 +380,19 @@ final class ScannerViewModel: ObservableObject {
                 errorMessage: error.localizedDescription
             )
         }
+    }
+
+    private func estimateImplantPose(from rawPoseResult: PoseResult?) -> ImplantMetrics {
+        guard let rawPoseResult else {
+            return ImplantMetrics(implantPoseResult: nil)
+        }
+
+        return ImplantMetrics(
+            implantPoseResult: MarkerToImplantTransform.applyOffset(
+                tagPose: rawPoseResult,
+                offset: ImplantConfiguration.transform
+            )
+        )
     }
 
     private func stabilizePose(_ rawPose: PoseResult) -> (pose: PoseResult, stabilityStatus: String) {
@@ -527,6 +554,22 @@ final class ScannerViewModel: ObservableObject {
         let stablePoseResult: PoseResult?
         let stabilityStatus: String
         let errorMessage: String?
+    }
+
+    private struct ImplantMetrics {
+        let implantPoseResult: ImplantPose?
+    }
+
+    private static func formatImplantOffset(_ offset: MarkerToImplantTransform) -> String {
+        String(
+            format: "t(%.1f, %.1f, %.1f) mm, r(%.2f, %.2f, %.2f) rad",
+            offset.translationMm.x,
+            offset.translationMm.y,
+            offset.translationMm.z,
+            offset.rotationVector.x,
+            offset.rotationVector.y,
+            offset.rotationVector.z
+        )
     }
 
     private func makeErrorMessage(from error: Error) -> String {

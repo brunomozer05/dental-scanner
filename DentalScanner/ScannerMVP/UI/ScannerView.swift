@@ -50,6 +50,9 @@ struct ScannerView: View {
                     metricRow(title: "Distancia estavel", value: formattedStablePoseDistance)
                     metricRow(title: "Erro reprojecao", value: formattedPoseReprojectionError)
                     metricRow(title: "Status pose", value: viewModel.poseStabilityStatus)
+                    metricRow(title: "Offset implante", value: viewModel.implantOffsetDescription)
+                    metricRow(title: "Implante x/y/z", value: formattedImplantPosition)
+                    metricRow(title: "Distancia implante", value: formattedImplantDistance)
                     metricRow(title: "Candidatos rejeitados", value: formattedRejectedCandidates)
                     metricRow(title: "Ultimo erro detector", value: formattedArucoErrorMessage)
                     metricRow(title: "Ultimo erro pose", value: formattedPoseErrorMessage)
@@ -170,6 +173,27 @@ struct ScannerView: View {
         }
 
         return String(format: "%.2f px", poseReprojectionError)
+    }
+
+    private var formattedImplantPosition: String {
+        guard let translationVector = viewModel.implantPoseResult?.translationVector else {
+            return "-"
+        }
+
+        return String(
+            format: "x %.1f, y %.1f, z %.1f mm",
+            translationVector.x,
+            translationVector.y,
+            translationVector.z
+        )
+    }
+
+    private var formattedImplantDistance: String {
+        guard let distanceMm = viewModel.implantPoseResult?.distanceMm else {
+            return "-"
+        }
+
+        return String(format: "%.1f mm", distanceMm)
     }
 
     private var formattedPoseErrorMessage: String {
