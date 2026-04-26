@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ScannerView: View {
     @StateObject private var viewModel = ScannerViewModel()
+    @State private var scaleValidationRealDistanceText = ""
 
     var body: some View {
         ScrollView {
@@ -56,6 +57,7 @@ struct ScannerView: View {
                     implantComparisonControls
                     metricRow(title: "Implantes selecionados", value: formattedSelectedImplantMarkers)
                     metricRow(title: "Distancia entre implantes", value: formattedSelectedImplantDistance)
+                    scaleValidationSection
                     metricRow(title: "Candidatos rejeitados", value: formattedRejectedCandidates)
                     metricRow(title: "Ultimo erro detector", value: formattedArucoErrorMessage)
                     metricRow(title: "Ultimo erro pose", value: formattedPoseErrorMessage)
@@ -219,6 +221,92 @@ struct ScannerView: View {
         return String(format: "%.1f mm", selectedImplantDistanceMm)
     }
 
+    private var parsedScaleValidationRealDistanceMm: Double? {
+        let normalizedText = scaleValidationRealDistanceText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: ",", with: ".")
+
+        guard !normalizedText.isEmpty,
+              let distanceMm = Double(normalizedText),
+              distanceMm > 0
+        else {
+            return nil
+        }
+
+        return distanceMm
+    }
+
+    private var formattedScaleValidationRealDistance: String {
+        if scaleValidationRealDistanceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "-"
+        }
+
+        guard let distanceMm = parsedScaleValidationRealDistanceMm else {
+            return "Valor invalido"
+        }
+
+        return String(format: "%.2f mm", distanceMm)
+    }
+
+    private var formattedScaleValidationAppDistance: String {
+        formattedSelectedImplantDistance
+    }
+
+    private var formattedScaleValidationAbsoluteError: String {
+        guard let errorMm = scaleValidationAbsoluteErrorMm else {
+            return "-"
+        }
+
+        return String(format: "%.2f mm", errorMm)
+    }
+
+    private var formattedScaleValidationPercentError: String {
+        guard let percentError = scaleValidationPercentError else {
+            return "-"
+        }
+
+        return String(format: "%.2f%%", percentError)
+    }
+
+    private var formattedScaleValidationCorrectionFactor: String {
+        guard let correctionFactor = scaleValidationCorrectionFactor else {
+            return "-"
+        }
+
+        return String(format: "%.4fx", correctionFactor)
+    }
+
+    private var scaleValidationAbsoluteErrorMm: Double? {
+        guard let realDistanceMm = parsedScaleValidationRealDistanceMm,
+              let appDistanceMm = viewModel.selectedImplantDistanceMm
+        else {
+            return nil
+        }
+
+        return abs(appDistanceMm - realDistanceMm)
+    }
+
+    private var scaleValidationPercentError: Double? {
+        guard let realDistanceMm = parsedScaleValidationRealDistanceMm,
+              let absoluteErrorMm = scaleValidationAbsoluteErrorMm
+        else {
+            return nil
+        }
+
+        return absoluteErrorMm / realDistanceMm * 100.0
+    }
+
+    private var scaleValidationCorrectionFactor: Double? {
+        guard let realDistanceMm = parsedScaleValidationRealDistanceMm,
+              let appDistanceMm = viewModel.selectedImplantDistanceMm,
+              appDistanceMm > 0
+        else {
+            return nil
+        }
+
+        return realDistanceMm / appDistanceMm
+    }
+
     private var formattedPoseErrorMessage: String {
         viewModel.poseErrorMessage ?? "Nenhum"
     }
@@ -243,6 +331,30 @@ struct ScannerView: View {
                     .padding(.vertical, 2)
                 }
             }
+        }
+    }
+
+    private var scaleValidationSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Validacao de escala")
+                .font(.headline)
+
+            HStack(alignment: .center, spacing: 12) {
+                Text("Distancia real")
+                    .foregroundStyle(.secondary)
+
+                TextField("mm", text: $scaleValidationRealDistanceText)
+                    .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+                    .multilineTextAlignment(.trailing)
+                    .monospacedDigit()
+            }
+
+            metricRow(title: "Real informado", value: formattedScaleValidationRealDistance)
+            metricRow(title: "Medida app", value: formattedScaleValidationAppDistance)
+            metricRow(title: "Erro absoluto", value: formattedScaleValidationAbsoluteError)
+            metricRow(title: "Erro percentual", value: formattedScaleValidationPercentError)
+            metricRow(title: "Fator sugerido", value: formattedScaleValidationCorrectionFactor)
         }
     }
 
