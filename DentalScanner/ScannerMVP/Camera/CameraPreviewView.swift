@@ -9,14 +9,15 @@ struct CameraPreviewView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
-        view.previewLayer.session = session
+        view.previewLayer?.session = session
         view.setOrientation(orientation)
         return view
     }
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
-        if uiView.previewLayer.session !== session {
-            uiView.previewLayer.session = session
+        if let previewLayer = uiView.previewLayer,
+           previewLayer.session !== session {
+            previewLayer.session = session
         }
 
         _ = orientationRevision
@@ -25,14 +26,12 @@ struct CameraPreviewView: UIViewRepresentable {
 }
 
 final class PreviewView: UIView {
-    private var desiredOrientation: CameraPreviewOrientation = .landscapeRight
-
     override class var layerClass: AnyClass {
         AVCaptureVideoPreviewLayer.self
     }
 
-    var previewLayer: AVCaptureVideoPreviewLayer {
-        layer as! AVCaptureVideoPreviewLayer
+    var previewLayer: AVCaptureVideoPreviewLayer? {
+        layer as? AVCaptureVideoPreviewLayer
     }
 
     override init(frame: CGRect) {
@@ -47,43 +46,22 @@ final class PreviewView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        previewLayer.frame = bounds
-        previewLayer.videoGravity = .resizeAspectFill
-
-        if let connection = previewLayer.connection {
-            if connection.isVideoOrientationSupported {
-                connection.videoOrientation = .landscapeRight
-            }
-        }
-
-        previewLayer.setNeedsLayout()
-        previewLayer.layoutIfNeeded()
+        previewLayer?.frame = bounds
+        previewLayer?.videoGravity = .resizeAspectFill
     }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        applyDesiredOrientation()
     }
 
     func setOrientation(_ orientation: CameraPreviewOrientation) {
-        desiredOrientation = orientation
-        applyDesiredOrientation()
-    }
-
-    private func applyDesiredOrientation() {
-        guard let connection = previewLayer.connection,
-              connection.isVideoOrientationSupported
-        else {
-            return
-        }
-
-        connection.videoOrientation = desiredOrientation.captureVideoOrientation
+        _ = orientation
     }
 
     private func configurePreviewLayer() {
         backgroundColor = .black
         clipsToBounds = true
         contentMode = .scaleAspectFill
-        previewLayer.videoGravity = .resizeAspectFill
+        previewLayer?.videoGravity = .resizeAspectFill
     }
 }
