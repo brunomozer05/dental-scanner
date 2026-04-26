@@ -3,6 +3,7 @@ import SwiftUI
 struct ArUcoOverlayView: View {
     let detections: [ArUcoDetectionResult]
     let frameResolution: ScannerViewModel.FrameResolution?
+    let orientation: CameraPreviewOrientation
 
     var body: some View {
         GeometryReader { proxy in
@@ -71,18 +72,25 @@ struct ArUcoOverlayView: View {
             return nil
         }
 
-        let frameWidth = CGFloat(frameResolution.width)
-        let frameHeight = CGFloat(frameResolution.height)
-        let scale = max(previewSize.width / frameWidth, previewSize.height / frameHeight)
-        let scaledWidth = frameWidth * scale
-        let scaledHeight = frameHeight * scale
+        let rawFrameWidth = CGFloat(frameResolution.width)
+        let rawFrameHeight = CGFloat(frameResolution.height)
+        let orientedFrameSize = orientation.orientedFrameSize(width: rawFrameWidth, height: rawFrameHeight)
+        let scale = max(previewSize.width / orientedFrameSize.width, previewSize.height / orientedFrameSize.height)
+        let scaledWidth = orientedFrameSize.width * scale
+        let scaledHeight = orientedFrameSize.height * scale
         let xOffset = (previewSize.width - scaledWidth) / 2
         let yOffset = (previewSize.height - scaledHeight) / 2
 
         return { point in
+            let orientedPoint = orientation.orientedPoint(
+                point,
+                frameWidth: rawFrameWidth,
+                frameHeight: rawFrameHeight
+            )
+
             CGPoint(
-                x: point.x * scale + xOffset,
-                y: point.y * scale + yOffset
+                x: orientedPoint.x * scale + xOffset,
+                y: orientedPoint.y * scale + yOffset
             )
         }
     }

@@ -1,91 +1,252 @@
 import SwiftUI
+import UIKit
 
 struct ScannerView: View {
     @StateObject private var viewModel = ScannerViewModel()
     @State private var scaleValidationRealDistanceText = ""
+    @State private var previewOrientation: CameraPreviewOrientation = .portrait
+    @State private var isDebugPanelExpanded = true
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                ZStack {
-                    CameraPreviewView(session: viewModel.captureSession)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    ArUcoOverlayView(
-                        detections: viewModel.overlayMarkers,
-                        frameResolution: viewModel.arucoFrameResolution ?? viewModel.frameResolution
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 360)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(alignment: .topTrailing) {
-                    torchButton
-                        .padding(12)
-                }
-                .overlay(alignment: .bottomLeading) {
-                    cameraStateBadge
-                        .padding(12)
-                }
+        GeometryReader { proxy in
+            let isLandscape = proxy.size.width > proxy.size.height
 
-                VStack(alignment: .leading, spacing: 12) {
-                    metricRow(title: "Estado da camera", value: formattedCameraState)
-                    metricRow(title: "Lanterna", value: formattedTorchState)
-                    metricRow(title: "Frames recebidos", value: "\(viewModel.totalFramesReceived)")
-                    metricRow(title: "FPS estimado", value: String(format: "%.1f", viewModel.estimatedFPS))
-                    metricRow(title: "Resolucao", value: formattedResolution)
-                    metricRow(title: "Matriz intrinseca", value: viewModel.isIntrinsicMatrixAvailable ? "Disponivel" : "Indisponivel")
-                    metricRow(title: "OpenCV disponivel", value: viewModel.isOpenCVAvailable ? "true" : "false")
-                    metricRow(title: "Dicionario ArUco", value: viewModel.arucoDictionaryName)
-                    metricRow(title: "Frame no detector", value: viewModel.hasFrameReachedArucoDetector ? "true" : "false")
-                    metricRow(title: "Chamadas detector", value: "\(viewModel.arucoDetectionCallCount)")
-                    metricRow(title: "Frame OpenCV", value: formattedArucoFrameResolution)
-                    metricRow(title: "Formato OpenCV", value: viewModel.arucoFramePixelFormat)
-                    metricRow(title: "Bytes por linha", value: formattedArucoBytesPerRow)
-                    metricRow(title: "Conversao OpenCV", value: viewModel.arucoPreprocessingDescription)
-                    metricRow(title: "Marcadores detectados", value: "\(viewModel.detectedMarkerCount)")
-                    metricRow(title: "IDs detectados", value: formattedDetectedMarkerIds)
-                    metricRow(title: "Marcador pose", value: formattedPoseMarkerId)
-                    metricRow(title: "Tamanho marcador", value: String(format: "%.1f mm", viewModel.poseMarkerSizeMillimeters))
-                    markerSizeDebugControl
-                    metricRow(title: "Distancia bruta", value: formattedRawPoseDistance)
-                    metricRow(title: "Distancia estavel", value: formattedStablePoseDistance)
-                    metricRow(title: "Erro reprojecao", value: formattedPoseReprojectionError)
-                    metricRow(title: "Status pose", value: viewModel.poseStabilityStatus)
-                    metricRow(title: "Offset implante", value: viewModel.implantOffsetDescription)
-                    metricRow(title: "Implantes x/y/z", value: formattedImplantPositions)
-                    metricRow(title: "Distancia implante", value: formattedImplantDistance)
-                    implantComparisonControls
-                    metricRow(title: "Implantes selecionados", value: formattedSelectedImplantMarkers)
-                    metricRow(title: "Distancia tag-tag", value: formattedSelectedTagDistance)
-                    metricRow(title: "Distancia implante-implante", value: formattedSelectedImplantDistance)
-                    scaleValidationSection
-                    stlExportSection
-                    metricRow(title: "Candidatos rejeitados", value: formattedRejectedCandidates)
-                    metricRow(title: "Ultimo erro detector", value: formattedArucoErrorMessage)
-                    metricRow(title: "Ultimo erro pose", value: formattedPoseErrorMessage)
+            ZStack {
+                CameraPreviewView(
+                    session: viewModel.captureSession,
+                    orientation: previewOrientation
+                )
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .ignoresSafeArea()
 
-                    if let lastFrameTimestamp = viewModel.lastFrameTimestamp {
-                        metricRow(title: "Ultimo timestamp", value: String(format: "%.3f s", lastFrameTimestamp))
-                    }
+                ArUcoOverlayView(
+                    detections: viewModel.overlayMarkers,
+                    frameResolution: viewModel.arucoFrameResolution ?? viewModel.frameResolution,
+                    orientation: previewOrientation
+                )
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .ignoresSafeArea()
 
-                    if let errorMessage = viewModel.errorMessage {
-                        Text(errorMessage)
-                            .font(.footnote)
-                            .foregroundStyle(.red)
+                VStack(spacing: 0) {
+                    topControlBar
+                        .padding(.horizontal, 12)
+                        .padding(.top, max(proxy.safeAreaInsets.top, 10))
+
+                    Spacer(minLength: 12)
+
+                    if isDebugPanelExpanded {
+                        HStack(alignment: .bottom) {
+                            if isLandscape {
+                                Spacer(minLength: 0)
+                            }
+
+                            debugPanel(isLandscape: isLandscape)
+                                .frame(
+                                    width: isLandscape ? min(380, proxy.size.width * 0.42) : nil,
+                                    height: isLandscape ? min(proxy.size.height * 0.78, 420) : nil
+                                )
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, max(proxy.safeAreaInsets.bottom, 12))
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(20)
+            .background(Color.black)
+            .ignoresSafeArea()
         }
-        .background(Color(.systemBackground))
         .task {
             await viewModel.startCamera()
         }
+        .onAppear {
+            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+            updatePreviewOrientation()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+            updatePreviewOrientation()
+        }
         .onDisappear {
             viewModel.stopCamera()
+            UIDevice.current.endGeneratingDeviceOrientationNotifications()
         }
+    }
+
+    private var topControlBar: some View {
+        HStack(spacing: 8) {
+            statusChip(
+                title: "OpenCV",
+                value: viewModel.isOpenCVAvailable ? "on" : "off",
+                isActive: viewModel.isOpenCVAvailable
+            )
+
+            statusChip(
+                title: "Tags",
+                value: "\(viewModel.detectedMarkerCount)",
+                isActive: viewModel.detectedMarkerCount > 0
+            )
+
+            statusChip(
+                title: "Pose",
+                value: viewModel.rawPoseResult == nil ? "-" : formattedRawPoseDistance,
+                isActive: viewModel.rawPoseResult != nil
+            )
+
+            Spacer(minLength: 4)
+
+            compactTorchButton
+            compactExportButton
+            debugPanelToggleButton
+        }
+        .padding(8)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func debugPanel(isLandscape: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Debug")
+                    .font(.headline)
+
+                Spacer()
+
+                Text(formattedCameraState)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            ScrollView(showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 10) {
+                    debugSummarySection
+                    markerSizeDebugControl
+                    poseDebugSection
+                    implantComparisonControls
+                    scaleValidationSection
+                    stlExportSection
+                    errorDebugSection
+                }
+                .padding(.trailing, 2)
+            }
+            .frame(maxHeight: isLandscape ? .infinity : 360)
+        }
+        .padding(12)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var debugSummarySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            metricRow(title: "Lanterna", value: formattedTorchState)
+            metricRow(title: "FPS", value: String(format: "%.1f", viewModel.estimatedFPS))
+            metricRow(title: "Resolucao", value: formattedResolution)
+            metricRow(title: "Intrinseca", value: viewModel.isIntrinsicMatrixAvailable ? "Disponivel" : "Indisponivel")
+            metricRow(title: "IDs", value: formattedDetectedMarkerIds)
+            metricRow(title: "Marker size", value: String(format: "%.1f mm", viewModel.poseMarkerSizeMillimeters))
+        }
+    }
+
+    private var poseDebugSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Pose")
+                .font(.subheadline.weight(.semibold))
+
+            metricRow(title: "Marcador", value: formattedPoseMarkerId)
+            metricRow(title: "Distancia bruta", value: formattedRawPoseDistance)
+            metricRow(title: "Distancia estavel", value: formattedStablePoseDistance)
+            metricRow(title: "Erro reproj.", value: formattedPoseReprojectionError)
+            metricRow(title: "Status", value: viewModel.poseStabilityStatus)
+            metricRow(title: "Implante", value: formattedImplantDistance)
+            metricRow(title: "Implantes x/y/z", value: formattedImplantPositions)
+        }
+    }
+
+    private var errorDebugSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            metricRow(title: "Erro detector", value: formattedArucoErrorMessage)
+            metricRow(title: "Erro pose", value: formattedPoseErrorMessage)
+
+            if let errorMessage = viewModel.errorMessage {
+                Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    private var debugPanelToggleButton: some View {
+        Button {
+            isDebugPanelExpanded.toggle()
+        } label: {
+            Image(systemName: isDebugPanelExpanded ? "info.circle.fill" : "info.circle")
+                .font(.body.weight(.semibold))
+                .frame(width: 34, height: 34)
+                .foregroundStyle(Color.primary)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var compactTorchButton: some View {
+        Button {
+            viewModel.toggleTorch()
+        } label: {
+            Image(systemName: viewModel.isTorchEnabled ? "flashlight.on.fill" : "flashlight.off.fill")
+                .font(.body.weight(.semibold))
+                .frame(width: 34, height: 34)
+                .foregroundStyle(viewModel.isTorchAvailable ? Color.primary : Color.secondary)
+        }
+        .buttonStyle(.plain)
+        .disabled(!viewModel.isTorchAvailable)
+        .opacity(viewModel.isTorchAvailable ? 1 : 0.65)
+    }
+
+    private var compactExportButton: some View {
+        Button {
+            viewModel.exportCurrentImplantsAsSTL()
+        } label: {
+            Image(systemName: "square.and.arrow.up")
+                .font(.body.weight(.semibold))
+                .frame(width: 34, height: 34)
+                .foregroundStyle(viewModel.implantPoseResults.isEmpty ? Color.secondary : Color.primary)
+        }
+        .buttonStyle(.plain)
+        .disabled(viewModel.implantPoseResults.isEmpty)
+        .opacity(viewModel.implantPoseResults.isEmpty ? 0.65 : 1)
+    }
+
+    private func statusChip(title: String, value: String, isActive: Bool) -> some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(isActive ? Color.green : Color.red)
+                .frame(width: 7, height: 7)
+
+            Text(title)
+                .foregroundStyle(.secondary)
+
+            Text(value)
+                .monospacedDigit()
+        }
+        .font(.caption.weight(.semibold))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color(.secondarySystemBackground).opacity(0.75))
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+
+    private func updatePreviewOrientation() {
+        let foregroundScene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+
+        if let interfaceOrientation = foregroundScene?.interfaceOrientation,
+           let orientation = CameraPreviewOrientation(interfaceOrientation: interfaceOrientation) {
+            previewOrientation = orientation
+            return
+        }
+
+        guard let orientation = CameraPreviewOrientation(deviceOrientation: UIDevice.current.orientation) else {
+            return
+        }
+
+        previewOrientation = orientation
     }
 
     private var formattedCameraState: String {
@@ -546,7 +707,7 @@ struct ScannerView: View {
                 .layoutPriority(1)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .font(.body)
+        .font(.caption)
     }
 }
 
