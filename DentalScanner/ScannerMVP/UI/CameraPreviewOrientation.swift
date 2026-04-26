@@ -15,9 +15,9 @@ enum CameraPreviewOrientation: Equatable {
         case .portraitUpsideDown:
             self = .portraitUpsideDown
         case .landscapeLeft:
-            self = .landscapeRight
-        case .landscapeRight:
             self = .landscapeLeft
+        case .landscapeRight:
+            self = .landscapeRight
         default:
             return nil
         }
@@ -48,28 +48,6 @@ enum CameraPreviewOrientation: Equatable {
             return .landscapeLeft
         case .landscapeRight:
             return .landscapeRight
-        }
-    }
-
-    func orientedFrameSize(width: CGFloat, height: CGFloat) -> CGSize {
-        switch self {
-        case .portrait, .portraitUpsideDown:
-            return CGSize(width: width, height: height)
-        case .landscapeLeft, .landscapeRight:
-            return CGSize(width: height, height: width)
-        }
-    }
-
-    func orientedPoint(_ point: CGPoint, frameWidth: CGFloat, frameHeight: CGFloat) -> CGPoint {
-        switch self {
-        case .portrait:
-            return point
-        case .portraitUpsideDown:
-            return CGPoint(x: frameWidth - point.x, y: frameHeight - point.y)
-        case .landscapeLeft:
-            return CGPoint(x: point.y, y: frameWidth - point.x)
-        case .landscapeRight:
-            return CGPoint(x: frameHeight - point.y, y: point.x)
         }
     }
 }

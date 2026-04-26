@@ -74,24 +74,68 @@ struct ArUcoOverlayView: View {
 
         let rawFrameWidth = CGFloat(frameResolution.width)
         let rawFrameHeight = CGFloat(frameResolution.height)
-        let orientedFrameSize = orientation.orientedFrameSize(width: rawFrameWidth, height: rawFrameHeight)
-        let scale = max(previewSize.width / orientedFrameSize.width, previewSize.height / orientedFrameSize.height)
-        let scaledWidth = orientedFrameSize.width * scale
-        let scaledHeight = orientedFrameSize.height * scale
+        let projectionFrameSize = makeProjectionFrameSize(
+            rawFrameWidth: rawFrameWidth,
+            rawFrameHeight: rawFrameHeight
+        )
+        let scale = max(
+            previewSize.width / projectionFrameSize.width,
+            previewSize.height / projectionFrameSize.height
+        )
+        let scaledWidth = projectionFrameSize.width * scale
+        let scaledHeight = projectionFrameSize.height * scale
         let xOffset = (previewSize.width - scaledWidth) / 2
         let yOffset = (previewSize.height - scaledHeight) / 2
 
         return { point -> CGPoint in
-            let orientedPoint = orientation.orientedPoint(
+            let projectedPoint = orientedPoint(
                 point,
-                frameWidth: rawFrameWidth,
-                frameHeight: rawFrameHeight
+                rawFrameWidth: rawFrameWidth,
+                rawFrameHeight: rawFrameHeight
             )
 
             return CGPoint(
-                x: orientedPoint.x * scale + xOffset,
-                y: orientedPoint.y * scale + yOffset
+                x: projectedPoint.x * scale + xOffset,
+                y: projectedPoint.y * scale + yOffset
             )
+        }
+    }
+
+    private func makeProjectionFrameSize(rawFrameWidth: CGFloat, rawFrameHeight: CGFloat) -> CGSize {
+        if shouldRotateRawFrame(rawFrameWidth: rawFrameWidth, rawFrameHeight: rawFrameHeight) {
+            return CGSize(width: rawFrameHeight, height: rawFrameWidth)
+        }
+
+        return CGSize(width: rawFrameWidth, height: rawFrameHeight)
+    }
+
+    private func orientedPoint(
+        _ point: CGPoint,
+        rawFrameWidth: CGFloat,
+        rawFrameHeight: CGFloat
+    ) -> CGPoint {
+        guard shouldRotateRawFrame(rawFrameWidth: rawFrameWidth, rawFrameHeight: rawFrameHeight) else {
+            return point
+        }
+
+        switch orientation {
+        case .landscapeLeft:
+            return CGPoint(x: point.y, y: rawFrameWidth - point.x)
+        case .landscapeRight:
+            return CGPoint(x: rawFrameHeight - point.y, y: point.x)
+        case .portrait:
+            return point
+        case .portraitUpsideDown:
+            return CGPoint(x: rawFrameWidth - point.x, y: rawFrameHeight - point.y)
+        }
+    }
+
+    private func shouldRotateRawFrame(rawFrameWidth: CGFloat, rawFrameHeight: CGFloat) -> Bool {
+        switch orientation {
+        case .landscapeLeft, .landscapeRight:
+            return rawFrameHeight > rawFrameWidth
+        case .portrait, .portraitUpsideDown:
+            return rawFrameWidth > rawFrameHeight
         }
     }
 

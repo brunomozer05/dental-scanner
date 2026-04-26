@@ -245,6 +245,10 @@ final class ScannerViewModel: ObservableObject {
         )
     }
 
+    func setPreviewOrientation(_ orientation: CameraPreviewOrientation) {
+        cameraService.setVideoOrientation(orientation.captureVideoOrientation)
+    }
+
     @MainActor
     @discardableResult
     func exportCurrentImplantsAsSTL() -> URL? {

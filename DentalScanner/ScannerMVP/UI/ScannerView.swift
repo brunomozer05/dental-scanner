@@ -4,7 +4,7 @@ import UIKit
 struct ScannerView: View {
     @StateObject private var viewModel = ScannerViewModel()
     @State private var scaleValidationRealDistanceText = ""
-    @State private var previewOrientation: CameraPreviewOrientation = .portrait
+    @State private var previewOrientation: CameraPreviewOrientation = .landscapeRight
     @State private var isDebugPanelExpanded = true
 
     var body: some View {
@@ -54,6 +54,7 @@ struct ScannerView: View {
             .background(Color.black)
             .ignoresSafeArea()
         }
+        .ignoresSafeArea()
         .task {
             await viewModel.startCamera()
         }
@@ -237,16 +238,43 @@ struct ScannerView: View {
             .first { $0.activationState == .foregroundActive }
 
         if let interfaceOrientation = foregroundScene?.interfaceOrientation,
-           let orientation = CameraPreviewOrientation(interfaceOrientation: interfaceOrientation) {
-            previewOrientation = orientation
+           let orientation = landscapeOrientation(from: interfaceOrientation) {
+            applyPreviewOrientation(orientation)
             return
         }
 
-        guard let orientation = CameraPreviewOrientation(deviceOrientation: UIDevice.current.orientation) else {
-            return
+        if let orientation = landscapeOrientation(from: UIDevice.current.orientation) {
+            applyPreviewOrientation(orientation)
+        } else {
+            applyPreviewOrientation(.landscapeRight)
         }
+    }
 
+    private func applyPreviewOrientation(_ orientation: CameraPreviewOrientation) {
         previewOrientation = orientation
+        viewModel.setPreviewOrientation(orientation)
+    }
+
+    private func landscapeOrientation(from interfaceOrientation: UIInterfaceOrientation) -> CameraPreviewOrientation? {
+        switch interfaceOrientation {
+        case .landscapeLeft:
+            return .landscapeLeft
+        case .landscapeRight:
+            return .landscapeRight
+        default:
+            return nil
+        }
+    }
+
+    private func landscapeOrientation(from deviceOrientation: UIDeviceOrientation) -> CameraPreviewOrientation? {
+        switch deviceOrientation {
+        case .landscapeLeft:
+            return .landscapeLeft
+        case .landscapeRight:
+            return .landscapeRight
+        default:
+            return nil
+        }
     }
 
     private var formattedCameraState: String {
