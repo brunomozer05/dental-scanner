@@ -63,6 +63,7 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var arucoInputChannelCount: Int?
     @Published private(set) var arucoGrayscaleChannelCount: Int?
     @Published private(set) var arucoRejectedCandidateCount: Int?
+    @Published private(set) var rawPoseResults: [PoseResult] = []
     @Published private(set) var rawPoseResult: PoseResult?
     @Published private(set) var stablePoseResult: PoseResult?
     @Published private(set) var poseStabilityStatus: String = "Sem pose"
@@ -71,10 +72,13 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var poseReprojectionError: Double?
     @Published private(set) var poseErrorMessage: String?
     @Published private(set) var poseMarkerSizeMillimeters: Double = PoseConfiguration.markerSizeMillimeters
+    @Published private(set) var implantPoseResults: [ImplantPose] = []
     @Published private(set) var implantPoseResult: ImplantPose?
     @Published private(set) var implantOffsetDescription: String = ScannerViewModel.formatImplantOffset(
         ImplantConfiguration.transform
     )
+    @Published private(set) var selectedImplantMarkerIds: [Int] = []
+    @Published private(set) var selectedImplantDistanceMm: Double?
     @Published private(set) var isTorchAvailable: Bool = false
     @Published private(set) var isTorchEnabled: Bool = false
     @Published private(set) var errorMessage: String?
@@ -191,6 +195,20 @@ final class ScannerViewModel: ObservableObject {
         }
     }
 
+    @MainActor
+    func toggleImplantMarkerSelection(_ markerId: Int) {
+        if let selectedIndex = selectedImplantMarkerIds.firstIndex(of: markerId) {
+            selectedImplantMarkerIds.remove(at: selectedIndex)
+        } else {
+            if selectedImplantMarkerIds.count >= 2 {
+                selectedImplantMarkerIds.removeFirst()
+            }
+            selectedImplantMarkerIds.append(markerId)
+        }
+
+        selectedImplantDistanceMm = selectedImplantDistance(in: implantPoseResults)
+    }
+
     private func bindCameraCallbacks() {
         cameraService.onFrame = { [weak self] frame in
             self?.handleFrame(frame)
@@ -212,7 +230,7 @@ final class ScannerViewModel: ObservableObject {
         )
         let poseMetrics = estimatePose(from: arucoMetrics.detections, in: frame)
         // A geometria do implante usa a pose bruta do frame, nao a pose estabilizada da UI.
-        let implantMetrics = estimateImplantPose(from: poseMetrics.rawPoseResult)
+        let implantMetrics = estimateImplantPoses(from: poseMetrics.rawPoseResults)
 
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -237,6 +255,7 @@ final class ScannerViewModel: ObservableObject {
             self.arucoInputChannelCount = arucoMetrics.inputChannelCount
             self.arucoGrayscaleChannelCount = arucoMetrics.grayscaleChannelCount
             self.arucoRejectedCandidateCount = arucoMetrics.rejectedCandidateCount
+            self.rawPoseResults = poseMetrics.rawPoseResults
             self.rawPoseResult = poseMetrics.rawPoseResult
             self.stablePoseResult = poseMetrics.stablePoseResult
             self.poseStabilityStatus = poseMetrics.stabilityStatus
@@ -244,7 +263,9 @@ final class ScannerViewModel: ObservableObject {
             self.poseDistanceMm = poseMetrics.stablePoseResult?.distanceMm
             self.poseReprojectionError = poseMetrics.rawPoseResult?.reprojectionError
             self.poseErrorMessage = poseMetrics.errorMessage
-            self.implantPoseResult = implantMetrics.implantPoseResult
+            self.implantPoseResults = implantMetrics.implantPoseResults
+            self.implantPoseResult = implantMetrics.implantPoseResults.first
+            self.selectedImplantDistanceMm = self.selectedImplantDistance(in: implantMetrics.implantPoseResults)
         }
     }
 
@@ -340,6 +361,7 @@ final class ScannerViewModel: ObservableObject {
         guard !detections.isEmpty else {
             resetPoseFilter()
             return PoseMetrics(
+                rawPoseResults: [],
                 rawPoseResult: nil,
                 stablePoseResult: nil,
                 stabilityStatus: "Sem pose",
@@ -353,9 +375,11 @@ final class ScannerViewModel: ObservableObject {
                 in: frame,
                 markerSizeMillimeters: PoseConfiguration.markerSizeMillimeters
             )
-            guard let pose = poses.first else {
+            let sortedPoses = poses.sorted { $0.markerId < $1.markerId }
+            guard let pose = sortedPoses.first else {
                 resetPoseFilter()
                 return PoseMetrics(
+                    rawPoseResults: [],
                     rawPoseResult: nil,
                     stablePoseResult: nil,
                     stabilityStatus: "Sem pose",
@@ -366,6 +390,7 @@ final class ScannerViewModel: ObservableObject {
             let filterResult = stabilizePose(pose)
 
             return PoseMetrics(
+                rawPoseResults: sortedPoses,
                 rawPoseResult: pose,
                 stablePoseResult: filterResult.pose,
                 stabilityStatus: filterResult.stabilityStatus,
@@ -374,6 +399,7 @@ final class ScannerViewModel: ObservableObject {
         } catch {
             resetPoseFilter()
             return PoseMetrics(
+                rawPoseResults: [],
                 rawPoseResult: nil,
                 stablePoseResult: nil,
                 stabilityStatus: "Instavel",
@@ -382,17 +408,34 @@ final class ScannerViewModel: ObservableObject {
         }
     }
 
-    private func estimateImplantPose(from rawPoseResult: PoseResult?) -> ImplantMetrics {
-        guard let rawPoseResult else {
-            return ImplantMetrics(implantPoseResult: nil)
+    private func estimateImplantPoses(from rawPoseResults: [PoseResult]) -> ImplantMetrics {
+        return ImplantMetrics(
+            implantPoseResults: rawPoseResults.map { rawPoseResult in
+                MarkerToImplantTransform.applyOffset(
+                    tagPose: rawPoseResult,
+                    offset: ImplantConfiguration.transform
+                )
+            }
+        )
+    }
+
+    private func selectedImplantDistance(in implantPoseResults: [ImplantPose]) -> Double? {
+        guard selectedImplantMarkerIds.count == 2 else {
+            return nil
         }
 
-        return ImplantMetrics(
-            implantPoseResult: MarkerToImplantTransform.applyOffset(
-                tagPose: rawPoseResult,
-                offset: ImplantConfiguration.transform
-            )
-        )
+        var posesByMarkerId: [Int: ImplantPose] = [:]
+        for implantPose in implantPoseResults {
+            posesByMarkerId[implantPose.markerId] = implantPose
+        }
+
+        guard let firstPose = posesByMarkerId[selectedImplantMarkerIds[0]],
+              let secondPose = posesByMarkerId[selectedImplantMarkerIds[1]]
+        else {
+            return nil
+        }
+
+        return ImplantPose.distance(between: firstPose, and: secondPose)
     }
 
     private func stabilizePose(_ rawPose: PoseResult) -> (pose: PoseResult, stabilityStatus: String) {
@@ -550,6 +593,7 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private struct PoseMetrics {
+        let rawPoseResults: [PoseResult]
         let rawPoseResult: PoseResult?
         let stablePoseResult: PoseResult?
         let stabilityStatus: String
@@ -557,7 +601,7 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private struct ImplantMetrics {
-        let implantPoseResult: ImplantPose?
+        let implantPoseResults: [ImplantPose]
     }
 
     private static func formatImplantOffset(_ offset: MarkerToImplantTransform) -> String {

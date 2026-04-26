@@ -7,4 +7,12 @@ struct ImplantPose {
     let translationVector: SIMD3<Double>
     let distanceMm: Double
     let sourceTagPose: PoseResult
+
+    func distance(to other: ImplantPose) -> Double {
+        Self.distance(between: self, and: other)
+    }
+
+    static func distance(between first: ImplantPose, and second: ImplantPose) -> Double {
+        simd_distance(first.translationVector, second.translationVector)
+    }
 }

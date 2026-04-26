@@ -51,8 +51,11 @@ struct ScannerView: View {
                     metricRow(title: "Erro reprojecao", value: formattedPoseReprojectionError)
                     metricRow(title: "Status pose", value: viewModel.poseStabilityStatus)
                     metricRow(title: "Offset implante", value: viewModel.implantOffsetDescription)
-                    metricRow(title: "Implante x/y/z", value: formattedImplantPosition)
+                    metricRow(title: "Implantes x/y/z", value: formattedImplantPositions)
                     metricRow(title: "Distancia implante", value: formattedImplantDistance)
+                    implantComparisonControls
+                    metricRow(title: "Implantes selecionados", value: formattedSelectedImplantMarkers)
+                    metricRow(title: "Distancia entre implantes", value: formattedSelectedImplantDistance)
                     metricRow(title: "Candidatos rejeitados", value: formattedRejectedCandidates)
                     metricRow(title: "Ultimo erro detector", value: formattedArucoErrorMessage)
                     metricRow(title: "Ultimo erro pose", value: formattedPoseErrorMessage)
@@ -175,25 +178,45 @@ struct ScannerView: View {
         return String(format: "%.2f px", poseReprojectionError)
     }
 
-    private var formattedImplantPosition: String {
-        guard let translationVector = viewModel.implantPoseResult?.translationVector else {
+    private var formattedImplantPositions: String {
+        guard !viewModel.implantPoseResults.isEmpty else {
             return "-"
         }
 
-        return String(
-            format: "x %.1f, y %.1f, z %.1f mm",
-            translationVector.x,
-            translationVector.y,
-            translationVector.z
-        )
+        return viewModel.implantPoseResults.map { implantPose in
+            String(
+                format: "ID %d: x %.1f, y %.1f, z %.1f mm",
+                implantPose.markerId,
+                implantPose.translationVector.x,
+                implantPose.translationVector.y,
+                implantPose.translationVector.z
+            )
+        }
+        .joined(separator: "\n")
     }
 
     private var formattedImplantDistance: String {
-        guard let distanceMm = viewModel.implantPoseResult?.distanceMm else {
+        guard let implantPose = viewModel.implantPoseResult else {
             return "-"
         }
 
-        return String(format: "%.1f mm", distanceMm)
+        return String(format: "ID %d: %.1f mm", implantPose.markerId, implantPose.distanceMm)
+    }
+
+    private var formattedSelectedImplantMarkers: String {
+        guard !viewModel.selectedImplantMarkerIds.isEmpty else {
+            return "-"
+        }
+
+        return viewModel.selectedImplantMarkerIds.map { "ID \($0)" }.joined(separator: " x ")
+    }
+
+    private var formattedSelectedImplantDistance: String {
+        guard let selectedImplantDistanceMm = viewModel.selectedImplantDistanceMm else {
+            return "-"
+        }
+
+        return String(format: "%.1f mm", selectedImplantDistanceMm)
     }
 
     private var formattedPoseErrorMessage: String {
@@ -202,6 +225,25 @@ struct ScannerView: View {
 
     private var formattedArucoErrorMessage: String {
         viewModel.arucoErrorMessage ?? "Nenhum"
+    }
+
+    @ViewBuilder
+    private var implantComparisonControls: some View {
+        if !viewModel.implantPoseResults.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Comparar implantes")
+                    .font(.headline)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(viewModel.implantPoseResults, id: \.markerId) { implantPose in
+                            implantMarkerButton(for: implantPose)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
     }
 
     private var cameraStateBadge: some View {
@@ -232,20 +274,38 @@ struct ScannerView: View {
         .opacity(viewModel.isTorchAvailable ? 1 : 0.65)
     }
 
+    private func implantMarkerButton(for implantPose: ImplantPose) -> some View {
+        let isSelected = viewModel.selectedImplantMarkerIds.contains(implantPose.markerId)
+
+        return Button {
+            viewModel.toggleImplantMarkerSelection(implantPose.markerId)
+        } label: {
+            Label("ID \(implantPose.markerId)", systemImage: isSelected ? "checkmark.circle.fill" : "circle")
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .foregroundStyle(isSelected ? Color.white : Color.primary)
+                .background(isSelected ? Color.accentColor : Color(.secondarySystemBackground))
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
     private func metricRow(title: String, value: String) -> some View {
         HStack(alignment: .top) {
             Text(title)
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
 
             Spacer()
 
             Text(value)
                 .monospacedDigit()
                 .multilineTextAlignment(.trailing)
-                .lineLimit(2)
                 .minimumScaleFactor(0.8)
                 .layoutPriority(1)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .font(.body)
     }
