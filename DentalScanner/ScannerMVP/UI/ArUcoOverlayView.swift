@@ -81,14 +81,14 @@ struct ArUcoOverlayView: View {
         let xOffset = (previewSize.width - scaledWidth) / 2
         let yOffset = (previewSize.height - scaledHeight) / 2
 
-        return { point in
+        return { point -> CGPoint in
             let orientedPoint = orientation.orientedPoint(
                 point,
                 frameWidth: rawFrameWidth,
                 frameHeight: rawFrameHeight
             )
 
-            CGPoint(
+            return CGPoint(
                 x: orientedPoint.x * scale + xOffset,
                 y: orientedPoint.y * scale + yOffset
             )
