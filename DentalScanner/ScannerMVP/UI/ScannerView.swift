@@ -10,6 +10,10 @@ struct ScannerView: View {
 
     var body: some View {
         let screenBounds = UIScreen.main.bounds
+        let screenSize = CGSize(
+            width: max(screenBounds.width, screenBounds.height),
+            height: min(screenBounds.width, screenBounds.height)
+        )
 
         ZStack {
             Color.black
@@ -21,7 +25,7 @@ struct ScannerView: View {
                 orientation: previewOrientation,
                 orientationRevision: previewOrientationRevision
             )
-            .frame(width: screenBounds.width, height: screenBounds.height)
+            .frame(width: screenSize.width, height: screenSize.height)
             .ignoresSafeArea()
             .allowsHitTesting(false)
             .zIndex(0)
@@ -31,7 +35,7 @@ struct ScannerView: View {
                 frameResolution: viewModel.arucoFrameResolution ?? viewModel.frameResolution,
                 orientation: previewOrientation
             )
-            .frame(width: screenBounds.width, height: screenBounds.height)
+            .frame(width: screenSize.width, height: screenSize.height)
             .ignoresSafeArea()
             .allowsHitTesting(false)
             .zIndex(1)
@@ -70,7 +74,6 @@ struct ScannerView: View {
             reapplyPreviewOrientation(after: 0.45)
         }
         .onAppear {
-            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
             applyLaunchPreviewOrientation()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
@@ -78,7 +81,6 @@ struct ScannerView: View {
         }
         .onDisappear {
             viewModel.stopCamera()
-            UIDevice.current.endGeneratingDeviceOrientationNotifications()
         }
     }
 
@@ -257,49 +259,13 @@ struct ScannerView: View {
     }
 
     private func updatePreviewOrientation() {
-        let foregroundScene = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first { $0.activationState == .foregroundActive }
-
-        if let interfaceOrientation = foregroundScene?.interfaceOrientation,
-           let orientation = landscapeOrientation(from: interfaceOrientation) {
-            applyPreviewOrientation(orientation)
-            return
-        }
-
-        if let orientation = landscapeOrientation(from: UIDevice.current.orientation) {
-            applyPreviewOrientation(orientation)
-        } else {
-            applyPreviewOrientation(.landscapeRight)
-        }
+        applyPreviewOrientation(.landscapeRight)
     }
 
     private func applyPreviewOrientation(_ orientation: CameraPreviewOrientation) {
         previewOrientation = orientation
         previewOrientationRevision += 1
         viewModel.setPreviewOrientation(orientation)
-    }
-
-    private func landscapeOrientation(from interfaceOrientation: UIInterfaceOrientation) -> CameraPreviewOrientation? {
-        switch interfaceOrientation {
-        case .landscapeLeft:
-            return .landscapeLeft
-        case .landscapeRight:
-            return .landscapeRight
-        default:
-            return nil
-        }
-    }
-
-    private func landscapeOrientation(from deviceOrientation: UIDeviceOrientation) -> CameraPreviewOrientation? {
-        switch deviceOrientation {
-        case .landscapeLeft:
-            return .landscapeLeft
-        case .landscapeRight:
-            return .landscapeRight
-        default:
-            return nil
-        }
     }
 
     private var formattedCameraState: String {

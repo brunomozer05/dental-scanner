@@ -9,17 +9,18 @@ struct CameraPreviewView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
-        view.previewLayer?.session = session
+        view.previewLayer.session = session
+        view.previewLayer.videoGravity = .resizeAspectFill
         view.setOrientation(orientation)
         return view
     }
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
-        if let previewLayer = uiView.previewLayer,
-           previewLayer.session !== session {
-            previewLayer.session = session
+        if uiView.previewLayer.session !== session {
+            uiView.previewLayer.session = session
         }
 
+        uiView.previewLayer.videoGravity = .resizeAspectFill
         _ = orientationRevision
         uiView.setOrientation(orientation)
     }
@@ -30,8 +31,8 @@ final class PreviewView: UIView {
         AVCaptureVideoPreviewLayer.self
     }
 
-    var previewLayer: AVCaptureVideoPreviewLayer? {
-        layer as? AVCaptureVideoPreviewLayer
+    var previewLayer: AVCaptureVideoPreviewLayer {
+        layer as! AVCaptureVideoPreviewLayer
     }
 
     override init(frame: CGRect) {
@@ -46,8 +47,9 @@ final class PreviewView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        previewLayer?.frame = bounds
-        previewLayer?.videoGravity = .resizeAspectFill
+        previewLayer.frame = bounds
+        previewLayer.videoGravity = .resizeAspectFill
+        applyLandscapeOrientationIfReady()
     }
 
     override func didMoveToWindow() {
@@ -55,13 +57,24 @@ final class PreviewView: UIView {
     }
 
     func setOrientation(_ orientation: CameraPreviewOrientation) {
-        _ = orientation
+        applyLandscapeOrientationIfReady()
     }
 
     private func configurePreviewLayer() {
         backgroundColor = .black
         clipsToBounds = true
         contentMode = .scaleAspectFill
-        previewLayer?.videoGravity = .resizeAspectFill
+        previewLayer.videoGravity = .resizeAspectFill
+    }
+
+    private func applyLandscapeOrientationIfReady() {
+        guard previewLayer.session?.isRunning == true,
+              let connection = previewLayer.connection,
+              connection.isVideoOrientationSupported
+        else {
+            return
+        }
+
+        connection.videoOrientation = .landscapeRight
     }
 }
