@@ -5,6 +5,7 @@ import UIKit
 struct CameraPreviewView: UIViewRepresentable {
     let session: AVCaptureSession
     let orientation: CameraPreviewOrientation
+    let orientationRevision: Int
 
     func makeUIView(context: Context) -> PreviewContainerView {
         let view = PreviewContainerView()
@@ -19,11 +20,14 @@ struct CameraPreviewView: UIViewRepresentable {
             uiView.previewLayer.session = session
         }
 
+        _ = orientationRevision
         uiView.setOrientation(orientation)
     }
 }
 
 final class PreviewContainerView: UIView {
+    private var desiredOrientation: CameraPreviewOrientation = .landscapeRight
+
     override class var layerClass: AnyClass {
         AVCaptureVideoPreviewLayer.self
     }
@@ -36,13 +40,29 @@ final class PreviewContainerView: UIView {
         return layer
     }
 
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        previewLayer.frame = bounds
+        applyDesiredOrientation()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        applyDesiredOrientation()
+    }
+
     func setOrientation(_ orientation: CameraPreviewOrientation) {
+        desiredOrientation = orientation
+        applyDesiredOrientation()
+    }
+
+    private func applyDesiredOrientation() {
         guard let connection = previewLayer.connection,
               connection.isVideoOrientationSupported
         else {
             return
         }
 
-        connection.videoOrientation = orientation.captureVideoOrientation
+        connection.videoOrientation = desiredOrientation.captureVideoOrientation
     }
 }

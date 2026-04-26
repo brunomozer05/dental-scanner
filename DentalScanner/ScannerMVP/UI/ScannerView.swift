@@ -5,6 +5,7 @@ struct ScannerView: View {
     @StateObject private var viewModel = ScannerViewModel()
     @State private var scaleValidationRealDistanceText = ""
     @State private var previewOrientation: CameraPreviewOrientation = .landscapeRight
+    @State private var previewOrientationRevision = 0
     @State private var isDebugPanelExpanded = true
 
     var body: some View {
@@ -14,7 +15,8 @@ struct ScannerView: View {
             ZStack {
                 CameraPreviewView(
                     session: viewModel.captureSession,
-                    orientation: previewOrientation
+                    orientation: previewOrientation,
+                    orientationRevision: previewOrientationRevision
                 )
                 .frame(width: proxy.size.width, height: proxy.size.height)
                 .ignoresSafeArea()
@@ -56,11 +58,14 @@ struct ScannerView: View {
         }
         .ignoresSafeArea()
         .task {
+            applyLaunchPreviewOrientation()
             await viewModel.startCamera()
+            reapplyPreviewOrientation(after: 0.15)
+            reapplyPreviewOrientation(after: 0.45)
         }
         .onAppear {
             UIDevice.current.beginGeneratingDeviceOrientationNotifications()
-            updatePreviewOrientation()
+            applyLaunchPreviewOrientation()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
             updatePreviewOrientation()
@@ -68,6 +73,19 @@ struct ScannerView: View {
         .onDisappear {
             viewModel.stopCamera()
             UIDevice.current.endGeneratingDeviceOrientationNotifications()
+        }
+    }
+
+    private func applyLaunchPreviewOrientation() {
+        applyPreviewOrientation(.landscapeRight)
+        reapplyPreviewOrientation(after: 0.05)
+        reapplyPreviewOrientation(after: 0.25)
+        reapplyPreviewOrientation(after: 0.75)
+    }
+
+    private func reapplyPreviewOrientation(after delay: TimeInterval) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            updatePreviewOrientation()
         }
     }
 
@@ -252,6 +270,7 @@ struct ScannerView: View {
 
     private func applyPreviewOrientation(_ orientation: CameraPreviewOrientation) {
         previewOrientation = orientation
+        previewOrientationRevision += 1
         viewModel.setPreviewOrientation(orientation)
     }
 
