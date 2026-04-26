@@ -56,7 +56,8 @@ struct ScannerView: View {
                     metricRow(title: "Distancia implante", value: formattedImplantDistance)
                     implantComparisonControls
                     metricRow(title: "Implantes selecionados", value: formattedSelectedImplantMarkers)
-                    metricRow(title: "Distancia entre implantes", value: formattedSelectedImplantDistance)
+                    metricRow(title: "Distancia tag-tag", value: formattedSelectedTagDistance)
+                    metricRow(title: "Distancia implante-implante", value: formattedSelectedImplantDistance)
                     scaleValidationSection
                     metricRow(title: "Candidatos rejeitados", value: formattedRejectedCandidates)
                     metricRow(title: "Ultimo erro detector", value: formattedArucoErrorMessage)
@@ -213,6 +214,14 @@ struct ScannerView: View {
         return viewModel.selectedImplantMarkerIds.map { "ID \($0)" }.joined(separator: " x ")
     }
 
+    private var formattedSelectedTagDistance: String {
+        guard let selectedTagDistanceMm = viewModel.selectedTagDistanceMm else {
+            return "-"
+        }
+
+        return String(format: "%.1f mm", selectedTagDistanceMm)
+    }
+
     private var formattedSelectedImplantDistance: String {
         guard let selectedImplantDistanceMm = viewModel.selectedImplantDistanceMm else {
             return "-"
@@ -253,42 +262,42 @@ struct ScannerView: View {
     }
 
     private var formattedScaleValidationAbsoluteError: String {
-        guard let errorMm = scaleValidationAbsoluteErrorMm else {
-            return "-"
-        }
-
-        return String(format: "%.2f mm", errorMm)
+        formattedMillimeterValue(scaleValidationAbsoluteErrorMm(for: viewModel.selectedImplantDistanceMm))
     }
 
     private var formattedScaleValidationPercentError: String {
-        guard let percentError = scaleValidationPercentError else {
-            return "-"
-        }
-
-        return String(format: "%.2f%%", percentError)
+        formattedPercentValue(scaleValidationPercentError(for: viewModel.selectedImplantDistanceMm))
     }
 
     private var formattedScaleValidationCorrectionFactor: String {
-        guard let correctionFactor = scaleValidationCorrectionFactor else {
-            return "-"
-        }
-
-        return String(format: "%.4fx", correctionFactor)
+        formattedCorrectionFactor(scaleValidationCorrectionFactor(for: viewModel.selectedImplantDistanceMm))
     }
 
-    private var scaleValidationAbsoluteErrorMm: Double? {
+    private var formattedScaleValidationTagAbsoluteError: String {
+        formattedMillimeterValue(scaleValidationAbsoluteErrorMm(for: viewModel.selectedTagDistanceMm))
+    }
+
+    private var formattedScaleValidationTagPercentError: String {
+        formattedPercentValue(scaleValidationPercentError(for: viewModel.selectedTagDistanceMm))
+    }
+
+    private var formattedScaleValidationTagCorrectionFactor: String {
+        formattedCorrectionFactor(scaleValidationCorrectionFactor(for: viewModel.selectedTagDistanceMm))
+    }
+
+    private func scaleValidationAbsoluteErrorMm(for measuredDistanceMm: Double?) -> Double? {
         guard let realDistanceMm = parsedScaleValidationRealDistanceMm,
-              let appDistanceMm = viewModel.selectedImplantDistanceMm
+              let measuredDistanceMm
         else {
             return nil
         }
 
-        return abs(appDistanceMm - realDistanceMm)
+        return abs(measuredDistanceMm - realDistanceMm)
     }
 
-    private var scaleValidationPercentError: Double? {
+    private func scaleValidationPercentError(for measuredDistanceMm: Double?) -> Double? {
         guard let realDistanceMm = parsedScaleValidationRealDistanceMm,
-              let absoluteErrorMm = scaleValidationAbsoluteErrorMm
+              let absoluteErrorMm = scaleValidationAbsoluteErrorMm(for: measuredDistanceMm)
         else {
             return nil
         }
@@ -296,15 +305,39 @@ struct ScannerView: View {
         return absoluteErrorMm / realDistanceMm * 100.0
     }
 
-    private var scaleValidationCorrectionFactor: Double? {
+    private func scaleValidationCorrectionFactor(for measuredDistanceMm: Double?) -> Double? {
         guard let realDistanceMm = parsedScaleValidationRealDistanceMm,
-              let appDistanceMm = viewModel.selectedImplantDistanceMm,
-              appDistanceMm > 0
+              let measuredDistanceMm,
+              measuredDistanceMm > 0
         else {
             return nil
         }
 
-        return realDistanceMm / appDistanceMm
+        return realDistanceMm / measuredDistanceMm
+    }
+
+    private func formattedMillimeterValue(_ value: Double?) -> String {
+        guard let value else {
+            return "-"
+        }
+
+        return String(format: "%.2f mm", value)
+    }
+
+    private func formattedPercentValue(_ value: Double?) -> String {
+        guard let value else {
+            return "-"
+        }
+
+        return String(format: "%.2f%%", value)
+    }
+
+    private func formattedCorrectionFactor(_ value: Double?) -> String {
+        guard let value else {
+            return "-"
+        }
+
+        return String(format: "%.4fx", value)
     }
 
     private var formattedPoseErrorMessage: String {
@@ -351,10 +384,14 @@ struct ScannerView: View {
             }
 
             metricRow(title: "Real informado", value: formattedScaleValidationRealDistance)
-            metricRow(title: "Medida app", value: formattedScaleValidationAppDistance)
-            metricRow(title: "Erro absoluto", value: formattedScaleValidationAbsoluteError)
-            metricRow(title: "Erro percentual", value: formattedScaleValidationPercentError)
-            metricRow(title: "Fator sugerido", value: formattedScaleValidationCorrectionFactor)
+            metricRow(title: "Medida app tag", value: formattedSelectedTagDistance)
+            metricRow(title: "Erro tag", value: formattedScaleValidationTagAbsoluteError)
+            metricRow(title: "Erro tag %", value: formattedScaleValidationTagPercentError)
+            metricRow(title: "Fator tag", value: formattedScaleValidationTagCorrectionFactor)
+            metricRow(title: "Medida app implante", value: formattedScaleValidationAppDistance)
+            metricRow(title: "Erro implante", value: formattedScaleValidationAbsoluteError)
+            metricRow(title: "Erro implante %", value: formattedScaleValidationPercentError)
+            metricRow(title: "Fator implante", value: formattedScaleValidationCorrectionFactor)
         }
     }
 

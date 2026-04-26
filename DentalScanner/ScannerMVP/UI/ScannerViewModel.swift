@@ -78,6 +78,7 @@ final class ScannerViewModel: ObservableObject {
         ImplantConfiguration.transform
     )
     @Published private(set) var selectedImplantMarkerIds: [Int] = []
+    @Published private(set) var selectedTagDistanceMm: Double?
     @Published private(set) var selectedImplantDistanceMm: Double?
     @Published private(set) var isTorchAvailable: Bool = false
     @Published private(set) var isTorchEnabled: Bool = false
@@ -206,6 +207,7 @@ final class ScannerViewModel: ObservableObject {
             selectedImplantMarkerIds.append(markerId)
         }
 
+        selectedTagDistanceMm = selectedTagDistance(in: rawPoseResults)
         selectedImplantDistanceMm = selectedImplantDistance(in: implantPoseResults)
     }
 
@@ -265,6 +267,7 @@ final class ScannerViewModel: ObservableObject {
             self.poseErrorMessage = poseMetrics.errorMessage
             self.implantPoseResults = implantMetrics.implantPoseResults
             self.implantPoseResult = implantMetrics.implantPoseResults.first
+            self.selectedTagDistanceMm = self.selectedTagDistance(in: poseMetrics.rawPoseResults)
             self.selectedImplantDistanceMm = self.selectedImplantDistance(in: implantMetrics.implantPoseResults)
         }
     }
@@ -417,6 +420,25 @@ final class ScannerViewModel: ObservableObject {
                 )
             }
         )
+    }
+
+    private func selectedTagDistance(in rawPoseResults: [PoseResult]) -> Double? {
+        guard selectedImplantMarkerIds.count == 2 else {
+            return nil
+        }
+
+        var posesByMarkerId: [Int: PoseResult] = [:]
+        for rawPoseResult in rawPoseResults {
+            posesByMarkerId[rawPoseResult.markerId] = rawPoseResult
+        }
+
+        guard let firstPose = posesByMarkerId[selectedImplantMarkerIds[0]],
+              let secondPose = posesByMarkerId[selectedImplantMarkerIds[1]]
+        else {
+            return nil
+        }
+
+        return simd_distance(firstPose.translationVector, secondPose.translationVector)
     }
 
     private func selectedImplantDistance(in implantPoseResults: [ImplantPose]) -> Double? {
