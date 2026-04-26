@@ -9,6 +9,8 @@ struct ScannerView: View {
     @State private var isDebugPanelExpanded = true
 
     var body: some View {
+        let screenBounds = UIScreen.main.bounds
+
         ZStack {
             Color.black
                 .ignoresSafeArea()
@@ -19,8 +21,8 @@ struct ScannerView: View {
                 orientation: previewOrientation,
                 orientationRevision: previewOrientationRevision
             )
+            .frame(width: screenBounds.width, height: screenBounds.height)
             .ignoresSafeArea()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .allowsHitTesting(false)
             .zIndex(0)
 
@@ -29,8 +31,8 @@ struct ScannerView: View {
                 frameResolution: viewModel.arucoFrameResolution ?? viewModel.frameResolution,
                 orientation: previewOrientation
             )
+            .frame(width: screenBounds.width, height: screenBounds.height)
             .ignoresSafeArea()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .allowsHitTesting(false)
             .zIndex(1)
 
