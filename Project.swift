@@ -46,6 +46,7 @@ let project = Project(
         base: [
             "MARKETING_VERSION": .string("0.1.0"),
             "CURRENT_PROJECT_VERSION": .string("1"),
+            "TARGETED_DEVICE_FAMILY": .string("1"),
             "SWIFT_VERSION": .string("5.0"),
             "SWIFT_OBJC_BRIDGING_HEADER": .string("DentalScanner/DentalScanner-Bridging-Header.h"),
             "CLANG_CXX_LANGUAGE_STANDARD": .string("gnu++17"),
@@ -71,7 +72,7 @@ let project = Project(
     targets: [
         Target(
             name: "DentalScanner",
-            destinations: Destinations.iOS,
+            destinations: [.iPhone],
             product: Product.app,
             bundleId: "com.dentalscanner.mvp",
             deploymentTargets: DeploymentTargets.iOS("17.0"),
@@ -80,7 +81,9 @@ let project = Project(
                 "DentalScanner/**/*.swift",
                 "DentalScanner/**/*.mm"
             ],
-            resources: [],
+            resources: [
+                "DentalScanner/**/*.storyboard"
+            ],
             dependencies: OpenCV.dependencies
         )
     ]
