@@ -60,6 +60,7 @@ struct ScannerView: View {
                     metricRow(title: "Distancia tag-tag", value: formattedSelectedTagDistance)
                     metricRow(title: "Distancia implante-implante", value: formattedSelectedImplantDistance)
                     scaleValidationSection
+                    stlExportSection
                     metricRow(title: "Candidatos rejeitados", value: formattedRejectedCandidates)
                     metricRow(title: "Ultimo erro detector", value: formattedArucoErrorMessage)
                     metricRow(title: "Ultimo erro pose", value: formattedPoseErrorMessage)
@@ -269,6 +270,22 @@ struct ScannerView: View {
         formattedSelectedImplantDistance
     }
 
+    private var formattedSTLExportedImplantCount: String {
+        guard viewModel.stlExportedImplantCount > 0 else {
+            return "-"
+        }
+
+        return "\(viewModel.stlExportedImplantCount)"
+    }
+
+    private var formattedSTLExportFileName: String {
+        viewModel.stlExportURL?.lastPathComponent ?? "-"
+    }
+
+    private var formattedSTLExportError: String {
+        viewModel.stlExportErrorMessage ?? "Nenhum"
+    }
+
     private var formattedScaleValidationAbsoluteError: String {
         formattedMillimeterValue(scaleValidationAbsoluteErrorMm(for: viewModel.selectedImplantDistanceMm))
     }
@@ -424,6 +441,47 @@ struct ScannerView: View {
             metricRow(title: "Erro implante", value: formattedScaleValidationAbsoluteError)
             metricRow(title: "Erro implante %", value: formattedScaleValidationPercentError)
             metricRow(title: "Fator implante", value: formattedScaleValidationCorrectionFactor)
+        }
+    }
+
+    private var stlExportSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Exportacao STL")
+                .font(.headline)
+
+            HStack(spacing: 10) {
+                Button {
+                    viewModel.exportCurrentImplantsAsSTL()
+                } label: {
+                    Label("Exportar STL", systemImage: "doc.badge.plus")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .foregroundStyle(viewModel.implantPoseResults.isEmpty ? Color.secondary : Color.primary)
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.implantPoseResults.isEmpty)
+                .opacity(viewModel.implantPoseResults.isEmpty ? 0.65 : 1)
+
+                if let stlExportURL = viewModel.stlExportURL {
+                    ShareLink(item: stlExportURL) {
+                        Label("Compartilhar STL", systemImage: "square.and.arrow.up")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .foregroundStyle(Color.white)
+                            .background(Color.accentColor)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            metricRow(title: "Implantes no STL", value: formattedSTLExportedImplantCount)
+            metricRow(title: "Arquivo STL", value: formattedSTLExportFileName)
+            metricRow(title: "Erro STL", value: formattedSTLExportError)
         }
     }
 

@@ -84,6 +84,9 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var selectedImplantMarkerIds: [Int] = []
     @Published private(set) var selectedTagDistanceMm: Double?
     @Published private(set) var selectedImplantDistanceMm: Double?
+    @Published private(set) var stlExportURL: URL?
+    @Published private(set) var stlExportedImplantCount: Int = 0
+    @Published private(set) var stlExportErrorMessage: String?
     @Published private(set) var isTorchAvailable: Bool = false
     @Published private(set) var isTorchEnabled: Bool = false
     @Published private(set) var errorMessage: String?
@@ -91,6 +94,7 @@ final class ScannerViewModel: ObservableObject {
     private let cameraService: CameraFrameService
     private let arUcoDetector: ArUcoDetector
     private let poseEstimator: PoseEstimator
+    private let stlExporter: STLExporter
     private var shouldRunCamera = false
     private var totalFramesCounter: Int = 0
     private var recentFrameTimestamps: [Double] = []
@@ -119,11 +123,13 @@ final class ScannerViewModel: ObservableObject {
     init(
         cameraService: CameraFrameService = CameraFrameService(),
         arUcoDetector: ArUcoDetector = ArUcoDetector(),
-        poseEstimator: PoseEstimator = PoseEstimator()
+        poseEstimator: PoseEstimator = PoseEstimator(),
+        stlExporter: STLExporter = STLExporter()
     ) {
         self.cameraService = cameraService
         self.arUcoDetector = arUcoDetector
         self.poseEstimator = poseEstimator
+        self.stlExporter = stlExporter
         self.isOpenCVAvailable = arUcoDetector.isOpenCVAvailable
         bindCameraCallbacks()
     }
@@ -237,6 +243,32 @@ final class ScannerViewModel: ObservableObject {
             max(markerSizeMillimeters, PoseConfiguration.minimumMarkerSizeMillimeters),
             PoseConfiguration.maximumMarkerSizeMillimeters
         )
+    }
+
+    @MainActor
+    @discardableResult
+    func exportCurrentImplantsAsSTL() -> URL? {
+        let currentImplantPoses = implantPoseResults
+        guard !currentImplantPoses.isEmpty else {
+            stlExportURL = nil
+            stlExportedImplantCount = 0
+            stlExportErrorMessage = STLExporter.ExportError.emptyImplantList.localizedDescription
+            return nil
+        }
+
+        do {
+            let fileURL = makeTemporarySTLFileURL()
+            try stlExporter.writeASCIISTL(for: currentImplantPoses, to: fileURL)
+            stlExportURL = fileURL
+            stlExportedImplantCount = currentImplantPoses.count
+            stlExportErrorMessage = nil
+            return fileURL
+        } catch {
+            stlExportURL = nil
+            stlExportedImplantCount = 0
+            stlExportErrorMessage = error.localizedDescription
+            return nil
+        }
     }
 
     private func bindCameraCallbacks() {
@@ -623,6 +655,12 @@ final class ScannerViewModel: ObservableObject {
     private func handleCameraError(_ error: Error) {
         cameraState = .failed
         errorMessage = makeErrorMessage(from: error)
+    }
+
+    private func makeTemporarySTLFileURL() -> URL {
+        let timestamp = Int(Date().timeIntervalSince1970)
+        return FileManager.default.temporaryDirectory
+            .appendingPathComponent("dental-implants-\(timestamp).stl")
     }
 
     private struct FrameMetrics {
