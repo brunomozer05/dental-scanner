@@ -27,6 +27,7 @@ struct ScannerView: View {
             )
             .frame(width: screenSize.width, height: screenSize.height)
             .ignoresSafeArea()
+            .scaleEffect(1.2)
             .allowsHitTesting(false)
             .zIndex(0)
 
@@ -37,6 +38,7 @@ struct ScannerView: View {
             )
             .frame(width: screenSize.width, height: screenSize.height)
             .ignoresSafeArea()
+            .scaleEffect(1.2)
             .allowsHitTesting(false)
             .zIndex(1)
 
