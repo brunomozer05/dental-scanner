@@ -28,27 +28,33 @@ struct ScannerView: View {
             )
             .ignoresSafeArea()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            VStack {
+                topControlBar
+                    .padding(.top, 12)
+                    .padding(.horizontal, 12)
+
+                Spacer()
+            }
+
+            if isDebugPanelExpanded {
+                VStack {
+                    Spacer()
+
+                    HStack {
+                        Spacer()
+
+                        debugPanel(isLandscape: true)
+                            .frame(width: 380)
+                            .frame(maxHeight: 420)
+                            .padding(12)
+                    }
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
         .ignoresSafeArea()
-        .overlay(
-            topControlBar
-                .padding(.top, 12)
-                .padding(.horizontal, 12),
-            alignment: .top
-        )
-        .overlay(
-            Group {
-                if isDebugPanelExpanded {
-                    debugPanel(isLandscape: true)
-                        .frame(width: 380)
-                        .frame(maxHeight: 420)
-                        .padding(12)
-                }
-            },
-            alignment: .bottomTrailing
-        )
         .task {
             applyLaunchPreviewOrientation()
             await viewModel.startCamera()
