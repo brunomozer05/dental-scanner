@@ -10,6 +10,9 @@ struct ScannerView: View {
 
     var body: some View {
         ZStack {
+            Color.black
+                .ignoresSafeArea()
+
             CameraPreviewView(
                 session: viewModel.captureSession,
                 orientation: previewOrientation,

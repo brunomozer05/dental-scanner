@@ -74,6 +74,8 @@ final class PreviewView: UIView {
 
     private func configurePreviewLayer() {
         backgroundColor = .black
+        clipsToBounds = true
+        contentMode = .scaleAspectFill
         previewLayer.videoGravity = .resizeAspectFill
     }
 }
