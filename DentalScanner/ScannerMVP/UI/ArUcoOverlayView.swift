@@ -30,7 +30,8 @@ struct ArUcoOverlayView: View {
                     TagAROverlayView(
                         markerId: trackedMarker.markerId,
                         corners: marker.corners,
-                        progress: progress
+                        progress: progress,
+                        displayScale: trackedMarker.displayScale
                     )
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .transition(.scale(scale: 0.96).combined(with: .opacity))
@@ -150,6 +151,7 @@ struct ArUcoOverlayView: View {
             let progress = tagCoverages[marker.markerId]?.progress ??
                 nextMarkers[marker.markerId]?.progress ??
                 0
+            let currentDisplayScale = markerDisplayScale(for: marker.corners)
 
             if let previousMarker = nextMarkers[marker.markerId] {
                 let currentCenter = markerCenter(for: marker.corners)
@@ -172,7 +174,11 @@ struct ArUcoOverlayView: View {
                     ),
                     lastSeen: timestamp,
                     previousCenter: currentCenter,
-                    progress: progress
+                    progress: progress,
+                    displayScale: smoothedDisplayScale(
+                        previous: previousMarker.displayScale,
+                        current: currentDisplayScale
+                    )
                 )
             } else {
                 nextMarkers[marker.markerId] = TrackedMarker(
@@ -180,7 +186,8 @@ struct ArUcoOverlayView: View {
                     corners: marker.corners,
                     lastSeen: timestamp,
                     previousCenter: markerCenter(for: marker.corners),
-                    progress: progress
+                    progress: progress,
+                    displayScale: currentDisplayScale
                 )
             }
         }
@@ -277,6 +284,26 @@ struct ArUcoOverlayView: View {
         )
     }
 
+    private func markerDisplayScale(for corners: [CGPoint]) -> CGFloat {
+        guard corners.count == 4 else {
+            return 1
+        }
+
+        let width = distance(corners[0], corners[1])
+        let height = distance(corners[1], corners[2])
+        let tagSize = (width + height) / 2
+        let scale = tagSize / 120.0
+        return min(max(scale, 0.5), 1.8)
+    }
+
+    private func smoothedDisplayScale(previous: CGFloat, current: CGFloat) -> CGFloat {
+        previous * 0.7 + current * 0.3
+    }
+
+    private func distance(_ first: CGPoint, _ second: CGPoint) -> CGFloat {
+        hypot(second.x - first.x, second.y - first.y)
+    }
+
     private struct ProjectedMarker: Equatable {
         let markerId: Int
         let corners: [CGPoint]
@@ -288,6 +315,7 @@ struct ArUcoOverlayView: View {
         let lastSeen: Date
         let previousCenter: CGPoint?
         let progress: Double
+        let displayScale: CGFloat
 
         var id: Int {
             markerId
@@ -303,6 +331,7 @@ private struct TagAROverlayView: View {
     let markerId: Int
     let corners: [CGPoint]
     let progress: Double
+    let displayScale: CGFloat
 
     private let accentColor = Color(red: 0.23, green: 0.51, blue: 0.96)
 
@@ -311,26 +340,26 @@ private struct TagAROverlayView: View {
             ArucoTagOverlayShape(corners: corners)
                 .stroke(
                     accentColor.opacity(0.36),
-                    style: StrokeStyle(lineWidth: 12, lineCap: .round, lineJoin: .round)
+                    style: StrokeStyle(lineWidth: glowLineWidth, lineCap: .round, lineJoin: .round)
                 )
-                .blur(radius: 5)
+                .blur(radius: glowRadius)
 
             ArucoTagOverlayShape(corners: corners)
                 .stroke(
                     accentColor.opacity(0.92),
-                    style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round)
+                    style: StrokeStyle(lineWidth: tagLineWidth, lineCap: .round, lineJoin: .round)
                 )
-                .shadow(color: accentColor.opacity(0.52), radius: 6, x: 0, y: 0)
+                .shadow(color: accentColor.opacity(0.52), radius: glowRadius, x: 0, y: 0)
 
             ForEach(Array(corners.enumerated()), id: \.offset) { item in
                 Circle()
                     .fill(Color.white.opacity(0.96))
-                    .frame(width: 14, height: 14)
+                    .frame(width: cornerNodeSize, height: cornerNodeSize)
                     .overlay {
                         Circle()
-                            .stroke(accentColor.opacity(0.95), lineWidth: 3)
+                            .stroke(accentColor.opacity(0.95), lineWidth: cornerNodeStrokeWidth)
                     }
-                    .shadow(color: accentColor.opacity(0.58), radius: 5, x: 0, y: 0)
+                    .shadow(color: accentColor.opacity(0.58), radius: cornerNodeGlowRadius, x: 0, y: 0)
                     .position(item.element)
             }
 
@@ -339,9 +368,11 @@ private struct TagAROverlayView: View {
                 progress: progressRatio,
                 accentColor: accentColor
             )
-            .position(x: markerCenter.x, y: markerCenter.y - 90)
+            .scaleEffect(clampedDisplayScale)
+            .position(x: markerCenter.x, y: markerCenter.y - cardVerticalOffset)
         }
         .animation(.easeOut(duration: 0.16), value: clampedProgress)
+        .animation(.easeOut(duration: 0.16), value: clampedDisplayScale)
     }
 
     private var clampedProgress: Double {
@@ -350,6 +381,38 @@ private struct TagAROverlayView: View {
 
     private var progressRatio: Double {
         clampedProgress / 100.0
+    }
+
+    private var clampedDisplayScale: CGFloat {
+        min(max(displayScale, 0.5), 1.8)
+    }
+
+    private var tagLineWidth: CGFloat {
+        4 * clampedDisplayScale
+    }
+
+    private var glowLineWidth: CGFloat {
+        tagLineWidth * 1.8
+    }
+
+    private var glowRadius: CGFloat {
+        4 * clampedDisplayScale
+    }
+
+    private var cornerNodeSize: CGFloat {
+        10 * clampedDisplayScale
+    }
+
+    private var cornerNodeStrokeWidth: CGFloat {
+        2.2 * clampedDisplayScale
+    }
+
+    private var cornerNodeGlowRadius: CGFloat {
+        3.5 * clampedDisplayScale
+    }
+
+    private var cardVerticalOffset: CGFloat {
+        80 * clampedDisplayScale
     }
 
     private var markerCenter: CGPoint {
