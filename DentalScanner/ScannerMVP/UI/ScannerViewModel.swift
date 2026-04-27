@@ -103,6 +103,7 @@ final class ScannerViewModel: ObservableObject {
     private var filteredPoseResult: PoseResult?
     private var acceptedPoseFrameCount = 0
     private var consecutivePoseOutlierCount = 0
+    private var desiredTorchEnabled = false
 
     var captureSession: AVCaptureSession {
         cameraService.captureSession
@@ -151,7 +152,14 @@ final class ScannerViewModel: ObservableObject {
             await MainActor.run {
                 cameraState = .ready
                 isTorchAvailable = torchState.isAvailable
-                isTorchEnabled = torchState.isEnabled
+
+                if torchState.isAvailable {
+                    desiredTorchEnabled = desiredTorchEnabled || torchState.isEnabled
+                    isTorchEnabled = desiredTorchEnabled ? true : torchState.isEnabled
+                } else {
+                    desiredTorchEnabled = false
+                    isTorchEnabled = false
+                }
             }
         } catch {
             await MainActor.run {
@@ -177,7 +185,7 @@ final class ScannerViewModel: ObservableObject {
             return
         }
 
-        guard preparedState == .ready else {
+        guard preparedState == .ready || preparedState == .running else {
             return
         }
 
@@ -200,21 +208,48 @@ final class ScannerViewModel: ObservableObject {
         guard isTorchAvailable else { return }
 
         let targetState = !isTorchEnabled
+        desiredTorchEnabled = targetState
+
         Task { [weak self] in
             guard let self else { return }
 
             do {
-                let torchState = try await self.cameraService.setTorchEnabled(targetState)
+                let torchState = try await self.cameraService.setTorchEnabled(
+                    targetState,
+                    requiresRunningSession: true
+                )
                 await MainActor.run {
                     self.isTorchAvailable = torchState.isAvailable
                     self.isTorchEnabled = torchState.isEnabled
+
+                    if !torchState.isAvailable {
+                        self.desiredTorchEnabled = false
+                    }
+
                     self.errorMessage = nil
                 }
             } catch {
+                if self.isSessionNotPreparedError(error) {
+                    return
+                }
+
                 await MainActor.run {
                     self.errorMessage = self.makeErrorMessage(from: error)
                 }
             }
+        }
+    }
+
+    @MainActor
+    func handleAppBecameActive() {
+        guard shouldRunCamera else {
+            return
+        }
+
+        Task { [weak self] in
+            guard let self else { return }
+            await self.startCamera()
+            await self.reapplyDesiredTorchIfNeeded()
         }
     }
 
@@ -284,6 +319,63 @@ final class ScannerViewModel: ObservableObject {
             Task { @MainActor [weak self] in
                 self?.handleCameraError(error)
             }
+        }
+
+        cameraService.onSessionDidBecomeActive = { [weak self] in
+            Task { [weak self] in
+                await self?.reapplyDesiredTorchIfNeeded()
+            }
+        }
+    }
+
+    private func reapplyDesiredTorchIfNeeded() async {
+        let shouldReapplyTorch = await MainActor.run {
+            desiredTorchEnabled && isTorchAvailable && cameraState == .running
+        }
+
+        guard shouldReapplyTorch else {
+            return
+        }
+
+        do {
+            let torchState = try await cameraService.setTorchEnabled(
+                true,
+                requiresRunningSession: true
+            )
+
+            await MainActor.run {
+                isTorchAvailable = torchState.isAvailable
+                isTorchEnabled = torchState.isEnabled
+
+                if !torchState.isAvailable {
+                    desiredTorchEnabled = false
+                }
+
+                errorMessage = nil
+            }
+        } catch {
+            if isSessionNotPreparedError(error) {
+                return
+            }
+
+            await MainActor.run {
+                if desiredTorchEnabled {
+                    errorMessage = makeErrorMessage(from: error)
+                }
+            }
+        }
+    }
+
+    private func isSessionNotPreparedError(_ error: Error) -> Bool {
+        guard let serviceError = error as? CameraFrameService.ServiceError else {
+            return false
+        }
+
+        switch serviceError {
+        case .sessionNotPrepared:
+            return true
+        default:
+            return false
         }
     }
 

@@ -53,6 +53,7 @@ final class CameraFrameService: NSObject {
 
     var onFrame: ((CameraFrame) -> Void)?
     var onError: ((Error) -> Void)?
+    var onSessionDidBecomeActive: (() -> Void)?
 
     var captureSession: AVCaptureSession {
         session
@@ -66,6 +67,11 @@ final class CameraFrameService: NSObject {
         self.callbackQueue = callbackQueue
         self.currentVideoOrientation = configuration.videoOrientation
         super.init()
+        registerSessionNotifications()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     func prepare() async throws {
@@ -153,12 +159,22 @@ final class CameraFrameService: NSObject {
         }
     }
 
-    func setTorchEnabled(_ isEnabled: Bool) async throws -> TorchState {
+    func setTorchEnabled(
+        _ isEnabled: Bool,
+        requiresRunningSession: Bool = false
+    ) async throws -> TorchState {
         try await withCheckedThrowingContinuation { continuation in
             sessionQueue.async { [weak self] in
                 guard let self else {
                     continuation.resume(returning: TorchState(isAvailable: false, isEnabled: false))
                     return
+                }
+
+                if requiresRunningSession {
+                    guard self.isPrepared, self.session.isRunning else {
+                        continuation.resume(throwing: ServiceError.sessionNotPrepared)
+                        return
+                    }
                 }
 
                 guard let device = self.activeDevice else {
@@ -352,6 +368,44 @@ final class CameraFrameService: NSObject {
 
     private func isTorchSupported(on device: AVCaptureDevice) -> Bool {
         device.hasTorch && device.isTorchModeSupported(.on) && device.isTorchModeSupported(.off)
+    }
+
+    private func registerSessionNotifications() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSessionDidStartRunning(_:)),
+            name: AVCaptureSession.didStartRunningNotification,
+            object: session
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSessionInterruptionEnded(_:)),
+            name: AVCaptureSession.interruptionEndedNotification,
+            object: session
+        )
+    }
+
+    @objc private func handleSessionDidStartRunning(_ notification: Notification) {
+        deliverSessionDidBecomeActive()
+    }
+
+    @objc private func handleSessionInterruptionEnded(_ notification: Notification) {
+        guard session.isRunning else {
+            return
+        }
+
+        deliverSessionDidBecomeActive()
+    }
+
+    private func deliverSessionDidBecomeActive() {
+        if let callbackQueue {
+            callbackQueue.async { [weak self] in
+                self?.onSessionDidBecomeActive?()
+            }
+        } else {
+            onSessionDidBecomeActive?()
+        }
     }
 
     private func buildFrame(from sampleBuffer: CMSampleBuffer, connection: AVCaptureConnection) -> CameraFrame? {

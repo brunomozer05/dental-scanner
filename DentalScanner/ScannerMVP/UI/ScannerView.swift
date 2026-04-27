@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 struct ScannerView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel = ScannerViewModel()
     @State private var scaleValidationRealDistanceText = ""
     @State private var previewOrientation: CameraPreviewOrientation = .landscapeRight
@@ -68,6 +69,13 @@ struct ScannerView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
             updateLandscapePreviewOrientation()
+        }
+        .onChange(of: scenePhase) { _, newScenePhase in
+            guard newScenePhase == .active else {
+                return
+            }
+
+            viewModel.handleAppBecameActive()
         }
         .onDisappear {
             viewModel.stopCamera()
