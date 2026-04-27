@@ -32,12 +32,35 @@ final class ScannerViewModel: ObservableObject {
         static let stableReprojectionError: Double = 2.0
     }
 
+    private enum ScanConfiguration {
+        static let requiredValidFrameCount: Int = 45
+        static let minimumStabilizingFrameCount: Int = 20
+        static let poseStabilityWindowCount: Int = 12
+        static let targetAverageReprojectionError: Double = 1.2
+        static let maximumAverageReprojectionError: Double = 2.0
+        static let maximumReadyAverageReprojectionError: Double = 1.5
+        static let targetPoseJitterMm: Double = 2.0
+        static let maximumPoseJitterMm: Double = 8.0
+        static let maximumReadyPoseJitterMm: Double = 4.0
+    }
+
     enum CameraState: Equatable {
         case idle
         case preparing
         case ready
         case running
         case failed
+    }
+
+    enum ScanState: Equatable {
+        case idle
+        case scanning
+        case stabilizing
+        case ready
+
+        var isCollectingFrames: Bool {
+            self == .scanning || self == .stabilizing
+        }
     }
 
     struct FrameResolution: Equatable {
@@ -85,6 +108,13 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var selectedImplantMarkerIds: [Int] = []
     @Published private(set) var selectedTagDistanceMm: Double?
     @Published private(set) var selectedImplantDistanceMm: Double?
+    @Published private(set) var scanState: ScanState = .idle
+    @Published private(set) var scanProgress: Double = 0
+    @Published private(set) var scanQualityScore: Double = 0
+    @Published private(set) var scanValidFrameCount: Int = 0
+    @Published private(set) var scanAverageReprojectionError: Double?
+    @Published private(set) var scanPoseJitterMm: Double?
+    @Published private(set) var scanQualityStatus: String = "Aguardando inicio"
     @Published private(set) var stlExportURL: URL?
     @Published private(set) var stlExportedImplantCount: Int = 0
     @Published private(set) var stlExportErrorMessage: String?
@@ -107,6 +137,8 @@ final class ScannerViewModel: ObservableObject {
     private var acceptedPoseFrameCount = 0
     private var consecutivePoseOutlierCount = 0
     private var desiredTorchEnabled = false
+    private var scanReprojectionErrors: [Double] = []
+    private var scanPoseTranslationHistory: [SIMD3<Double>] = []
 
     var captureSession: AVCaptureSession {
         cameraService.captureSession
@@ -122,6 +154,10 @@ final class ScannerViewModel: ObservableObject {
 
     var isMarkerSizeDebugEditingEnabled: Bool {
         PoseConfiguration.isMarkerSizeDebugEditingEnabled
+    }
+
+    var canExportSTL: Bool {
+        scanState == .ready && !implantPoseResults.isEmpty
     }
 
     init(
@@ -285,13 +321,14 @@ final class ScannerViewModel: ObservableObject {
             max(markerSizeMillimeters, PoseConfiguration.minimumMarkerSizeMillimeters),
             PoseConfiguration.maximumMarkerSizeMillimeters
         )
-        arUcoConsistencyFilter.reset()
-        multiFramePoseAccumulator.reset()
-        fusedPoseResults = []
-        implantPoseResults = []
-        implantPoseResult = nil
-        selectedTagDistanceMm = nil
-        selectedImplantDistanceMm = nil
+        resetScanSession()
+    }
+
+    @MainActor
+    func startScan() {
+        resetScanSession()
+        scanState = .scanning
+        scanQualityStatus = "Capturando"
     }
 
     func setPreviewOrientation(_ orientation: CameraPreviewOrientation) {
@@ -307,6 +344,13 @@ final class ScannerViewModel: ObservableObject {
     @MainActor
     @discardableResult
     func exportCurrentImplantsAsSTL() -> URL? {
+        guard canExportSTL else {
+            stlExportURL = nil
+            stlExportedImplantCount = 0
+            stlExportErrorMessage = "Escaneamento ainda nao esta pronto."
+            return nil
+        }
+
         let currentImplantPoses = implantPoseResults
         guard !currentImplantPoses.isEmpty else {
             stlExportURL = nil
@@ -417,10 +461,17 @@ final class ScannerViewModel: ObservableObject {
             in: frame,
             markerSizeMillimeters: markerSizeMillimeters
         )
-        // Consolidated geometry stays in a tag-anchor reference frame, not the moving camera frame.
-        let fusedPoseResults = multiFramePoseAccumulator.update(with: poseMetrics.rawPoseResults)
-        let consolidatedPoseResults = fusedPoseResults.isEmpty ? poseMetrics.rawPoseResults : fusedPoseResults
-        let implantMetrics = estimateImplantPoses(from: consolidatedPoseResults)
+        let scanStateForFrame = scanState
+        let shouldCollectScanFrame = scanStateForFrame.isCollectingFrames
+        let fusedPoseResults = shouldCollectScanFrame
+            ? multiFramePoseAccumulator.update(with: poseMetrics.rawPoseResults)
+            : self.fusedPoseResults
+        let consolidatedPoseResults = shouldCollectScanFrame
+            ? (fusedPoseResults.isEmpty ? poseMetrics.rawPoseResults : fusedPoseResults)
+            : []
+        let implantMetrics = shouldCollectScanFrame
+            ? estimateImplantPoses(from: consolidatedPoseResults)
+            : ImplantMetrics(implantPoseResults: [])
 
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -446,7 +497,6 @@ final class ScannerViewModel: ObservableObject {
             self.arucoGrayscaleChannelCount = arucoMetrics.grayscaleChannelCount
             self.arucoRejectedCandidateCount = arucoMetrics.rejectedCandidateCount
             self.rawPoseResults = poseMetrics.rawPoseResults
-            self.fusedPoseResults = fusedPoseResults
             self.rawPoseResult = poseMetrics.rawPoseResult
             self.stablePoseResult = poseMetrics.stablePoseResult
             self.poseStabilityStatus = poseMetrics.stabilityStatus
@@ -454,11 +504,203 @@ final class ScannerViewModel: ObservableObject {
             self.poseDistanceMm = poseMetrics.stablePoseResult?.distanceMm
             self.poseReprojectionError = poseMetrics.rawPoseResult?.reprojectionError
             self.poseErrorMessage = poseMetrics.errorMessage
-            self.implantPoseResults = implantMetrics.implantPoseResults
-            self.implantPoseResult = implantMetrics.implantPoseResults.first
-            self.selectedTagDistanceMm = self.selectedTagDistance(in: consolidatedPoseResults)
-            self.selectedImplantDistanceMm = self.selectedImplantDistance(in: implantMetrics.implantPoseResults)
+
+            if shouldCollectScanFrame && self.scanState.isCollectingFrames {
+                self.fusedPoseResults = fusedPoseResults
+                self.implantPoseResults = implantMetrics.implantPoseResults
+                self.implantPoseResult = implantMetrics.implantPoseResults.first
+                self.selectedTagDistanceMm = self.selectedTagDistance(in: consolidatedPoseResults)
+                self.selectedImplantDistanceMm = self.selectedImplantDistance(
+                    in: implantMetrics.implantPoseResults
+                )
+                self.recordScanFrame(
+                    rawPoseResults: poseMetrics.rawPoseResults,
+                    consolidatedPoseResults: consolidatedPoseResults,
+                    implantPoseResults: implantMetrics.implantPoseResults
+                )
+            }
         }
+    }
+
+    @MainActor
+    private func resetScanSession() {
+        arUcoConsistencyFilter.reset()
+        multiFramePoseAccumulator.reset()
+        fusedPoseResults = []
+        implantPoseResults = []
+        implantPoseResult = nil
+        selectedTagDistanceMm = nil
+        selectedImplantDistanceMm = nil
+        stlExportURL = nil
+        stlExportedImplantCount = 0
+        stlExportErrorMessage = nil
+        scanState = .idle
+        scanProgress = 0
+        scanQualityScore = 0
+        scanValidFrameCount = 0
+        scanAverageReprojectionError = nil
+        scanPoseJitterMm = nil
+        scanQualityStatus = "Aguardando inicio"
+        scanReprojectionErrors = []
+        scanPoseTranslationHistory = []
+    }
+
+    @MainActor
+    private func recordScanFrame(
+        rawPoseResults: [PoseResult],
+        consolidatedPoseResults: [PoseResult],
+        implantPoseResults: [ImplantPose]
+    ) {
+        guard scanState.isCollectingFrames else {
+            return
+        }
+
+        guard !rawPoseResults.isEmpty,
+              !consolidatedPoseResults.isEmpty,
+              !implantPoseResults.isEmpty,
+              let frameReprojectionError = averageReprojectionError(in: rawPoseResults)
+        else {
+            updateScanQualityStatusForMissingPose()
+            return
+        }
+
+        scanValidFrameCount += 1
+        scanReprojectionErrors.append(frameReprojectionError)
+
+        if let representativePose = consolidatedPoseResults.sorted(by: { $0.markerId < $1.markerId }).first {
+            scanPoseTranslationHistory.append(representativePose.translationVector)
+
+            if scanPoseTranslationHistory.count > ScanConfiguration.poseStabilityWindowCount {
+                scanPoseTranslationHistory.removeFirst(
+                    scanPoseTranslationHistory.count - ScanConfiguration.poseStabilityWindowCount
+                )
+            }
+        }
+
+        scanAverageReprojectionError = average(scanReprojectionErrors)
+        scanPoseJitterMm = poseJitterMillimeters()
+        updateScanProgressAndState(hasImplants: !implantPoseResults.isEmpty)
+    }
+
+    @MainActor
+    private func updateScanQualityStatusForMissingPose() {
+        if scanValidFrameCount == 0 {
+            scanQualityStatus = "Procurando pose"
+        } else if scanState == .stabilizing {
+            scanQualityStatus = "Estabilizando"
+        } else {
+            scanQualityStatus = "Capturando"
+        }
+    }
+
+    @MainActor
+    private func updateScanProgressAndState(hasImplants: Bool) {
+        let frameScore = min(
+            Double(scanValidFrameCount) / Double(ScanConfiguration.requiredValidFrameCount),
+            1.0
+        )
+        let errorScore = qualityScoreForReprojectionError(scanAverageReprojectionError)
+        let stabilityScore = qualityScoreForPoseJitter(scanPoseJitterMm)
+        let combinedQualityScore = frameScore * 0.55 + errorScore * 0.25 + stabilityScore * 0.20
+        let isReady = scanValidFrameCount >= ScanConfiguration.requiredValidFrameCount &&
+            (scanAverageReprojectionError ?? .infinity) <= ScanConfiguration.maximumReadyAverageReprojectionError &&
+            (scanPoseJitterMm ?? .infinity) <= ScanConfiguration.maximumReadyPoseJitterMm &&
+            hasImplants
+
+        scanQualityScore = combinedQualityScore * 100.0
+
+        if isReady {
+            scanState = .ready
+            scanProgress = 100
+            scanQualityStatus = "Pronto para exportar"
+            return
+        }
+
+        scanState = scanValidFrameCount >= ScanConfiguration.minimumStabilizingFrameCount
+            ? .stabilizing
+            : .scanning
+        scanProgress = min(scanQualityScore, 99)
+
+        if errorScore < 0.5 {
+            scanQualityStatus = "Melhore o enquadramento"
+        } else if stabilityScore < 0.5 {
+            scanQualityStatus = "Estabilizando"
+        } else {
+            scanQualityStatus = scanState == .stabilizing ? "Estabilizando" : "Capturando"
+        }
+    }
+
+    private func averageReprojectionError(in poseResults: [PoseResult]) -> Double? {
+        let errors = poseResults
+            .map(\.reprojectionError)
+            .filter { $0.isFinite }
+
+        return average(errors)
+    }
+
+    private func average(_ values: [Double]) -> Double? {
+        guard !values.isEmpty else {
+            return nil
+        }
+
+        return values.reduce(0.0, +) / Double(values.count)
+    }
+
+    private func qualityScoreForReprojectionError(_ reprojectionError: Double?) -> Double {
+        guard let reprojectionError, reprojectionError.isFinite else {
+            return 0
+        }
+
+        if reprojectionError <= ScanConfiguration.targetAverageReprojectionError {
+            return 1
+        }
+
+        if reprojectionError >= ScanConfiguration.maximumAverageReprojectionError {
+            return 0
+        }
+
+        return (
+            ScanConfiguration.maximumAverageReprojectionError - reprojectionError
+        ) / (
+            ScanConfiguration.maximumAverageReprojectionError -
+                ScanConfiguration.targetAverageReprojectionError
+        )
+    }
+
+    private func qualityScoreForPoseJitter(_ poseJitterMm: Double?) -> Double {
+        guard let poseJitterMm, poseJitterMm.isFinite else {
+            return scanValidFrameCount > 0 ? 0.25 : 0
+        }
+
+        if poseJitterMm <= ScanConfiguration.targetPoseJitterMm {
+            return 1
+        }
+
+        if poseJitterMm >= ScanConfiguration.maximumPoseJitterMm {
+            return 0
+        }
+
+        return (
+            ScanConfiguration.maximumPoseJitterMm - poseJitterMm
+        ) / (
+            ScanConfiguration.maximumPoseJitterMm - ScanConfiguration.targetPoseJitterMm
+        )
+    }
+
+    private func poseJitterMillimeters() -> Double? {
+        guard scanPoseTranslationHistory.count >= 3 else {
+            return nil
+        }
+
+        let count = Double(scanPoseTranslationHistory.count)
+        let meanTranslation = scanPoseTranslationHistory.reduce(SIMD3<Double>.zero) {
+            $0 + $1
+        } / count
+        let totalDistanceFromMean = scanPoseTranslationHistory.reduce(0.0) {
+            $0 + simd_distance($1, meanTranslation)
+        }
+
+        return totalDistanceFromMean / count
     }
 
     private func buildFrameMetrics(from frame: CameraFrame) -> FrameMetrics {

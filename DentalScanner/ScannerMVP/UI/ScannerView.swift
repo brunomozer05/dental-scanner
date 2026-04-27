@@ -40,6 +40,18 @@ struct ScannerView: View {
             }
             .zIndex(3)
 
+            VStack {
+                Spacer()
+
+                HStack {
+                    scanWorkflowPanel
+                        .padding(12)
+
+                    Spacer()
+                }
+            }
+            .zIndex(3)
+
             if isDebugPanelExpanded {
                 VStack {
                     Spacer()
@@ -138,6 +150,12 @@ struct ScannerView: View {
                 isActive: viewModel.rawPoseResult != nil
             )
 
+            statusChip(
+                title: "Scan",
+                value: formattedScanProgress,
+                isActive: viewModel.scanState == .ready || viewModel.scanState.isCollectingFrames
+            )
+
             Spacer(minLength: 4)
 
             compactTorchButton
@@ -168,6 +186,7 @@ struct ScannerView: View {
                     markerSizeDebugControl
                     poseDebugSection
                     implantComparisonControls
+                    scanQualitySection
                     scaleValidationSection
                     stlExportSection
                     errorDebugSection
@@ -253,11 +272,65 @@ struct ScannerView: View {
             Image(systemName: "square.and.arrow.up")
                 .font(.body.weight(.semibold))
                 .frame(width: 34, height: 34)
-                .foregroundStyle(viewModel.implantPoseResults.isEmpty ? Color.secondary : Color.primary)
+                .foregroundStyle(viewModel.canExportSTL ? Color.primary : Color.secondary)
         }
         .buttonStyle(.plain)
-        .disabled(viewModel.implantPoseResults.isEmpty)
-        .opacity(viewModel.implantPoseResults.isEmpty ? 0.65 : 1)
+        .disabled(!viewModel.canExportSTL)
+        .opacity(viewModel.canExportSTL ? 1 : 0.65)
+    }
+
+    private var scanWorkflowPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Button {
+                    viewModel.startScan()
+                } label: {
+                    Label(scanActionTitle, systemImage: scanActionIconName)
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .foregroundStyle(Color.white)
+                        .background(viewModel.scanState == .ready ? Color.green : Color.accentColor)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(formattedScanState)
+                        .font(.caption.weight(.semibold))
+
+                    Text(viewModel.scanQualityStatus)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            ProgressView(value: viewModel.scanProgress, total: 100)
+                .progressViewStyle(.linear)
+                .tint(viewModel.scanState == .ready ? Color.green : Color.accentColor)
+                .frame(width: 260)
+
+            HStack(spacing: 12) {
+                scanMetric(title: "Progresso", value: formattedScanProgress)
+                scanMetric(title: "Frames", value: formattedScanValidFrames)
+                scanMetric(title: "Qualidade", value: formattedScanQualityScore)
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func scanMetric(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+        }
     }
 
     private func statusChip(title: String, value: String, isActive: Bool) -> some View {
@@ -292,6 +365,69 @@ struct ScannerView: View {
         case .failed:
             return "Failed"
         }
+    }
+
+    private var formattedScanState: String {
+        switch viewModel.scanState {
+        case .idle:
+            return "Idle"
+        case .scanning:
+            return "Scanning"
+        case .stabilizing:
+            return "Stabilizing"
+        case .ready:
+            return "Ready"
+        }
+    }
+
+    private var scanActionTitle: String {
+        switch viewModel.scanState {
+        case .idle:
+            return "Iniciar escaneamento"
+        case .scanning, .stabilizing:
+            return "Reiniciar"
+        case .ready:
+            return "Novo escaneamento"
+        }
+    }
+
+    private var scanActionIconName: String {
+        switch viewModel.scanState {
+        case .idle:
+            return "record.circle"
+        case .scanning, .stabilizing:
+            return "arrow.clockwise"
+        case .ready:
+            return "checkmark.circle"
+        }
+    }
+
+    private var formattedScanProgress: String {
+        String(format: "%.0f%%", viewModel.scanProgress)
+    }
+
+    private var formattedScanQualityScore: String {
+        String(format: "%.0f%%", viewModel.scanQualityScore)
+    }
+
+    private var formattedScanValidFrames: String {
+        "\(viewModel.scanValidFrameCount)"
+    }
+
+    private var formattedScanAverageReprojectionError: String {
+        guard let scanAverageReprojectionError = viewModel.scanAverageReprojectionError else {
+            return "-"
+        }
+
+        return String(format: "%.2f px", scanAverageReprojectionError)
+    }
+
+    private var formattedScanPoseJitter: String {
+        guard let scanPoseJitterMm = viewModel.scanPoseJitterMm else {
+            return "-"
+        }
+
+        return String(format: "%.2f mm", scanPoseJitterMm)
     }
 
     private var formattedResolution: String {
@@ -564,6 +700,21 @@ struct ScannerView: View {
         viewModel.arucoErrorMessage ?? "Nenhum"
     }
 
+    private var scanQualitySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Escaneamento")
+                .font(.subheadline.weight(.semibold))
+
+            metricRow(title: "Estado", value: formattedScanState)
+            metricRow(title: "Progresso", value: formattedScanProgress)
+            metricRow(title: "Qualidade", value: formattedScanQualityScore)
+            metricRow(title: "Frames validos", value: formattedScanValidFrames)
+            metricRow(title: "Erro medio", value: formattedScanAverageReprojectionError)
+            metricRow(title: "Jitter pose", value: formattedScanPoseJitter)
+            metricRow(title: "Status", value: viewModel.scanQualityStatus)
+        }
+    }
+
     @ViewBuilder
     private var implantComparisonControls: some View {
         if !viewModel.implantPoseResults.isEmpty {
@@ -648,15 +799,15 @@ struct ScannerView: View {
                         .font(.caption.weight(.semibold))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 8)
-                        .foregroundStyle(viewModel.implantPoseResults.isEmpty ? Color.secondary : Color.primary)
+                        .foregroundStyle(viewModel.canExportSTL ? Color.primary : Color.secondary)
                         .background(Color(.secondarySystemBackground))
                         .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .disabled(viewModel.implantPoseResults.isEmpty)
-                .opacity(viewModel.implantPoseResults.isEmpty ? 0.65 : 1)
+                .disabled(!viewModel.canExportSTL)
+                .opacity(viewModel.canExportSTL ? 1 : 0.65)
 
-                if let stlExportURL = viewModel.stlExportURL {
+                if viewModel.canExportSTL, let stlExportURL = viewModel.stlExportURL {
                     ShareLink(item: stlExportURL) {
                         Label("Compartilhar STL", systemImage: "square.and.arrow.up")
                             .font(.caption.weight(.semibold))
