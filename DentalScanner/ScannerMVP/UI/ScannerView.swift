@@ -25,7 +25,8 @@ struct ScannerView: View {
             ArUcoOverlayView(
                 detections: viewModel.overlayMarkers,
                 frameResolution: viewModel.arucoFrameResolution ?? viewModel.frameResolution,
-                orientation: previewOrientation
+                orientation: previewOrientation,
+                tagCoverages: viewModel.scanTagCoverages
             )
             .ignoresSafeArea(.all)
             .allowsHitTesting(false)
@@ -187,6 +188,7 @@ struct ScannerView: View {
                     poseDebugSection
                     implantComparisonControls
                     scanQualitySection
+                    scanDebugControl
                     scaleValidationSection
                     stlExportSection
                     errorDebugSection
@@ -430,6 +432,29 @@ struct ScannerView: View {
         return String(format: "%.2f mm", scanPoseJitterMm)
     }
 
+    private var formattedScanRequiredCoverage: String {
+        String(format: "%.0f%%", viewModel.scanRequiredAngularCoveragePercent)
+    }
+
+    private var formattedScanTagCoverageSummary: String {
+        guard !viewModel.scanTagCoverages.isEmpty else {
+            return "-"
+        }
+
+        return viewModel.scanTagCoverages.values
+            .sorted { $0.markerId < $1.markerId }
+            .map { coverage in
+                String(
+                    format: "ID %d: %.0f%% (%d/%d)",
+                    coverage.markerId,
+                    coverage.progress,
+                    coverage.coveredBinCount,
+                    coverage.requiredBinCount
+                )
+            }
+            .joined(separator: "\n")
+    }
+
     private var formattedResolution: String {
         guard let resolution = viewModel.frameResolution else {
             return "-"
@@ -490,6 +515,20 @@ struct ScannerView: View {
         Binding(
             get: { viewModel.poseMarkerSizeMillimeters },
             set: { viewModel.setMarkerSizeMillimeters($0) }
+        )
+    }
+
+    private var scanTargetFrameBinding: Binding<Int> {
+        Binding(
+            get: { viewModel.scanTargetValidFrameCount },
+            set: { viewModel.setScanTargetValidFrameCount($0) }
+        )
+    }
+
+    private var scanRequiredCoverageBinding: Binding<Double> {
+        Binding(
+            get: { viewModel.scanRequiredAngularCoveragePercent },
+            set: { viewModel.setScanRequiredAngularCoveragePercent($0) }
         )
     }
 
@@ -709,10 +748,51 @@ struct ScannerView: View {
             metricRow(title: "Progresso", value: formattedScanProgress)
             metricRow(title: "Qualidade", value: formattedScanQualityScore)
             metricRow(title: "Frames validos", value: formattedScanValidFrames)
+            metricRow(title: "Cobertura tags", value: formattedScanTagCoverageSummary)
             metricRow(title: "Erro medio", value: formattedScanAverageReprojectionError)
             metricRow(title: "Jitter pose", value: formattedScanPoseJitter)
             metricRow(title: "Status", value: viewModel.scanQualityStatus)
         }
+    }
+
+    private var scanDebugControl: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Config scan")
+                .font(.subheadline.weight(.semibold))
+
+            Stepper(
+                value: scanTargetFrameBinding,
+                in: viewModel.scanTargetValidFrameRange,
+                step: 5
+            ) {
+                HStack(alignment: .center) {
+                    Text("Frames alvo")
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Text("\(viewModel.scanTargetValidFrameCount)")
+                        .monospacedDigit()
+                }
+            }
+
+            Stepper(
+                value: scanRequiredCoverageBinding,
+                in: viewModel.scanRequiredAngularCoverageRange,
+                step: viewModel.scanAngularCoverageStepPercent
+            ) {
+                HStack(alignment: .center) {
+                    Text("Cobertura angular")
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Text(formattedScanRequiredCoverage)
+                        .monospacedDigit()
+                }
+            }
+        }
+        .font(.caption)
     }
 
     @ViewBuilder

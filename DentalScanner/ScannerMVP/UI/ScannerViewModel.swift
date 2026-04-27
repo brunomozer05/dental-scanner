@@ -33,8 +33,9 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private enum ScanConfiguration {
-        static let requiredValidFrameCount: Int = 45
-        static let minimumStabilizingFrameCount: Int = 20
+        static let defaultTargetValidFrameCount: Int = 45
+        static let minimumTargetValidFrameCount: Int = 10
+        static let maximumTargetValidFrameCount: Int = 120
         static let poseStabilityWindowCount: Int = 12
         static let targetAverageReprojectionError: Double = 1.2
         static let maximumAverageReprojectionError: Double = 2.0
@@ -42,6 +43,12 @@ final class ScannerViewModel: ObservableObject {
         static let targetPoseJitterMm: Double = 2.0
         static let maximumPoseJitterMm: Double = 8.0
         static let maximumReadyPoseJitterMm: Double = 4.0
+        static let azimuthBinCount: Int = 8
+        static let elevationBinCount: Int = 2
+        static let defaultRequiredAngularCoveragePercent: Double = 50.0
+        static let minimumRequiredAngularCoveragePercent: Double = 25.0
+        static let maximumRequiredAngularCoveragePercent: Double = 100.0
+        static let angularCoverageStepPercent: Double = 5.0
     }
 
     enum CameraState: Equatable {
@@ -66,6 +73,14 @@ final class ScannerViewModel: ObservableObject {
     struct FrameResolution: Equatable {
         let width: Int
         let height: Int
+    }
+
+    struct ScanTagCoverage: Equatable {
+        let markerId: Int
+        let progress: Double
+        let coveredBinCount: Int
+        let requiredBinCount: Int
+        let observedFrameCount: Int
     }
 
     @Published private(set) var cameraState: CameraState = .idle
@@ -115,6 +130,10 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var scanAverageReprojectionError: Double?
     @Published private(set) var scanPoseJitterMm: Double?
     @Published private(set) var scanQualityStatus: String = "Aguardando inicio"
+    @Published private(set) var scanTagCoverages: [Int: ScanTagCoverage] = [:]
+    @Published private(set) var scanTargetValidFrameCount: Int = ScanConfiguration.defaultTargetValidFrameCount
+    @Published private(set) var scanRequiredAngularCoveragePercent: Double =
+        ScanConfiguration.defaultRequiredAngularCoveragePercent
     @Published private(set) var stlExportURL: URL?
     @Published private(set) var stlExportedImplantCount: Int = 0
     @Published private(set) var stlExportErrorMessage: String?
@@ -139,6 +158,8 @@ final class ScannerViewModel: ObservableObject {
     private var desiredTorchEnabled = false
     private var scanReprojectionErrors: [Double] = []
     private var scanPoseTranslationHistory: [SIMD3<Double>] = []
+    private var scanCoverageBinsByMarkerId: [Int: Set<Int>] = [:]
+    private var scanFrameCountsByMarkerId: [Int: Int] = [:]
 
     var captureSession: AVCaptureSession {
         cameraService.captureSession
@@ -158,6 +179,19 @@ final class ScannerViewModel: ObservableObject {
 
     var canExportSTL: Bool {
         scanState == .ready && !implantPoseResults.isEmpty
+    }
+
+    var scanTargetValidFrameRange: ClosedRange<Int> {
+        ScanConfiguration.minimumTargetValidFrameCount...ScanConfiguration.maximumTargetValidFrameCount
+    }
+
+    var scanRequiredAngularCoverageRange: ClosedRange<Double> {
+        ScanConfiguration.minimumRequiredAngularCoveragePercent...
+            ScanConfiguration.maximumRequiredAngularCoveragePercent
+    }
+
+    var scanAngularCoverageStepPercent: Double {
+        ScanConfiguration.angularCoverageStepPercent
     }
 
     init(
@@ -329,6 +363,38 @@ final class ScannerViewModel: ObservableObject {
         resetScanSession()
         scanState = .scanning
         scanQualityStatus = "Capturando"
+    }
+
+    @MainActor
+    func setScanTargetValidFrameCount(_ targetValidFrameCount: Int) {
+        scanTargetValidFrameCount = min(
+            max(targetValidFrameCount, ScanConfiguration.minimumTargetValidFrameCount),
+            ScanConfiguration.maximumTargetValidFrameCount
+        )
+
+        if scanState != .idle {
+            updateScanProgressAndState(hasImplants: !implantPoseResults.isEmpty)
+        }
+    }
+
+    @MainActor
+    func setScanRequiredAngularCoveragePercent(_ requiredAngularCoveragePercent: Double) {
+        guard requiredAngularCoveragePercent.isFinite else {
+            return
+        }
+
+        scanRequiredAngularCoveragePercent = min(
+            max(
+                requiredAngularCoveragePercent,
+                ScanConfiguration.minimumRequiredAngularCoveragePercent
+            ),
+            ScanConfiguration.maximumRequiredAngularCoveragePercent
+        )
+        rebuildScanTagCoverages()
+
+        if scanState != .idle {
+            updateScanProgressAndState(hasImplants: !implantPoseResults.isEmpty)
+        }
     }
 
     func setPreviewOrientation(_ orientation: CameraPreviewOrientation) {
@@ -541,8 +607,11 @@ final class ScannerViewModel: ObservableObject {
         scanAverageReprojectionError = nil
         scanPoseJitterMm = nil
         scanQualityStatus = "Aguardando inicio"
+        scanTagCoverages = [:]
         scanReprojectionErrors = []
         scanPoseTranslationHistory = []
+        scanCoverageBinsByMarkerId = [:]
+        scanFrameCountsByMarkerId = [:]
     }
 
     @MainActor
@@ -566,6 +635,7 @@ final class ScannerViewModel: ObservableObject {
 
         scanValidFrameCount += 1
         scanReprojectionErrors.append(frameReprojectionError)
+        recordAngularCoverage(from: rawPoseResults)
 
         if let representativePose = consolidatedPoseResults.sorted(by: { $0.markerId < $1.markerId }).first {
             scanPoseTranslationHistory.append(representativePose.translationVector)
@@ -595,14 +665,18 @@ final class ScannerViewModel: ObservableObject {
 
     @MainActor
     private func updateScanProgressAndState(hasImplants: Bool) {
+        let tagCoverageScore = minimumTagCoverageProgress()
         let frameScore = min(
-            Double(scanValidFrameCount) / Double(ScanConfiguration.requiredValidFrameCount),
+            Double(scanValidFrameCount) / Double(scanTargetValidFrameCount),
             1.0
         )
         let errorScore = qualityScoreForReprojectionError(scanAverageReprojectionError)
         let stabilityScore = qualityScoreForPoseJitter(scanPoseJitterMm)
-        let combinedQualityScore = frameScore * 0.55 + errorScore * 0.25 + stabilityScore * 0.20
-        let isReady = scanValidFrameCount >= ScanConfiguration.requiredValidFrameCount &&
+        let combinedQualityScore = tagCoverageScore * 0.65 +
+            frameScore * 0.15 +
+            errorScore * 0.10 +
+            stabilityScore * 0.10
+        let isReady = hasCompleteTagCoverage &&
             (scanAverageReprojectionError ?? .infinity) <= ScanConfiguration.maximumReadyAverageReprojectionError &&
             (scanPoseJitterMm ?? .infinity) <= ScanConfiguration.maximumReadyPoseJitterMm &&
             hasImplants
@@ -616,18 +690,130 @@ final class ScannerViewModel: ObservableObject {
             return
         }
 
-        scanState = scanValidFrameCount >= ScanConfiguration.minimumStabilizingFrameCount
+        scanState = scanValidFrameCount >= minimumStabilizingFrameCount
             ? .stabilizing
             : .scanning
-        scanProgress = min(scanQualityScore, 99)
+        scanProgress = min(tagCoverageScore * 100.0, 99)
 
-        if errorScore < 0.5 {
+        if tagCoverageScore < 0.5 {
+            scanQualityStatus = "Varie os angulos"
+        } else if errorScore < 0.5 {
             scanQualityStatus = "Melhore o enquadramento"
         } else if stabilityScore < 0.5 {
             scanQualityStatus = "Estabilizando"
         } else {
             scanQualityStatus = scanState == .stabilizing ? "Estabilizando" : "Capturando"
         }
+    }
+
+    private var minimumStabilizingFrameCount: Int {
+        max(3, scanTargetValidFrameCount / 2)
+    }
+
+    private var hasCompleteTagCoverage: Bool {
+        !scanTagCoverages.isEmpty &&
+            scanTagCoverages.values.allSatisfy { $0.progress >= 100.0 }
+    }
+
+    private func minimumTagCoverageProgress() -> Double {
+        guard !scanTagCoverages.isEmpty else {
+            return 0
+        }
+
+        let minimumProgress = scanTagCoverages.values
+            .map { min(max($0.progress / 100.0, 0.0), 1.0) }
+            .min() ?? 0
+
+        return minimumProgress
+    }
+
+    @MainActor
+    private func recordAngularCoverage(from poseResults: [PoseResult]) {
+        for poseResult in poseResults {
+            guard let coverageBin = angularCoverageBin(for: poseResult) else {
+                continue
+            }
+
+            scanCoverageBinsByMarkerId[poseResult.markerId, default: []].insert(coverageBin)
+            scanFrameCountsByMarkerId[poseResult.markerId, default: 0] += 1
+        }
+
+        rebuildScanTagCoverages()
+    }
+
+    @MainActor
+    private func rebuildScanTagCoverages() {
+        let requiredBinCount = scanRequiredAngularCoverageBinCount()
+
+        scanTagCoverages = scanCoverageBinsByMarkerId.reduce(into: [:]) { partialResult, item in
+            let markerId = item.key
+            let coveredBinCount = item.value.count
+            let progress = min(Double(coveredBinCount) / Double(requiredBinCount), 1.0) * 100.0
+
+            partialResult[markerId] = ScanTagCoverage(
+                markerId: markerId,
+                progress: progress,
+                coveredBinCount: coveredBinCount,
+                requiredBinCount: requiredBinCount,
+                observedFrameCount: scanFrameCountsByMarkerId[markerId] ?? 0
+            )
+        }
+    }
+
+    private func scanRequiredAngularCoverageBinCount() -> Int {
+        max(
+            1,
+            Int(
+                ceil(
+                    Double(totalAngularCoverageBinCount) *
+                        scanRequiredAngularCoveragePercent / 100.0
+                )
+            )
+        )
+    }
+
+    private var totalAngularCoverageBinCount: Int {
+        ScanConfiguration.azimuthBinCount * ScanConfiguration.elevationBinCount
+    }
+
+    private func angularCoverageBin(for poseResult: PoseResult) -> Int? {
+        guard let direction = cameraToTagDirectionInMarkerSpace(for: poseResult) else {
+            return nil
+        }
+
+        let azimuth = atan2(direction.y, direction.x)
+        let normalizedAzimuth = (azimuth + Double.pi) / (2.0 * Double.pi)
+        let azimuthBin = min(
+            max(Int(normalizedAzimuth * Double(ScanConfiguration.azimuthBinCount)), 0),
+            ScanConfiguration.azimuthBinCount - 1
+        )
+        let elevation = asin(min(max(direction.z, -1.0), 1.0))
+        let normalizedElevation = (elevation + Double.pi / 2.0) / Double.pi
+        let elevationBin = min(
+            max(Int(normalizedElevation * Double(ScanConfiguration.elevationBinCount)), 0),
+            ScanConfiguration.elevationBinCount - 1
+        )
+
+        return elevationBin * ScanConfiguration.azimuthBinCount + azimuthBin
+    }
+
+    private func cameraToTagDirectionInMarkerSpace(for poseResult: PoseResult) -> SIMD3<Double>? {
+        let cameraToTagLength = simd_length(poseResult.translationVector)
+        guard cameraToTagLength.isFinite, cameraToTagLength > 1e-9 else {
+            return nil
+        }
+
+        let cameraToTagDirectionInCameraSpace = poseResult.translationVector / cameraToTagLength
+        let markerRotation = Self.rotationMatrix(fromRodrigues: poseResult.rotationVector)
+        let cameraToTagDirectionInMarkerSpace = simd_transpose(markerRotation) *
+            cameraToTagDirectionInCameraSpace
+        let directionLength = simd_length(cameraToTagDirectionInMarkerSpace)
+
+        guard directionLength.isFinite, directionLength > 1e-9 else {
+            return nil
+        }
+
+        return cameraToTagDirectionInMarkerSpace / directionLength
     }
 
     private func averageReprojectionError(in poseResults: [PoseResult]) -> Double? {
@@ -1094,6 +1280,48 @@ final class ScannerViewModel: ObservableObject {
 
     private struct ImplantMetrics {
         let implantPoseResults: [ImplantPose]
+    }
+
+    private static func rotationMatrix(fromRodrigues vector: SIMD3<Double>) -> simd_double3x3 {
+        let theta = simd_length(vector)
+        guard theta.isFinite, theta > 1e-9 else {
+            return matrix_identity_double3x3
+        }
+
+        let axis = vector / theta
+        let cosine = cos(theta)
+        let sine = sin(theta)
+        let oneMinusCosine = 1.0 - cosine
+
+        return matrixFromRows(
+            SIMD3(
+                cosine + axis.x * axis.x * oneMinusCosine,
+                axis.x * axis.y * oneMinusCosine - axis.z * sine,
+                axis.x * axis.z * oneMinusCosine + axis.y * sine
+            ),
+            SIMD3(
+                axis.y * axis.x * oneMinusCosine + axis.z * sine,
+                cosine + axis.y * axis.y * oneMinusCosine,
+                axis.y * axis.z * oneMinusCosine - axis.x * sine
+            ),
+            SIMD3(
+                axis.z * axis.x * oneMinusCosine - axis.y * sine,
+                axis.z * axis.y * oneMinusCosine + axis.x * sine,
+                cosine + axis.z * axis.z * oneMinusCosine
+            )
+        )
+    }
+
+    private static func matrixFromRows(
+        _ row0: SIMD3<Double>,
+        _ row1: SIMD3<Double>,
+        _ row2: SIMD3<Double>
+    ) -> simd_double3x3 {
+        simd_double3x3(columns: (
+            SIMD3(row0.x, row1.x, row2.x),
+            SIMD3(row0.y, row1.y, row2.y),
+            SIMD3(row0.z, row1.z, row2.z)
+        ))
     }
 
     private static func formatImplantOffset(_ offset: MarkerToImplantTransform) -> String {

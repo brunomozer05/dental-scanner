@@ -1,9 +1,11 @@
+import Foundation
 import SwiftUI
 
 struct ArUcoOverlayView: View {
     let detections: [ArUcoDetectionResult]
     let frameResolution: ScannerViewModel.FrameResolution?
     let orientation: CameraPreviewOrientation
+    let tagCoverages: [Int: ScannerViewModel.ScanTagCoverage]
 
     var body: some View {
         GeometryReader { proxy in
@@ -50,16 +52,52 @@ struct ArUcoOverlayView: View {
                     .position(cornerItem.element)
             }
 
-            Text("ID \(marker.markerId)")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.black)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(.yellow.opacity(0.9))
-                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            markerCoverageLabel(for: marker)
                 .position(labelPosition(for: marker.corners, in: previewSize))
         }
         .frame(width: previewSize.width, height: previewSize.height)
+    }
+
+    private func markerCoverageLabel(for marker: ProjectedMarker) -> some View {
+        let coverage = tagCoverages[marker.markerId]
+        let progress = coverage?.progress ?? 0
+        let color = coverage == nil ? Color.yellow : coverageColor(for: progress)
+
+        return VStack(alignment: .leading, spacing: 3) {
+            Text("ID \(marker.markerId)")
+                .font(.caption2.weight(.semibold))
+
+            if coverage != nil {
+                HStack(spacing: 4) {
+                    Text(String(format: "%.0f%%", progress))
+                        .font(.caption2.weight(.bold))
+
+                    Text("\(coverage?.coveredBinCount ?? 0)/\(coverage?.requiredBinCount ?? 0)")
+                        .font(.caption2.monospacedDigit())
+                        .opacity(0.8)
+                }
+            }
+        }
+        .foregroundStyle(.black)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(color.opacity(0.92))
+        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .stroke(.black.opacity(0.65), lineWidth: 1)
+        }
+    }
+
+    private func coverageColor(for progress: Double) -> Color {
+        switch progress {
+        case 80...:
+            return .green
+        case 45..<80:
+            return .yellow
+        default:
+            return .red
+        }
     }
 
     private func makeAspectFillProjection(previewSize: CGSize) -> ((CGPoint) -> CGPoint)? {
