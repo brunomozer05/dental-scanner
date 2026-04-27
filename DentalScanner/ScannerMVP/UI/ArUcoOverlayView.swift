@@ -15,6 +15,7 @@ struct ArUcoOverlayView: View {
     private let markerFastMotionCurrentWeight: CGFloat = 0.93
     private let markerFastMotionDistanceThreshold: CGFloat = 6
     private let markerMotionResponseScale: CGFloat = 20
+    private let markerPredictionFactor: CGFloat = 0.6
 
     var body: some View {
         GeometryReader { proxy in
@@ -196,13 +197,26 @@ struct ArUcoOverlayView: View {
                 0
 
             if let previousMarker = nextMarkers[marker.markerId] {
+                let currentCenter = markerCenter(for: marker.corners)
+                let previousCenter = previousMarker.previousCenter ?? currentCenter
+                let velocity = CGPoint(
+                    x: currentCenter.x - previousCenter.x,
+                    y: currentCenter.y - previousCenter.y
+                )
+                let predictedCenter = CGPoint(
+                    x: currentCenter.x + velocity.x * markerPredictionFactor,
+                    y: currentCenter.y + velocity.y * markerPredictionFactor
+                )
+
                 nextMarkers[marker.markerId] = TrackedMarker(
                     markerId: marker.markerId,
                     corners: smoothedCorners(
                         previous: previousMarker.corners,
-                        current: marker.corners
+                        current: marker.corners,
+                        targetCenter: predictedCenter
                     ),
                     lastSeen: timestamp,
+                    previousCenter: currentCenter,
                     progress: progress
                 )
             } else {
@@ -210,6 +224,7 @@ struct ArUcoOverlayView: View {
                     markerId: marker.markerId,
                     corners: marker.corners,
                     lastSeen: timestamp,
+                    previousCenter: markerCenter(for: marker.corners),
                     progress: progress
                 )
             }
@@ -246,15 +261,19 @@ struct ArUcoOverlayView: View {
         }
     }
 
-    private func smoothedCorners(previous: [CGPoint], current: [CGPoint]) -> [CGPoint] {
+    private func smoothedCorners(
+        previous: [CGPoint],
+        current: [CGPoint],
+        targetCenter: CGPoint
+    ) -> [CGPoint] {
         guard previous.count == current.count else {
             return current
         }
 
         let previousCenter = markerCenter(for: previous)
         let currentCenter = markerCenter(for: current)
-        let centerDeltaX = currentCenter.x - previousCenter.x
-        let centerDeltaY = currentCenter.y - previousCenter.y
+        let centerDeltaX = targetCenter.x - previousCenter.x
+        let centerDeltaY = targetCenter.y - previousCenter.y
         let centerDistance = (centerDeltaX * centerDeltaX + centerDeltaY * centerDeltaY).squareRoot()
         let responseDistance = max(centerDistance - markerFastMotionDistanceThreshold, 0)
         let t = min(responseDistance / markerMotionResponseScale, 1.0)
@@ -303,6 +322,7 @@ struct ArUcoOverlayView: View {
         let markerId: Int
         let corners: [CGPoint]
         let lastSeen: Date
+        let previousCenter: CGPoint?
         let progress: Double
 
         var id: Int {
