@@ -32,6 +32,12 @@ struct STLExporter {
     }
 
     private let configuration: Configuration
+    // The generated cylinder is Z-up; implant pose axes expect the implant shaft on local Y.
+    private static let cylinderToImplantAxisRotation = matrixFromRows(
+        SIMD3(1.0, 0.0, 0.0),
+        SIMD3(0.0, 0.0, 1.0),
+        SIMD3(0.0, -1.0, 0.0)
+    )
 
     init(configuration: Configuration = .initialImplantMarker) {
         self.configuration = configuration
@@ -131,7 +137,20 @@ struct STLExporter {
     }
 
     private func worldPoint(_ localPoint: SIMD3<Double>, using implantPose: ImplantPose) -> SIMD3<Double> {
-        implantPose.rotationMatrix * localPoint + implantPose.translationVector
+        let implantAlignedPoint = Self.cylinderToImplantAxisRotation * localPoint
+        return implantPose.rotationMatrix * implantAlignedPoint + implantPose.translationVector
+    }
+
+    private static func matrixFromRows(
+        _ row0: SIMD3<Double>,
+        _ row1: SIMD3<Double>,
+        _ row2: SIMD3<Double>
+    ) -> simd_double3x3 {
+        simd_double3x3(columns: (
+            SIMD3(row0.x, row1.x, row2.x),
+            SIMD3(row0.y, row1.y, row2.y),
+            SIMD3(row0.z, row1.z, row2.z)
+        ))
     }
 
     private func format(_ value: Double) -> String {
