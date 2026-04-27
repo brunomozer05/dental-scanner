@@ -56,6 +56,7 @@ struct ScannerView: View {
         }
         .background(Color.black)
         .ignoresSafeArea(.all)
+        .supportedInterfaceOrientations(.landscape)
         .task {
             updatePreviewOrientation()
             await viewModel.startCamera()
