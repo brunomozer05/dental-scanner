@@ -13,4 +13,4 @@ The framework must be built with the OpenCV modules used by the scanner MVP:
 - `aruco`
 - `calib3d`
 
-For ArUco support, build OpenCV with `opencv_contrib` enabled. The default iOS framework published by OpenCV may not include contrib modules.
+For ArUco support, build OpenCV with `opencv_contrib` enabled. The default iOS framework published by OpenCV may not include contrib modules
