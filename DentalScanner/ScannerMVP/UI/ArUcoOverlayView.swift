@@ -9,9 +9,11 @@ struct ArUcoOverlayView: View {
 
     @State private var trackedMarkers: [Int: TrackedMarker] = [:]
 
-    private let markerPersistenceDuration: TimeInterval = 0.3
+    private let markerPersistenceDuration: TimeInterval = 0.18
     private let markerFadeAnimation = Animation.easeInOut(duration: 0.14)
-    private let markerPositionCurrentWeight: CGFloat = 0.3
+    private let markerSlowMotionCurrentWeight: CGFloat = 0.5
+    private let markerFastMotionCurrentWeight: CGFloat = 0.7
+    private let markerFastMotionDistanceThreshold: CGFloat = 18
 
     var body: some View {
         GeometryReader { proxy in
@@ -248,12 +250,21 @@ struct ArUcoOverlayView: View {
             return current
         }
 
+        let previousCenter = markerCenter(for: previous)
+        let currentCenter = markerCenter(for: current)
+        let centerDeltaX = currentCenter.x - previousCenter.x
+        let centerDeltaY = currentCenter.y - previousCenter.y
+        let centerDistance = (centerDeltaX * centerDeltaX + centerDeltaY * centerDeltaY).squareRoot()
+        let currentWeight = centerDistance < markerFastMotionDistanceThreshold ?
+            markerSlowMotionCurrentWeight :
+            markerFastMotionCurrentWeight
+
         return zip(previous, current).map { previousCorner, currentCorner in
             CGPoint(
-                x: currentCorner.x * markerPositionCurrentWeight +
-                    previousCorner.x * (1.0 - markerPositionCurrentWeight),
-                y: currentCorner.y * markerPositionCurrentWeight +
-                    previousCorner.y * (1.0 - markerPositionCurrentWeight)
+                x: currentCorner.x * currentWeight +
+                    previousCorner.x * (1.0 - currentWeight),
+                y: currentCorner.y * currentWeight +
+                    previousCorner.y * (1.0 - currentWeight)
             )
         }
     }
