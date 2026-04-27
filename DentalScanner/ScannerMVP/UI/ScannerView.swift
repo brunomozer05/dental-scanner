@@ -100,7 +100,12 @@ struct ScannerView: View {
             viewModel.stopCamera()
             UIDevice.current.endGeneratingDeviceOrientationNotifications()
         }
-        .fullScreenCover(item: $stlViewerPresentation) { presentation in
+        .fullScreenCover(
+            item: $stlViewerPresentation,
+            onDismiss: {
+                viewModel.resumeCameraAfterExternalPresentation()
+            }
+        ) { presentation in
             STLViewerView(stlFileURL: presentation.fileURL)
         }
     }
@@ -364,6 +369,7 @@ struct ScannerView: View {
             return
         }
 
+        viewModel.pauseCameraForExternalPresentation()
         stlViewerPresentation = STLViewerPresentation(fileURL: stlFileURL)
     }
 

@@ -275,8 +275,24 @@ final class ScannerViewModel: ObservableObject {
     func stopCamera() {
         shouldRunCamera = false
         cameraService.stopRunning()
+        turnOffTorchForInactiveCamera()
         guard cameraState != .failed else { return }
         cameraState = .ready
+    }
+
+    @MainActor
+    func pauseCameraForExternalPresentation() {
+        stopCamera()
+    }
+
+    @MainActor
+    func resumeCameraAfterExternalPresentation() {
+        Task { [weak self] in
+            guard let self else { return }
+
+            await self.startCamera()
+            await self.reapplyDesiredTorchIfNeeded()
+        }
     }
 
     @MainActor
@@ -491,6 +507,29 @@ final class ScannerViewModel: ObservableObject {
                 if desiredTorchEnabled {
                     errorMessage = makeErrorMessage(from: error)
                 }
+            }
+        }
+    }
+
+    @MainActor
+    private func turnOffTorchForInactiveCamera() {
+        isTorchEnabled = false
+
+        Task { [weak self] in
+            guard let self else { return }
+
+            do {
+                let torchState = try await self.cameraService.setTorchEnabled(
+                    false,
+                    requiresRunningSession: false
+                )
+
+                await MainActor.run {
+                    self.isTorchAvailable = torchState.isAvailable
+                    self.isTorchEnabled = torchState.isEnabled
+                }
+            } catch {
+                print("Erro ao desligar lanterna ao pausar camera: \(error)")
             }
         }
     }
