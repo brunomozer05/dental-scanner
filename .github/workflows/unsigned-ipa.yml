@@ -29,8 +29,12 @@ jobs:
         run: |
           mkdir -p ThirdParty/OpenCV
           curl -L -o opencv.zip https://github.com/brunomozer05/dental-scanner/releases/download/v1.0-opencv/opencv2.xcframework.zip
-          unzip opencv.zip
-          mv opencv2.xcframework ThirdParty/OpenCV/
+          unzip -o opencv.zip
+          if [ -d "opencv2.xcframework/opencv2.xcframework" ]; then
+            mv opencv2.xcframework/opencv2.xcframework ThirdParty/OpenCV/
+          else
+            mv opencv2.xcframework ThirdParty/OpenCV/
+          fi
 
       - name: Show tool versions
         run: |
