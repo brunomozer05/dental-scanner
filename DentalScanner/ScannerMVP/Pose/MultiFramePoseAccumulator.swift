@@ -7,12 +7,16 @@ final class MultiFramePoseAccumulator {
         let maxSamplesPerMarker: Int
         let maxTranslationOutlierDistanceMm: Double
         let minimumSamplesBeforeOutlierRejection: Int
+        let minimumWeightedReprojectionError: Double
+        let minimumAngularDiversityRadians: Double
 
         static let scannerDefault = Configuration(
             maxReprojectionError: 2.0,
             maxSamplesPerMarker: 90,
             maxTranslationOutlierDistanceMm: 6.0,
-            minimumSamplesBeforeOutlierRejection: 4
+            minimumSamplesBeforeOutlierRejection: 4,
+            minimumWeightedReprojectionError: 0.05,
+            minimumAngularDiversityRadians: Double.pi / 60.0
         )
     }
 
@@ -20,6 +24,7 @@ final class MultiFramePoseAccumulator {
     private let lock = NSLock()
     private var anchorMarkerId: Int?
     private var samplesByMarkerId: [Int: [PoseResult]] = [:]
+    private var acceptedViewpointRotations: [Quaternion] = []
 
     init(configuration: Configuration = .scannerDefault) {
         self.configuration = configuration
@@ -31,6 +36,7 @@ final class MultiFramePoseAccumulator {
 
         anchorMarkerId = nil
         samplesByMarkerId.removeAll()
+        acceptedViewpointRotations.removeAll()
     }
 
     func update(with cameraPoseResults: [PoseResult]) -> [PoseResult] {
@@ -57,6 +63,16 @@ final class MultiFramePoseAccumulator {
 
         let anchorRotation = Self.rotationMatrix(fromRodrigues: anchorPose.rotationVector)
         let inverseAnchorRotation = simd_transpose(anchorRotation)
+        guard let viewpointRotation = Quaternion(rotationMatrix: anchorRotation),
+              shouldAcceptFrame(
+                viewpointRotation: viewpointRotation,
+                validCameraPoses: validCameraPoses
+              )
+        else {
+            return fusedPoseResults()
+        }
+
+        appendAcceptedViewpointRotation(viewpointRotation)
 
         for cameraPose in validCameraPoses {
             guard let anchorRelativePose = Self.pose(
@@ -92,6 +108,38 @@ final class MultiFramePoseAccumulator {
         samplesByMarkerId[pose.markerId] = samples
     }
 
+    private func shouldAcceptFrame(
+        viewpointRotation: Quaternion,
+        validCameraPoses: [PoseResult]
+    ) -> Bool {
+        guard !acceptedViewpointRotations.isEmpty else {
+            return true
+        }
+
+        let hasMarkerWithoutSamples = validCameraPoses.contains { pose in
+            samplesByMarkerId[pose.markerId]?.isEmpty ?? true
+        }
+        if hasMarkerWithoutSamples {
+            return true
+        }
+
+        let closestAcceptedAngle = acceptedViewpointRotations
+            .map { viewpointRotation.angularDistance(to: $0) }
+            .min() ?? .infinity
+
+        return closestAcceptedAngle >= configuration.minimumAngularDiversityRadians
+    }
+
+    private func appendAcceptedViewpointRotation(_ viewpointRotation: Quaternion) {
+        acceptedViewpointRotations.append(viewpointRotation)
+
+        if acceptedViewpointRotations.count > configuration.maxSamplesPerMarker {
+            acceptedViewpointRotations.removeFirst(
+                acceptedViewpointRotations.count - configuration.maxSamplesPerMarker
+            )
+        }
+    }
+
     private func fusedPoseResults() -> [PoseResult] {
         samplesByMarkerId.keys.sorted().compactMap { markerId in
             guard let samples = samplesByMarkerId[markerId] else {
@@ -108,20 +156,27 @@ final class MultiFramePoseAccumulator {
         }
 
         let filteredSamples = samplesAfterOutlierRejection(samples)
-        guard !filteredSamples.isEmpty else {
+        let weightedSamples = filteredSamples.compactMap { weightedPoseSample(from: $0) }
+        guard !weightedSamples.isEmpty else {
             return nil
         }
 
-        let sampleCount = Double(filteredSamples.count)
-        let rotationVector = filteredSamples.reduce(SIMD3<Double>.zero) {
-            $0 + $1.rotationVector
-        } / sampleCount
-        let translationVector = filteredSamples.reduce(SIMD3<Double>.zero) {
-            $0 + $1.translationVector
-        } / sampleCount
-        let reprojectionError = filteredSamples.reduce(0.0) {
-            $0 + $1.reprojectionError
-        } / sampleCount
+        let totalWeight = weightedSamples.reduce(0.0) { $0 + $1.weight }
+        guard totalWeight.isFinite, totalWeight > 0 else {
+            return nil
+        }
+
+        let translationVector = weightedSamples.reduce(SIMD3<Double>.zero) {
+            $0 + $1.pose.translationVector * $1.weight
+        } / totalWeight
+        let reprojectionError = weightedSamples.reduce(0.0) {
+            $0 + $1.pose.reprojectionError * $1.weight
+        } / totalWeight
+        guard let rotationQuaternion = weightedAverageQuaternion(from: weightedSamples),
+              let rotationVector = Self.rotationVector(from: rotationQuaternion.rotationMatrix)
+        else {
+            return nil
+        }
 
         guard Self.isFinite(rotationVector),
               Self.isFinite(translationVector),
@@ -139,6 +194,41 @@ final class MultiFramePoseAccumulator {
         )
     }
 
+    private func weightedPoseSample(from pose: PoseResult) -> WeightedPoseSample? {
+        let boundedReprojectionError = min(
+            max(pose.reprojectionError, configuration.minimumWeightedReprojectionError),
+            configuration.maxReprojectionError
+        )
+        let weight = 1.0 / (boundedReprojectionError * boundedReprojectionError)
+        guard weight.isFinite, weight > 0 else {
+            return nil
+        }
+
+        let rotationMatrix = Self.rotationMatrix(fromRodrigues: pose.rotationVector)
+        guard let quaternion = Quaternion(rotationMatrix: rotationMatrix) else {
+            return nil
+        }
+
+        return WeightedPoseSample(
+            pose: pose,
+            weight: weight,
+            quaternion: quaternion
+        )
+    }
+
+    private func weightedAverageQuaternion(from weightedSamples: [WeightedPoseSample]) -> Quaternion? {
+        guard let referenceQuaternion = weightedSamples.first?.quaternion else {
+            return nil
+        }
+
+        let accumulatedQuaternion = weightedSamples.reduce(Quaternion.zero) { partialResult, sample in
+            let alignedQuaternion = sample.quaternion.aligned(to: referenceQuaternion)
+            return partialResult + alignedQuaternion.scaled(by: sample.weight)
+        }
+
+        return accumulatedQuaternion.normalized()
+    }
+
     private func samplesAfterOutlierRejection(_ samples: [PoseResult]) -> [PoseResult] {
         guard samples.count >= configuration.minimumSamplesBeforeOutlierRejection else {
             return samples
@@ -153,7 +243,7 @@ final class MultiFramePoseAccumulator {
             simd_distance($0.translationVector, medianTranslation) <= configuration.maxTranslationOutlierDistanceMm
         }
 
-        return filteredSamples.isEmpty ? samples : filteredSamples
+        return filteredSamples
     }
 
     private func median(_ values: [Double]) -> Double {
@@ -291,6 +381,159 @@ final class MultiFramePoseAccumulator {
         let vector = axis * theta
 
         return isFinite(vector) ? vector : nil
+    }
+
+    private struct WeightedPoseSample {
+        let pose: PoseResult
+        let weight: Double
+        let quaternion: Quaternion
+    }
+
+    private struct Quaternion {
+        let x: Double
+        let y: Double
+        let z: Double
+        let w: Double
+
+        static let zero = Quaternion(x: 0.0, y: 0.0, z: 0.0, w: 0.0)
+
+        init(x: Double, y: Double, z: Double, w: Double) {
+            self.x = x
+            self.y = y
+            self.z = z
+            self.w = w
+        }
+
+        init?(rotationMatrix matrix: simd_double3x3) {
+            let m00 = MultiFramePoseAccumulator.matrixElement(matrix, row: 0, column: 0)
+            let m01 = MultiFramePoseAccumulator.matrixElement(matrix, row: 0, column: 1)
+            let m02 = MultiFramePoseAccumulator.matrixElement(matrix, row: 0, column: 2)
+            let m10 = MultiFramePoseAccumulator.matrixElement(matrix, row: 1, column: 0)
+            let m11 = MultiFramePoseAccumulator.matrixElement(matrix, row: 1, column: 1)
+            let m12 = MultiFramePoseAccumulator.matrixElement(matrix, row: 1, column: 2)
+            let m20 = MultiFramePoseAccumulator.matrixElement(matrix, row: 2, column: 0)
+            let m21 = MultiFramePoseAccumulator.matrixElement(matrix, row: 2, column: 1)
+            let m22 = MultiFramePoseAccumulator.matrixElement(matrix, row: 2, column: 2)
+            let trace = m00 + m11 + m22
+            let quaternion: Quaternion
+
+            if trace > 0.0 {
+                let scale = sqrt(max(trace + 1.0, 0.0)) * 2.0
+                guard scale.isFinite, scale > 1e-12 else { return nil }
+                quaternion = Quaternion(
+                    x: (m21 - m12) / scale,
+                    y: (m02 - m20) / scale,
+                    z: (m10 - m01) / scale,
+                    w: 0.25 * scale
+                )
+            } else if m00 > m11 && m00 > m22 {
+                let scale = sqrt(max(1.0 + m00 - m11 - m22, 0.0)) * 2.0
+                guard scale.isFinite, scale > 1e-12 else { return nil }
+                quaternion = Quaternion(
+                    x: 0.25 * scale,
+                    y: (m01 + m10) / scale,
+                    z: (m02 + m20) / scale,
+                    w: (m21 - m12) / scale
+                )
+            } else if m11 > m22 {
+                let scale = sqrt(max(1.0 + m11 - m00 - m22, 0.0)) * 2.0
+                guard scale.isFinite, scale > 1e-12 else { return nil }
+                quaternion = Quaternion(
+                    x: (m01 + m10) / scale,
+                    y: 0.25 * scale,
+                    z: (m12 + m21) / scale,
+                    w: (m02 - m20) / scale
+                )
+            } else {
+                let scale = sqrt(max(1.0 + m22 - m00 - m11, 0.0)) * 2.0
+                guard scale.isFinite, scale > 1e-12 else { return nil }
+                quaternion = Quaternion(
+                    x: (m02 + m20) / scale,
+                    y: (m12 + m21) / scale,
+                    z: 0.25 * scale,
+                    w: (m10 - m01) / scale
+                )
+            }
+
+            guard let normalizedQuaternion = quaternion.normalized() else {
+                return nil
+            }
+
+            self = normalizedQuaternion
+        }
+
+        var rotationMatrix: simd_double3x3 {
+            guard let quaternion = normalized() else {
+                return matrix_identity_double3x3
+            }
+
+            let xx = quaternion.x * quaternion.x
+            let yy = quaternion.y * quaternion.y
+            let zz = quaternion.z * quaternion.z
+            let xy = quaternion.x * quaternion.y
+            let xz = quaternion.x * quaternion.z
+            let yz = quaternion.y * quaternion.z
+            let wx = quaternion.w * quaternion.x
+            let wy = quaternion.w * quaternion.y
+            let wz = quaternion.w * quaternion.z
+
+            return MultiFramePoseAccumulator.matrixFromRows(
+                SIMD3(1.0 - 2.0 * (yy + zz), 2.0 * (xy - wz), 2.0 * (xz + wy)),
+                SIMD3(2.0 * (xy + wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz - wx)),
+                SIMD3(2.0 * (xz - wy), 2.0 * (yz + wx), 1.0 - 2.0 * (xx + yy))
+            )
+        }
+
+        func normalized() -> Quaternion? {
+            let length = sqrt(x * x + y * y + z * z + w * w)
+            guard length.isFinite, length > 1e-12 else {
+                return nil
+            }
+
+            return Quaternion(
+                x: x / length,
+                y: y / length,
+                z: z / length,
+                w: w / length
+            )
+        }
+
+        func dot(_ other: Quaternion) -> Double {
+            x * other.x + y * other.y + z * other.z + w * other.w
+        }
+
+        func aligned(to reference: Quaternion) -> Quaternion {
+            dot(reference) < 0.0 ? scaled(by: -1.0) : self
+        }
+
+        func scaled(by scalar: Double) -> Quaternion {
+            Quaternion(
+                x: x * scalar,
+                y: y * scalar,
+                z: z * scalar,
+                w: w * scalar
+            )
+        }
+
+        func angularDistance(to other: Quaternion) -> Double {
+            guard let lhs = normalized(),
+                  let rhs = other.normalized()
+            else {
+                return .infinity
+            }
+
+            let cosineHalfAngle = min(max(abs(lhs.dot(rhs)), 0.0), 1.0)
+            return 2.0 * acos(cosineHalfAngle)
+        }
+
+        static func + (lhs: Quaternion, rhs: Quaternion) -> Quaternion {
+            Quaternion(
+                x: lhs.x + rhs.x,
+                y: lhs.y + rhs.y,
+                z: lhs.z + rhs.z,
+                w: lhs.w + rhs.w
+            )
+        }
     }
 
     private static func matrixFromRows(
