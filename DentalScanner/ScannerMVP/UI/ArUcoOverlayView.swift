@@ -272,6 +272,15 @@ struct ArUcoOverlayView: View {
 
         let previousCenter = markerCenter(for: previous)
         let currentCenter = markerCenter(for: current)
+        let movementThreshold: CGFloat = 4.0
+        let movementDeltaX = currentCenter.x - previousCenter.x
+        let movementDeltaY = currentCenter.y - previousCenter.y
+        let movementDistance = hypot(movementDeltaX, movementDeltaY)
+
+        guard movementDistance >= movementThreshold else {
+            return previous
+        }
+
         let centerDeltaX = targetCenter.x - previousCenter.x
         let centerDeltaY = targetCenter.y - previousCenter.y
         let centerDistance = (centerDeltaX * centerDeltaX + centerDeltaY * centerDeltaY).squareRoot()
