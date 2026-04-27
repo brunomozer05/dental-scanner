@@ -342,13 +342,13 @@ struct ScannerView: View {
                 Button {
                     openSTLViewer()
                 } label: {
-                    Label("Visualizar STL", systemImage: "cube.transparent")
+                    Label("Visualizar modelo 3D", systemImage: "cube.transparent")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.black)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(Color.white.opacity(0.88))
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 18)
+                        .frame(height: 46)
+                        .background(chipBackgroundColor.opacity(0.95))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
