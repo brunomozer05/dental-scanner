@@ -9,18 +9,11 @@ enum CameraPreviewOrientation: Equatable {
     case landscapeRight
 
     init?(deviceOrientation: UIDeviceOrientation) {
-        switch deviceOrientation {
-        case .portrait:
-            self = .portrait
-        case .portraitUpsideDown:
-            self = .portraitUpsideDown
-        case .landscapeLeft:
-            self = .landscapeLeft
-        case .landscapeRight:
-            self = .landscapeRight
-        default:
+        guard let resolvedVideoOrientation = videoOrientation(from: deviceOrientation) else {
             return nil
         }
+
+        self.init(videoOrientation: resolvedVideoOrientation)
     }
 
     init?(interfaceOrientation: UIInterfaceOrientation) {
@@ -38,6 +31,21 @@ enum CameraPreviewOrientation: Equatable {
         }
     }
 
+    init(videoOrientation: AVCaptureVideoOrientation) {
+        switch videoOrientation {
+        case .portrait:
+            self = .portrait
+        case .portraitUpsideDown:
+            self = .portraitUpsideDown
+        case .landscapeLeft:
+            self = .landscapeLeft
+        case .landscapeRight:
+            self = .landscapeRight
+        @unknown default:
+            self = .landscapeRight
+        }
+    }
+
     var captureVideoOrientation: AVCaptureVideoOrientation {
         switch self {
         case .portrait:
@@ -49,5 +57,20 @@ enum CameraPreviewOrientation: Equatable {
         case .landscapeRight:
             return .landscapeRight
         }
+    }
+}
+
+func videoOrientation(from deviceOrientation: UIDeviceOrientation) -> AVCaptureVideoOrientation? {
+    switch deviceOrientation {
+    case .landscapeLeft:
+        return .landscapeRight
+    case .landscapeRight:
+        return .landscapeLeft
+    case .portrait:
+        return .portrait
+    case .portraitUpsideDown:
+        return .portraitUpsideDown
+    default:
+        return nil
     }
 }

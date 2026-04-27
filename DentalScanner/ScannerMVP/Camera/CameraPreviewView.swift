@@ -4,11 +4,12 @@ import UIKit
 
 struct CameraPreviewView: UIViewRepresentable {
     let session: AVCaptureSession
+    let videoOrientation: AVCaptureVideoOrientation
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
         view.previewLayer.session = session
-        view.applyLandscapeOrientationIfAvailable()
+        view.applyVideoOrientation(videoOrientation)
         return view
     }
 
@@ -17,11 +18,13 @@ struct CameraPreviewView: UIViewRepresentable {
             uiView.previewLayer.session = session
         }
 
-        uiView.applyLandscapeOrientationIfAvailable()
+        uiView.applyVideoOrientation(videoOrientation)
     }
 }
 
 final class PreviewView: UIView {
+    private var desiredVideoOrientation: AVCaptureVideoOrientation = .landscapeRight
+
     override class var layerClass: AnyClass {
         AVCaptureVideoPreviewLayer.self
     }
@@ -43,7 +46,7 @@ final class PreviewView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         previewLayer.frame = bounds
-        applyLandscapeOrientationIfAvailable()
+        applyDesiredVideoOrientationIfAvailable()
     }
 
     private func configurePreviewLayer() {
@@ -52,13 +55,18 @@ final class PreviewView: UIView {
         previewLayer.videoGravity = .resizeAspectFill
     }
 
-    func applyLandscapeOrientationIfAvailable() {
+    func applyVideoOrientation(_ videoOrientation: AVCaptureVideoOrientation) {
+        desiredVideoOrientation = videoOrientation
+        applyDesiredVideoOrientationIfAvailable()
+    }
+
+    private func applyDesiredVideoOrientationIfAvailable() {
         guard let connection = previewLayer.connection,
               connection.isVideoOrientationSupported
         else {
             return
         }
 
-        connection.videoOrientation = .landscapeRight
+        connection.videoOrientation = desiredVideoOrientation
     }
 }

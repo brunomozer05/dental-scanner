@@ -4,7 +4,7 @@ import UIKit
 struct ScannerView: View {
     @StateObject private var viewModel = ScannerViewModel()
     @State private var scaleValidationRealDistanceText = ""
-    private let previewOrientation: CameraPreviewOrientation = .landscapeRight
+    @State private var previewOrientation: CameraPreviewOrientation = .landscapeRight
     @State private var isDebugPanelExpanded = true
 
     var body: some View {
@@ -14,7 +14,8 @@ struct ScannerView: View {
                 .allowsHitTesting(false)
 
             CameraPreviewView(
-                session: viewModel.captureSession
+                session: viewModel.captureSession,
+                videoOrientation: previewOrientation.captureVideoOrientation
             )
             .ignoresSafeArea(.all)
             .allowsHitTesting(false)
@@ -56,12 +57,29 @@ struct ScannerView: View {
         .background(Color.black)
         .ignoresSafeArea(.all)
         .task {
-            viewModel.setPreviewOrientation(previewOrientation)
+            updatePreviewOrientation()
             await viewModel.startCamera()
+        }
+        .onAppear {
+            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+            updatePreviewOrientation()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+            updatePreviewOrientation()
         }
         .onDisappear {
             viewModel.stopCamera()
+            UIDevice.current.endGeneratingDeviceOrientationNotifications()
         }
+    }
+
+    private func updatePreviewOrientation() {
+        let resolvedVideoOrientation = videoOrientation(from: UIDevice.current.orientation)
+            ?? previewOrientation.captureVideoOrientation
+        let orientation = CameraPreviewOrientation(videoOrientation: resolvedVideoOrientation)
+
+        previewOrientation = orientation
+        viewModel.setPreviewOrientation(orientation)
     }
 
     private var topControlBar: some View {
