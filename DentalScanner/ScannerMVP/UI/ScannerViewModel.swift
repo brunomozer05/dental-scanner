@@ -94,6 +94,7 @@ final class ScannerViewModel: ObservableObject {
 
     private let cameraService: CameraFrameService
     private let arUcoDetector: ArUcoDetector
+    private let arUcoConsistencyFilter: ArUcoConsistencyFilter
     private let poseEstimator: PoseEstimator
     private let multiFramePoseAccumulator: MultiFramePoseAccumulator
     private let stlExporter: STLExporter
@@ -126,12 +127,14 @@ final class ScannerViewModel: ObservableObject {
     init(
         cameraService: CameraFrameService = CameraFrameService(),
         arUcoDetector: ArUcoDetector = ArUcoDetector(),
+        arUcoConsistencyFilter: ArUcoConsistencyFilter = ArUcoConsistencyFilter(),
         poseEstimator: PoseEstimator = PoseEstimator(),
         multiFramePoseAccumulator: MultiFramePoseAccumulator = MultiFramePoseAccumulator(),
         stlExporter: STLExporter = STLExporter()
     ) {
         self.cameraService = cameraService
         self.arUcoDetector = arUcoDetector
+        self.arUcoConsistencyFilter = arUcoConsistencyFilter
         self.poseEstimator = poseEstimator
         self.multiFramePoseAccumulator = multiFramePoseAccumulator
         self.stlExporter = stlExporter
@@ -282,6 +285,7 @@ final class ScannerViewModel: ObservableObject {
             max(markerSizeMillimeters, PoseConfiguration.minimumMarkerSizeMillimeters),
             PoseConfiguration.maximumMarkerSizeMillimeters
         )
+        arUcoConsistencyFilter.reset()
         multiFramePoseAccumulator.reset()
         fusedPoseResults = []
         implantPoseResults = []
@@ -397,7 +401,12 @@ final class ScannerViewModel: ObservableObject {
 
     private func handleFrame(_ frame: CameraFrame) {
         let metrics = buildFrameMetrics(from: frame)
-        let arucoMetrics = detectArucoMarkers(in: frame)
+        let rawArucoMetrics = detectArucoMarkers(in: frame)
+        let validatedDetections = arUcoConsistencyFilter.filterDetections(rawArucoMetrics.detections)
+        let arucoMetrics = arucoMetrics(
+            rawArucoMetrics,
+            replacingDetectionsWith: validatedDetections
+        )
         let overlayMarkers = stabilizedOverlayDetections(
             from: arucoMetrics.detections,
             timestamp: metrics.lastFrameTimestamp
@@ -540,6 +549,29 @@ final class ScannerViewModel: ObservableObject {
         }
     }
 
+    private func arucoMetrics(
+        _ metrics: ArucoMetrics,
+        replacingDetectionsWith detections: [ArUcoDetectionResult]
+    ) -> ArucoMetrics {
+        ArucoMetrics(
+            isOpenCVAvailable: metrics.isOpenCVAvailable,
+            detectedMarkerCount: detections.count,
+            detectedMarkerIds: detections.map(\.markerId).sorted(),
+            detections: detections,
+            errorMessage: metrics.errorMessage,
+            hasFrameReachedDetector: metrics.hasFrameReachedDetector,
+            detectionCallCount: metrics.detectionCallCount,
+            frameResolution: metrics.frameResolution,
+            pixelFormat: metrics.pixelFormat,
+            bytesPerRow: metrics.bytesPerRow,
+            dictionaryName: metrics.dictionaryName,
+            preprocessingDescription: metrics.preprocessingDescription,
+            inputChannelCount: metrics.inputChannelCount,
+            grayscaleChannelCount: metrics.grayscaleChannelCount,
+            rejectedCandidateCount: metrics.rejectedCandidateCount
+        )
+    }
+
     private func estimatePose(
         from detections: [ArUcoDetectionResult],
         in frame: CameraFrame,
@@ -562,7 +594,9 @@ final class ScannerViewModel: ObservableObject {
                 in: frame,
                 markerSizeMillimeters: markerSizeMillimeters
             )
-            let sortedPoses = poses.sorted { $0.markerId < $1.markerId }
+            let sortedPoses = arUcoConsistencyFilter
+                .filterPoses(poses)
+                .sorted { $0.markerId < $1.markerId }
             guard let pose = sortedPoses.first else {
                 resetPoseFilter()
                 return PoseMetrics(
