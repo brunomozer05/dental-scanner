@@ -88,12 +88,21 @@ struct ScannerView: View {
             return
         }
 
-        applyPreviewOrientation(orientation)
+        applyPreviewOrientation(orientation, shouldReapplyTorch: true)
     }
 
-    private func applyPreviewOrientation(_ orientation: CameraPreviewOrientation) {
+    private func applyPreviewOrientation(
+        _ orientation: CameraPreviewOrientation,
+        shouldReapplyTorch: Bool = false
+    ) {
+        let didChangeOrientation = previewOrientation != orientation
+
         previewOrientation = orientation
         viewModel.setPreviewOrientation(orientation)
+
+        if shouldReapplyTorch && didChangeOrientation {
+            viewModel.handleScannerOrientationChanged()
+        }
     }
 
     private func scannerPreviewOrientation(from deviceOrientation: UIDeviceOrientation) -> CameraPreviewOrientation? {

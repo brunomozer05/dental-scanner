@@ -284,6 +284,12 @@ final class ScannerViewModel: ObservableObject {
         cameraService.setVideoOrientation(orientation.captureVideoOrientation)
     }
 
+    func handleScannerOrientationChanged() {
+        Task { [weak self] in
+            await self?.reapplyDesiredTorchIfNeeded()
+        }
+    }
+
     @MainActor
     @discardableResult
     func exportCurrentImplantsAsSTL() -> URL? {
