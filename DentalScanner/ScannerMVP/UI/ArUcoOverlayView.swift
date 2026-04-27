@@ -261,12 +261,17 @@ struct ArUcoOverlayView: View {
         let currentWeight = markerSlowMotionCurrentWeight * (1.0 - t) +
             markerFastMotionCurrentWeight * t
 
-        return zip(previous, current).map { previousCorner, currentCorner in
+        let smoothedCenter = CGPoint(
+            x: previousCenter.x + centerDeltaX * currentWeight,
+            y: previousCenter.y + centerDeltaY * currentWeight
+        )
+        let offsetX = smoothedCenter.x - currentCenter.x
+        let offsetY = smoothedCenter.y - currentCenter.y
+
+        return current.map { corner in
             CGPoint(
-                x: currentCorner.x * currentWeight +
-                    previousCorner.x * (1.0 - currentWeight),
-                y: currentCorner.y * currentWeight +
-                    previousCorner.y * (1.0 - currentWeight)
+                x: corner.x + offsetX,
+                y: corner.y + offsetY
             )
         }
     }
