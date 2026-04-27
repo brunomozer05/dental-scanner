@@ -25,6 +25,13 @@ jobs:
           version: 2026.4.17
           install: true
 
+      - name: Download OpenCV
+        run: |
+          mkdir -p ThirdParty/OpenCV
+          curl -L -o opencv.zip https://github.com/brunomozer05/dental-scanner/releases/download/v1.0-opencv/opencv2.xcframework.zip
+          unzip opencv.zip
+          mv opencv2.xcframework ThirdParty/OpenCV/
+
       - name: Show tool versions
         run: |
           mise --version
