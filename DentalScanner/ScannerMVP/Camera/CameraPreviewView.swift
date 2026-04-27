@@ -4,14 +4,11 @@ import UIKit
 
 struct CameraPreviewView: UIViewRepresentable {
     let session: AVCaptureSession
-    let orientation: CameraPreviewOrientation
-    let orientationRevision: Int
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
         view.previewLayer.session = session
-        view.previewLayer.videoGravity = .resizeAspectFill
-        view.setOrientation(orientation)
+        view.applyLandscapeOrientationIfAvailable()
         return view
     }
 
@@ -20,9 +17,7 @@ struct CameraPreviewView: UIViewRepresentable {
             uiView.previewLayer.session = session
         }
 
-        uiView.previewLayer.videoGravity = .resizeAspectFill
-        _ = orientationRevision
-        uiView.setOrientation(orientation)
+        uiView.applyLandscapeOrientationIfAvailable()
     }
 }
 
@@ -48,28 +43,17 @@ final class PreviewView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         previewLayer.frame = bounds
-        previewLayer.videoGravity = .resizeAspectFill
-        applyLandscapeOrientationIfReady()
-    }
-
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-    }
-
-    func setOrientation(_ orientation: CameraPreviewOrientation) {
-        applyLandscapeOrientationIfReady()
+        applyLandscapeOrientationIfAvailable()
     }
 
     private func configurePreviewLayer() {
         backgroundColor = .black
         clipsToBounds = true
-        contentMode = .scaleAspectFill
         previewLayer.videoGravity = .resizeAspectFill
     }
 
-    private func applyLandscapeOrientationIfReady() {
-        guard previewLayer.session?.isRunning == true,
-              let connection = previewLayer.connection,
+    func applyLandscapeOrientationIfAvailable() {
+        guard let connection = previewLayer.connection,
               connection.isVideoOrientationSupported
         else {
             return

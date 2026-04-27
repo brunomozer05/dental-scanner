@@ -4,8 +4,7 @@ import UIKit
 struct ScannerView: View {
     @StateObject private var viewModel = ScannerViewModel()
     @State private var scaleValidationRealDistanceText = ""
-    @State private var previewOrientation: CameraPreviewOrientation = .landscapeRight
-    @State private var previewOrientationRevision = 0
+    private let previewOrientation: CameraPreviewOrientation = .landscapeRight
     @State private var isDebugPanelExpanded = true
 
     var body: some View {
@@ -15,11 +14,8 @@ struct ScannerView: View {
                 .allowsHitTesting(false)
 
             CameraPreviewView(
-                session: viewModel.captureSession,
-                orientation: previewOrientation,
-                orientationRevision: previewOrientationRevision
+                session: viewModel.captureSession
             )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea(.all)
             .allowsHitTesting(false)
             .zIndex(0)
@@ -29,7 +25,6 @@ struct ScannerView: View {
                 frameResolution: viewModel.arucoFrameResolution ?? viewModel.frameResolution,
                 orientation: previewOrientation
             )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea(.all)
             .allowsHitTesting(false)
             .zIndex(1)
@@ -58,36 +53,14 @@ struct ScannerView: View {
                 .zIndex(2)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
         .ignoresSafeArea(.all)
         .task {
-            applyLaunchPreviewOrientation()
+            viewModel.setPreviewOrientation(previewOrientation)
             await viewModel.startCamera()
-            reapplyPreviewOrientation(after: 0.15)
-            reapplyPreviewOrientation(after: 0.45)
-        }
-        .onAppear {
-            applyLaunchPreviewOrientation()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
-            updatePreviewOrientation()
         }
         .onDisappear {
             viewModel.stopCamera()
-        }
-    }
-
-    private func applyLaunchPreviewOrientation() {
-        applyPreviewOrientation(.landscapeRight)
-        reapplyPreviewOrientation(after: 0.05)
-        reapplyPreviewOrientation(after: 0.25)
-        reapplyPreviewOrientation(after: 0.75)
-    }
-
-    private func reapplyPreviewOrientation(after delay: TimeInterval) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            updatePreviewOrientation()
         }
     }
 
@@ -250,16 +223,6 @@ struct ScannerView: View {
         .padding(.vertical, 6)
         .background(Color(.secondarySystemBackground).opacity(0.75))
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-    }
-
-    private func updatePreviewOrientation() {
-        applyPreviewOrientation(.landscapeRight)
-    }
-
-    private func applyPreviewOrientation(_ orientation: CameraPreviewOrientation) {
-        previewOrientation = orientation
-        previewOrientationRevision += 1
-        viewModel.setPreviewOrientation(orientation)
     }
 
     private var formattedCameraState: String {
