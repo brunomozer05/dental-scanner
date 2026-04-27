@@ -58,15 +58,16 @@ struct ScannerView: View {
         .ignoresSafeArea(.all)
         .supportedInterfaceOrientations(.landscape)
         .task {
-            updatePreviewOrientation()
+            applyPreviewOrientation(previewOrientation)
+            updateLandscapePreviewOrientation()
             await viewModel.startCamera()
         }
         .onAppear {
             UIDevice.current.beginGeneratingDeviceOrientationNotifications()
-            updatePreviewOrientation()
+            updateLandscapePreviewOrientation()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
-            updatePreviewOrientation()
+            updateLandscapePreviewOrientation()
         }
         .onDisappear {
             viewModel.stopCamera()
@@ -74,13 +75,30 @@ struct ScannerView: View {
         }
     }
 
-    private func updatePreviewOrientation() {
-        let resolvedVideoOrientation = videoOrientation(from: UIDevice.current.orientation)
-            ?? previewOrientation.captureVideoOrientation
-        let orientation = CameraPreviewOrientation(videoOrientation: resolvedVideoOrientation)
+    private func updateLandscapePreviewOrientation() {
+        guard let orientation = scannerPreviewOrientation(from: UIDevice.current.orientation) else {
+            return
+        }
 
+        applyPreviewOrientation(orientation)
+    }
+
+    private func applyPreviewOrientation(_ orientation: CameraPreviewOrientation) {
         previewOrientation = orientation
         viewModel.setPreviewOrientation(orientation)
+    }
+
+    private func scannerPreviewOrientation(from deviceOrientation: UIDeviceOrientation) -> CameraPreviewOrientation? {
+        switch deviceOrientation {
+        case .landscapeLeft, .landscapeRight:
+            guard let resolvedVideoOrientation = videoOrientation(from: deviceOrientation) else {
+                return nil
+            }
+
+            return CameraPreviewOrientation(videoOrientation: resolvedVideoOrientation)
+        default:
+            return nil
+        }
     }
 
     private var topControlBar: some View {
