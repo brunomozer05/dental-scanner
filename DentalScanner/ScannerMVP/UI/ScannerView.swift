@@ -6,7 +6,10 @@ struct ScannerView: View {
     @StateObject private var viewModel = ScannerViewModel()
     @State private var scaleValidationRealDistanceText = ""
     @State private var previewOrientation: CameraPreviewOrientation = .landscapeRight
-    @State private var isDebugPanelExpanded = true
+    @State private var isDebugPanelExpanded = false
+
+    private let panelBackgroundColor = Color(red: 0.11, green: 0.11, blue: 0.12)
+    private let chipBackgroundColor = Color(red: 0.16, green: 0.16, blue: 0.18)
 
     var body: some View {
         ZStack {
@@ -66,11 +69,13 @@ struct ScannerView: View {
                     }
                 }
                 .zIndex(2)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
         .background(Color.black)
         .ignoresSafeArea(.all)
         .supportedInterfaceOrientations(.landscape)
+        .animation(.easeInOut(duration: 0.18), value: isDebugPanelExpanded)
         .task {
             applyPreviewOrientation(previewOrientation)
             updateLandscapePreviewOrientation()
@@ -164,8 +169,8 @@ struct ScannerView: View {
             debugPanelToggleButton
         }
         .padding(8)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(panelBackgroundColor.opacity(0.88))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private func debugPanel(isLandscape: Bool) -> some View {
@@ -198,8 +203,9 @@ struct ScannerView: View {
             .frame(maxHeight: isLandscape ? 260 : 360)
         }
         .padding(12)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .foregroundStyle(.white)
+        .background(panelBackgroundColor.opacity(0.92))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var debugSummarySection: some View {
@@ -243,14 +249,19 @@ struct ScannerView: View {
 
     private var debugPanelToggleButton: some View {
         Button {
-            isDebugPanelExpanded.toggle()
+            withAnimation(.easeInOut(duration: 0.18)) {
+                isDebugPanelExpanded.toggle()
+            }
         } label: {
-            Image(systemName: isDebugPanelExpanded ? "info.circle.fill" : "info.circle")
+            Image(systemName: isDebugPanelExpanded ? "gearshape.fill" : "gearshape")
                 .font(.body.weight(.semibold))
                 .frame(width: 34, height: 34)
-                .foregroundStyle(Color.primary)
+                .foregroundStyle(Color.white.opacity(isDebugPanelExpanded ? 1.0 : 0.72))
+                .background(chipBackgroundColor.opacity(0.82))
+                .clipShape(Circle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(isDebugPanelExpanded ? "Fechar debug" : "Abrir debug")
     }
 
     private var compactTorchButton: some View {
@@ -260,7 +271,7 @@ struct ScannerView: View {
             Image(systemName: viewModel.isTorchEnabled ? "flashlight.on.fill" : "flashlight.off.fill")
                 .font(.body.weight(.semibold))
                 .frame(width: 34, height: 34)
-                .foregroundStyle(viewModel.isTorchAvailable ? Color.primary : Color.secondary)
+                .foregroundStyle(viewModel.isTorchAvailable ? Color.white : Color.white.opacity(0.35))
         }
         .buttonStyle(.plain)
         .disabled(!viewModel.isTorchAvailable)
@@ -274,7 +285,7 @@ struct ScannerView: View {
             Image(systemName: "square.and.arrow.up")
                 .font(.body.weight(.semibold))
                 .frame(width: 34, height: 34)
-                .foregroundStyle(viewModel.canExportSTL ? Color.primary : Color.secondary)
+                .foregroundStyle(viewModel.canExportSTL ? Color.white : Color.white.opacity(0.35))
         }
         .buttonStyle(.plain)
         .disabled(!viewModel.canExportSTL)
@@ -319,8 +330,9 @@ struct ScannerView: View {
             }
         }
         .padding(12)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .foregroundStyle(.white)
+        .background(panelBackgroundColor.opacity(0.9))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func scanMetric(title: String, value: String) -> some View {
@@ -350,8 +362,9 @@ struct ScannerView: View {
         .font(.caption.weight(.semibold))
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(Color(.secondarySystemBackground).opacity(0.75))
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .foregroundStyle(.white)
+        .background(chipBackgroundColor.opacity(0.85))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private var formattedCameraState: String {
