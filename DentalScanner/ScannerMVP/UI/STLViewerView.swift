@@ -9,6 +9,7 @@ struct STLViewerView: View {
     @State private var scene: SCNScene?
     @State private var pointOfView: SCNNode?
     @State private var loadErrorMessage: String?
+    @State private var isShareSheetPresented = false
 
     var body: some View {
         ZStack {
@@ -38,6 +39,19 @@ struct STLViewerView: View {
                     Spacer()
 
                     Button {
+                        isShareSheetPresented = true
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 38, height: 38)
+                            .background(Color(red: 0.11, green: 0.11, blue: 0.12).opacity(0.9))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Exportar STL")
+
+                    Button {
                         dismiss()
                     } label: {
                         Image(systemName: "xmark")
@@ -58,6 +72,10 @@ struct STLViewerView: View {
         .background(Color.black)
         .supportedInterfaceOrientations(.landscape)
         .onAppear(perform: loadScene)
+        .sheet(isPresented: $isShareSheetPresented) {
+            ActivityView(activityItems: [stlFileURL])
+                .presentationDetents([.medium, .large])
+        }
     }
 
     private func loadScene() {
@@ -72,6 +90,16 @@ struct STLViewerView: View {
             loadErrorMessage = error.localizedDescription
         }
     }
+}
+
+private struct ActivityView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 private enum STLSceneLoader {

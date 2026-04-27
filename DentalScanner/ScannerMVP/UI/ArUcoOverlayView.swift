@@ -16,6 +16,8 @@ struct ArUcoOverlayView: View {
     private let markerFastMotionDistanceThreshold: CGFloat = 6
     private let markerMotionResponseScale: CGFloat = 20
     private let markerPredictionFactor: CGFloat = 0.6
+    private let markerBracketLength: CGFloat = 22
+    private let markerOverlayColor = Color(red: 0.62, green: 0.95, blue: 0.92)
 
     var body: some View {
         GeometryReader { proxy in
@@ -67,18 +69,12 @@ struct ArUcoOverlayView: View {
 
     private func markerOverlay(marker: ProjectedMarker, previewSize: CGSize) -> some View {
         ZStack {
-            markerPath(corners: marker.corners)
-                .stroke(.green, style: StrokeStyle(lineWidth: 3, lineJoin: .round))
-
-            ForEach(Array(marker.corners.enumerated()), id: \.offset) { cornerItem in
-                Circle()
-                    .fill(.yellow)
-                    .frame(width: 8, height: 8)
-                    .overlay {
-                        Circle()
-                            .stroke(.black.opacity(0.8), lineWidth: 1)
-                    }
-                    .position(cornerItem.element)
+            ForEach(marker.corners.indices, id: \.self) { cornerIndex in
+                cornerBracketPath(at: cornerIndex, corners: marker.corners)
+                    .stroke(
+                        markerOverlayColor.opacity(0.84),
+                        style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round)
+                    )
             }
         }
         .frame(width: previewSize.width, height: previewSize.height)
@@ -161,19 +157,50 @@ struct ArUcoOverlayView: View {
         }
     }
 
-    private func markerPath(corners: [CGPoint]) -> Path {
+    private func cornerBracketPath(at index: Int, corners: [CGPoint]) -> Path {
         var path = Path()
-        guard let firstCorner = corners.first else {
+        guard corners.indices.contains(index), corners.count >= 3 else {
             return path
         }
 
-        path.move(to: firstCorner)
-        for corner in corners.dropFirst() {
-            path.addLine(to: corner)
-        }
-        path.closeSubpath()
+        let corner = corners[index]
+        let previousCorner = corners[(index + corners.count - 1) % corners.count]
+        let nextCorner = corners[(index + 1) % corners.count]
+        let bracketLength = min(
+            markerBracketLength,
+            min(
+                distance(from: corner, to: previousCorner) * 0.34,
+                distance(from: corner, to: nextCorner) * 0.34
+            )
+        )
+        let previousEndpoint = point(from: corner, toward: previousCorner, length: bracketLength)
+        let nextEndpoint = point(from: corner, toward: nextCorner, length: bracketLength)
+
+        path.move(to: previousEndpoint)
+        path.addLine(to: corner)
+        path.addLine(to: nextEndpoint)
 
         return path
+    }
+
+    private func distance(from start: CGPoint, to end: CGPoint) -> CGFloat {
+        hypot(end.x - start.x, end.y - start.y)
+    }
+
+    private func point(from start: CGPoint, toward end: CGPoint, length: CGFloat) -> CGPoint {
+        let deltaX = end.x - start.x
+        let deltaY = end.y - start.y
+        let distance = hypot(deltaX, deltaY)
+
+        guard distance > CGFloat.ulpOfOne else {
+            return start
+        }
+
+        let scale = min(length, distance) / distance
+        return CGPoint(
+            x: start.x + deltaX * scale,
+            y: start.y + deltaY * scale
+        )
     }
 
     private func bubblePosition(for marker: ProjectedMarker, in previewSize: CGSize) -> CGPoint {
@@ -348,18 +375,33 @@ private struct TagProgressBubble: View {
     let progress: Double
 
     var body: some View {
-        Text(String(format: "%.0f%%", clampedProgress))
-            .font(.caption.weight(.bold))
-            .monospacedDigit()
-            .foregroundStyle(.black)
-            .frame(width: 46, height: 46)
-            .background(progressColor.opacity(0.92))
-            .clipShape(Circle())
-            .overlay {
-                Circle()
-                    .stroke(.black.opacity(0.7), lineWidth: 1)
-            }
-            .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
+        ZStack {
+            Circle()
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    Circle()
+                        .fill(progressColor.opacity(0.14))
+                }
+
+            Circle()
+                .trim(from: 0, to: clampedProgress / 100.0)
+                .stroke(
+                    progressColor.opacity(0.88),
+                    style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+
+            Text(String(format: "%.0f%%", clampedProgress))
+                .font(.caption2.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+        }
+        .frame(width: 44, height: 44)
+        .overlay {
+            Circle()
+                .stroke(.white.opacity(0.22), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.18), radius: 3, x: 0, y: 1)
     }
 
     private var clampedProgress: Double {
@@ -369,11 +411,11 @@ private struct TagProgressBubble: View {
     private var progressColor: Color {
         switch clampedProgress {
         case 80...:
-            return .green
+            return Color(red: 0.42, green: 0.95, blue: 0.72)
         case 40..<80:
-            return .yellow
+            return Color(red: 0.95, green: 0.78, blue: 0.36)
         default:
-            return .red
+            return Color(red: 0.95, green: 0.42, blue: 0.42)
         }
     }
 }
