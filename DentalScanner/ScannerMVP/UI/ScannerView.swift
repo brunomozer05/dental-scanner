@@ -7,6 +7,7 @@ struct ScannerView: View {
     @State private var scaleValidationRealDistanceText = ""
     @State private var previewOrientation: CameraPreviewOrientation = .landscapeRight
     @State private var isDebugPanelExpanded = false
+    @State private var stlViewerPresentation: STLViewerPresentation?
 
     private let panelBackgroundColor = Color(red: 0.11, green: 0.11, blue: 0.12)
     private let chipBackgroundColor = Color(red: 0.16, green: 0.16, blue: 0.18)
@@ -98,6 +99,9 @@ struct ScannerView: View {
         .onDisappear {
             viewModel.stopCamera()
             UIDevice.current.endGeneratingDeviceOrientationNotifications()
+        }
+        .fullScreenCover(item: $stlViewerPresentation) { presentation in
+            STLViewerView(stlFileURL: presentation.fileURL)
         }
     }
 
@@ -328,11 +332,39 @@ struct ScannerView: View {
                 scanMetric(title: "Frames", value: formattedScanValidFrames)
                 scanMetric(title: "Qualidade", value: formattedScanQualityScore)
             }
+
+            if viewModel.canExportSTL {
+                Button {
+                    openSTLViewer()
+                } label: {
+                    Label("Visualizar STL", systemImage: "cube.transparent")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.black)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Color.white.opacity(0.88))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(12)
         .foregroundStyle(.white)
         .background(panelBackgroundColor.opacity(0.9))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func openSTLViewer() {
+        guard viewModel.canExportSTL else {
+            return
+        }
+
+        let stlFileURL = viewModel.stlExportURL ?? viewModel.exportCurrentImplantsAsSTL()
+        guard let stlFileURL else {
+            return
+        }
+
+        stlViewerPresentation = STLViewerPresentation(fileURL: stlFileURL)
     }
 
     private func scanMetric(title: String, value: String) -> some View {
@@ -987,4 +1019,9 @@ struct ScannerView: View {
 
 #Preview {
     ScannerView()
+}
+
+private struct STLViewerPresentation: Identifiable {
+    let id = UUID()
+    let fileURL: URL
 }
