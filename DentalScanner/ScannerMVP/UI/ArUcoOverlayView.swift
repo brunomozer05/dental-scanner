@@ -7,24 +7,39 @@ struct ArUcoOverlayView: View {
     let orientation: CameraPreviewOrientation
     let tagCoverages: [Int: ScannerViewModel.ScanTagCoverage]
 
+    @State private var trackedMarkers: [Int: TrackedMarker] = [:]
+
+    private let markerPersistenceDuration: TimeInterval = 0.3
+    private let markerFadeAnimation = Animation.easeInOut(duration: 0.14)
+    private let markerPositionCurrentWeight: CGFloat = 0.3
+
     var body: some View {
         GeometryReader { proxy in
             let markers = projectedMarkers(in: proxy.size)
+            let stableMarkers = trackedMarkers.values.sorted { $0.markerId < $1.markerId }
 
             ZStack {
-                ForEach(Array(markers.enumerated()), id: \.offset) { item in
-                    markerOverlay(marker: item.element, previewSize: proxy.size)
-                }
+                ForEach(stableMarkers) { trackedMarker in
+                    let marker = trackedMarker.projectedMarker
+                    let progress = tagCoverages[trackedMarker.markerId]?.progress ?? trackedMarker.progress
 
-                ForEach(Array(markers.enumerated()), id: \.offset) { item in
-                    let marker = item.element
-                    let progress = tagCoverages[marker.markerId]?.progress ?? 0
+                    ZStack {
+                        markerOverlay(marker: marker, previewSize: proxy.size)
 
-                    TagProgressBubble(progress: progress)
-                        .position(bubblePosition(for: marker, in: proxy.size))
+                        TagProgressBubble(progress: progress)
+                            .position(bubblePosition(for: marker, in: proxy.size))
+                    }
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .transition(.opacity)
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
+            .onAppear {
+                updateTrackedMarkers(with: markers)
+            }
+            .onChange(of: markers) { _, newMarkers in
+                updateTrackedMarkers(with: newMarkers)
+            }
         }
         .allowsHitTesting(false)
     }
@@ -167,6 +182,82 @@ struct ArUcoOverlayView: View {
         return CGPoint(x: x, y: y)
     }
 
+    private func updateTrackedMarkers(with markers: [ProjectedMarker], timestamp: Date = Date()) {
+        var nextMarkers = trackedMarkers.filter { _, marker in
+            timestamp.timeIntervalSince(marker.lastSeen) <= markerPersistenceDuration
+        }
+
+        for marker in markers {
+            let progress = tagCoverages[marker.markerId]?.progress ??
+                nextMarkers[marker.markerId]?.progress ??
+                0
+
+            if let previousMarker = nextMarkers[marker.markerId] {
+                nextMarkers[marker.markerId] = TrackedMarker(
+                    markerId: marker.markerId,
+                    corners: smoothedCorners(
+                        previous: previousMarker.corners,
+                        current: marker.corners
+                    ),
+                    lastSeen: timestamp,
+                    progress: progress
+                )
+            } else {
+                nextMarkers[marker.markerId] = TrackedMarker(
+                    markerId: marker.markerId,
+                    corners: marker.corners,
+                    lastSeen: timestamp,
+                    progress: progress
+                )
+            }
+        }
+
+        withAnimation(markerFadeAnimation) {
+            trackedMarkers = nextMarkers
+        }
+
+        scheduleExpiredMarkerPrune()
+    }
+
+    private func scheduleExpiredMarkerPrune() {
+        guard !trackedMarkers.isEmpty else {
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + markerPersistenceDuration) {
+            self.pruneExpiredMarkers(at: Date())
+        }
+    }
+
+    private func pruneExpiredMarkers(at timestamp: Date) {
+        let nextMarkers = trackedMarkers.filter { _, marker in
+            timestamp.timeIntervalSince(marker.lastSeen) <= markerPersistenceDuration
+        }
+
+        guard nextMarkers.count != trackedMarkers.count else {
+            return
+        }
+
+        withAnimation(markerFadeAnimation) {
+            trackedMarkers = nextMarkers
+        }
+    }
+
+    private func smoothedCorners(previous: [CGPoint], current: [CGPoint]) -> [CGPoint] {
+        guard previous.count == current.count else {
+            return current
+        }
+
+        return zip(previous, current).map { previousCorner, currentCorner in
+            CGPoint(
+                x: currentCorner.x * markerPositionCurrentWeight +
+                    previousCorner.x * (1.0 - markerPositionCurrentWeight),
+                y: currentCorner.y * markerPositionCurrentWeight +
+                    previousCorner.y * (1.0 - markerPositionCurrentWeight)
+            )
+        }
+    }
+
     private func markerCenter(for corners: [CGPoint]) -> CGPoint {
         guard !corners.isEmpty else {
             return .zero
@@ -185,9 +276,24 @@ struct ArUcoOverlayView: View {
         )
     }
 
-    private struct ProjectedMarker {
+    private struct ProjectedMarker: Equatable {
         let markerId: Int
         let corners: [CGPoint]
+    }
+
+    private struct TrackedMarker: Equatable, Identifiable {
+        let markerId: Int
+        let corners: [CGPoint]
+        let lastSeen: Date
+        let progress: Double
+
+        var id: Int {
+            markerId
+        }
+
+        var projectedMarker: ProjectedMarker {
+            ProjectedMarker(markerId: markerId, corners: corners)
+        }
     }
 }
 
