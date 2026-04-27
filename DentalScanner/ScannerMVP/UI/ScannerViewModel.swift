@@ -186,8 +186,7 @@ final class ScannerViewModel: ObservableObject {
     }
 
     var scanRequiredAngularCoverageRange: ClosedRange<Double> {
-        ScanConfiguration.minimumRequiredAngularCoveragePercent...
-            ScanConfiguration.maximumRequiredAngularCoveragePercent
+        return ScanConfiguration.minimumRequiredAngularCoveragePercent...ScanConfiguration.maximumRequiredAngularCoveragePercent
     }
 
     var scanAngularCoverageStepPercent: Double {
