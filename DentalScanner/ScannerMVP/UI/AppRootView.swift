@@ -6,8 +6,12 @@ struct AppRootView: View {
     var body: some View {
         ZStack {
             if isScannerActive {
-                ScannerView()
-                    .transition(.opacity)
+                ScannerView {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        isScannerActive = false
+                    }
+                }
+                .transition(.opacity)
             } else {
                 HomeView {
                     withAnimation(.easeInOut(duration: 0.22)) {

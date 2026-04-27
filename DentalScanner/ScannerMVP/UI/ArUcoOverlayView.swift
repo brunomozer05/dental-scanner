@@ -305,39 +305,46 @@ private struct TagAROverlayView: View {
     let progress: Double
 
     private let accentColor = Color(red: 0.23, green: 0.51, blue: 0.96)
-    private let depthOffset = CGSize(width: 9, height: -9)
-    private let nodeSize: CGFloat = 5
+    private let depthOffset = CGSize(width: 10, height: -10)
+    private let nodeSize: CGFloat = 4.5
 
     var body: some View {
         ZStack {
             boxPath(frontCorners: corners, backCorners: backCorners)
-                .stroke(accentColor.opacity(0.24), lineWidth: 5)
-                .blur(radius: 5)
+                .stroke(accentColor.opacity(0.18), lineWidth: 6)
+                .blur(radius: 5.5)
+
+            polygonPath(corners: corners)
+                .stroke(
+                    accentColor.opacity(0.25),
+                    style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round)
+                )
+                .blur(radius: 2.2)
 
             polygonPath(corners: backCorners)
                 .stroke(
-                    accentColor.opacity(0.32),
-                    style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round)
+                    accentColor.opacity(0.22),
+                    style: StrokeStyle(lineWidth: 1.0, lineCap: .round, lineJoin: .round)
                 )
 
             connectorPath(frontCorners: corners, backCorners: backCorners)
                 .stroke(
-                    accentColor.opacity(0.46),
-                    style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round)
+                    accentColor.opacity(0.34),
+                    style: StrokeStyle(lineWidth: 0.9, lineCap: .round, lineJoin: .round)
                 )
 
             polygonPath(corners: corners)
                 .stroke(
-                    accentColor.opacity(0.92),
-                    style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round)
+                    accentColor.opacity(0.96),
+                    style: StrokeStyle(lineWidth: 1.9, lineCap: .round, lineJoin: .round)
                 )
 
             topProgressPath(corners: corners, progress: clampedProgress / 100.0)
                 .stroke(
-                    accentColor.opacity(0.98),
+                    progressColor,
                     style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round)
                 )
-                .shadow(color: accentColor.opacity(0.55), radius: 4, x: 0, y: 0)
+                .shadow(color: accentColor.opacity(0.58), radius: 4, x: 0, y: 0)
 
             ForEach(Array(corners.enumerated()), id: \.offset) { item in
                 cornerNode(size: nodeSize)
@@ -350,13 +357,31 @@ private struct TagAROverlayView: View {
                     .position(item.element)
             }
 
-            tagLabel
-                .position(labelPosition)
+            indicatorConnectorPath(from: indicatorPosition, to: tagAnchorPosition)
+                .stroke(
+                    accentColor.opacity(0.42),
+                    style: StrokeStyle(lineWidth: 0.9, lineCap: .round)
+                )
+
+            TagARProgressIndicator(
+                markerId: markerId,
+                progress: clampedProgress,
+                accentColor: accentColor
+            )
+            .position(indicatorPosition)
         }
     }
 
     private var clampedProgress: Double {
         min(max(progress, 0), 100)
+    }
+
+    private var progressRatio: Double {
+        clampedProgress / 100.0
+    }
+
+    private var progressColor: Color {
+        accentColor.opacity(0.46 + 0.52 * progressRatio)
     }
 
     private var backCorners: [CGPoint] {
@@ -368,44 +393,27 @@ private struct TagAROverlayView: View {
         }
     }
 
-    private var labelPosition: CGPoint {
+    private var tagAnchorPosition: CGPoint {
         guard corners.count >= 2 else {
             return .zero
         }
 
-        let topCenter = midpoint(corners[0], corners[1])
-        return CGPoint(x: topCenter.x + 5, y: topCenter.y - 18)
+        return midpoint(corners[0], corners[1])
     }
 
-    private var tagLabel: some View {
-        HStack(spacing: 5) {
-            Text("ID \(markerId)")
-                .foregroundStyle(.white.opacity(0.64))
-
-            Text(String(format: "%.0f%%", clampedProgress))
-                .foregroundStyle(.white)
-                .monospacedDigit()
-        }
-        .font(.caption2.weight(.semibold))
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(accentColor.opacity(0.28), lineWidth: 1)
-        }
+    private var indicatorPosition: CGPoint {
+        CGPoint(x: tagAnchorPosition.x + 8, y: tagAnchorPosition.y - 38)
     }
 
     private func cornerNode(size: CGFloat) -> some View {
         Circle()
-            .fill(Color.white.opacity(0.96))
+            .fill(accentColor.opacity(0.20))
             .frame(width: size, height: size)
             .overlay {
                 Circle()
-                    .stroke(accentColor.opacity(0.92), lineWidth: 1)
+                    .stroke(accentColor.opacity(0.90), lineWidth: 1)
             }
-            .shadow(color: accentColor.opacity(0.65), radius: 3, x: 0, y: 0)
+            .shadow(color: accentColor.opacity(0.58), radius: 3, x: 0, y: 0)
     }
 
     private func polygonPath(corners: [CGPoint]) -> Path {
@@ -461,10 +469,63 @@ private struct TagAROverlayView: View {
         return path
     }
 
+    private func indicatorConnectorPath(from indicatorPosition: CGPoint, to anchorPosition: CGPoint) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: indicatorPosition.x, y: indicatorPosition.y + 18))
+        path.addLine(to: anchorPosition)
+        return path
+    }
+
     private func midpoint(_ first: CGPoint, _ second: CGPoint) -> CGPoint {
         CGPoint(
             x: (first.x + second.x) / 2,
             y: (first.y + second.y) / 2
         )
+    }
+}
+
+private struct TagARProgressIndicator: View {
+    let markerId: Int
+    let progress: Double
+    let accentColor: Color
+
+    private var progressRatio: Double {
+        min(max(progress / 100.0, 0), 1)
+    }
+
+    var body: some View {
+        VStack(spacing: 2) {
+            ZStack {
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .overlay {
+                        Circle()
+                            .fill(Color.black.opacity(0.52))
+                    }
+
+                Circle()
+                    .stroke(Color.white.opacity(0.14), lineWidth: 2)
+
+                Circle()
+                    .trim(from: 0, to: progressRatio)
+                    .stroke(
+                        accentColor.opacity(0.52 + 0.44 * progressRatio),
+                        style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                    .shadow(color: accentColor.opacity(0.40), radius: 3, x: 0, y: 0)
+
+                Text(String(format: "%.0f%%", progress))
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .monospacedDigit()
+            }
+            .frame(width: 38, height: 38)
+
+            Text("ID \(markerId)")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.58))
+        }
+        .shadow(color: Color.black.opacity(0.32), radius: 8, x: 0, y: 3)
     }
 }
