@@ -137,6 +137,18 @@ static size_t DetectAruco4x4Markers(const cv::Mat &grayImage,
                                     std::vector<int> &ids) {
     cv::aruco::Dictionary dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
     cv::aruco::DetectorParameters parameters;
+    parameters.adaptiveThreshWinSizeMin = 3;
+    parameters.adaptiveThreshWinSizeMax = 23;
+    parameters.adaptiveThreshWinSizeStep = 10;
+    parameters.minMarkerPerimeterRate = 0.02;
+    parameters.maxMarkerPerimeterRate = 4.0;
+    parameters.polygonalApproxAccuracyRate = 0.05;
+    parameters.minCornerDistanceRate = 0.01;
+    parameters.minDistanceToBorder = 3;
+    parameters.cornerRefinementMethod = cv::aruco::CORNER_REFINE_SUBPIX;
+    parameters.cornerRefinementWinSize = 5;
+    parameters.cornerRefinementMaxIterations = 30;
+
     cv::aruco::ArucoDetector detector(dictionary, parameters);
 
     std::vector<std::vector<cv::Point2f>> rejectedCorners;
