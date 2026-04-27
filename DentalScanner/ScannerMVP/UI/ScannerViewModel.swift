@@ -68,6 +68,7 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var arucoGrayscaleChannelCount: Int?
     @Published private(set) var arucoRejectedCandidateCount: Int?
     @Published private(set) var rawPoseResults: [PoseResult] = []
+    @Published private(set) var fusedPoseResults: [PoseResult] = []
     @Published private(set) var rawPoseResult: PoseResult?
     @Published private(set) var stablePoseResult: PoseResult?
     @Published private(set) var poseStabilityStatus: String = "Sem pose"
@@ -94,6 +95,7 @@ final class ScannerViewModel: ObservableObject {
     private let cameraService: CameraFrameService
     private let arUcoDetector: ArUcoDetector
     private let poseEstimator: PoseEstimator
+    private let multiFramePoseAccumulator: MultiFramePoseAccumulator
     private let stlExporter: STLExporter
     private var shouldRunCamera = false
     private var totalFramesCounter: Int = 0
@@ -125,11 +127,13 @@ final class ScannerViewModel: ObservableObject {
         cameraService: CameraFrameService = CameraFrameService(),
         arUcoDetector: ArUcoDetector = ArUcoDetector(),
         poseEstimator: PoseEstimator = PoseEstimator(),
+        multiFramePoseAccumulator: MultiFramePoseAccumulator = MultiFramePoseAccumulator(),
         stlExporter: STLExporter = STLExporter()
     ) {
         self.cameraService = cameraService
         self.arUcoDetector = arUcoDetector
         self.poseEstimator = poseEstimator
+        self.multiFramePoseAccumulator = multiFramePoseAccumulator
         self.stlExporter = stlExporter
         self.isOpenCVAvailable = arUcoDetector.isOpenCVAvailable
         bindCameraCallbacks()
@@ -264,7 +268,7 @@ final class ScannerViewModel: ObservableObject {
             selectedImplantMarkerIds.append(markerId)
         }
 
-        selectedTagDistanceMm = selectedTagDistance(in: rawPoseResults)
+        selectedTagDistanceMm = selectedTagDistance(in: consolidatedPoseResults())
         selectedImplantDistanceMm = selectedImplantDistance(in: implantPoseResults)
     }
 
@@ -278,6 +282,12 @@ final class ScannerViewModel: ObservableObject {
             max(markerSizeMillimeters, PoseConfiguration.minimumMarkerSizeMillimeters),
             PoseConfiguration.maximumMarkerSizeMillimeters
         )
+        multiFramePoseAccumulator.reset()
+        fusedPoseResults = []
+        implantPoseResults = []
+        implantPoseResult = nil
+        selectedTagDistanceMm = nil
+        selectedImplantDistanceMm = nil
     }
 
     func setPreviewOrientation(_ orientation: CameraPreviewOrientation) {
@@ -398,8 +408,10 @@ final class ScannerViewModel: ObservableObject {
             in: frame,
             markerSizeMillimeters: markerSizeMillimeters
         )
-        // A geometria do implante usa a pose bruta do frame, nao a pose estabilizada da UI.
-        let implantMetrics = estimateImplantPoses(from: poseMetrics.rawPoseResults)
+        // Consolidated geometry stays in a tag-anchor reference frame, not the moving camera frame.
+        let fusedPoseResults = multiFramePoseAccumulator.update(with: poseMetrics.rawPoseResults)
+        let consolidatedPoseResults = fusedPoseResults.isEmpty ? poseMetrics.rawPoseResults : fusedPoseResults
+        let implantMetrics = estimateImplantPoses(from: consolidatedPoseResults)
 
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -425,6 +437,7 @@ final class ScannerViewModel: ObservableObject {
             self.arucoGrayscaleChannelCount = arucoMetrics.grayscaleChannelCount
             self.arucoRejectedCandidateCount = arucoMetrics.rejectedCandidateCount
             self.rawPoseResults = poseMetrics.rawPoseResults
+            self.fusedPoseResults = fusedPoseResults
             self.rawPoseResult = poseMetrics.rawPoseResult
             self.stablePoseResult = poseMetrics.stablePoseResult
             self.poseStabilityStatus = poseMetrics.stabilityStatus
@@ -434,7 +447,7 @@ final class ScannerViewModel: ObservableObject {
             self.poseErrorMessage = poseMetrics.errorMessage
             self.implantPoseResults = implantMetrics.implantPoseResults
             self.implantPoseResult = implantMetrics.implantPoseResults.first
-            self.selectedTagDistanceMm = self.selectedTagDistance(in: poseMetrics.rawPoseResults)
+            self.selectedTagDistanceMm = self.selectedTagDistance(in: consolidatedPoseResults)
             self.selectedImplantDistanceMm = self.selectedImplantDistance(in: implantMetrics.implantPoseResults)
         }
     }
@@ -610,6 +623,10 @@ final class ScannerViewModel: ObservableObject {
         }
 
         return simd_distance(firstPose.translationVector, secondPose.translationVector)
+    }
+
+    private func consolidatedPoseResults() -> [PoseResult] {
+        fusedPoseResults.isEmpty ? rawPoseResults : fusedPoseResults
     }
 
     private func selectedImplantDistance(in implantPoseResults: [ImplantPose]) -> Double? {
