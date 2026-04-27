@@ -66,7 +66,8 @@ let project = Project(
             "LD_RUNPATH_SEARCH_PATHS": .array([
                 "$(inherited)",
                 "@executable_path/Frameworks"
-            ])
+            ]),
+            "ASSETCATALOG_COMPILER_APPICON_NAME": .string("AppIcon")
         ]
     ),
     targets: [
@@ -82,7 +83,8 @@ let project = Project(
                 "DentalScanner/**/*.mm"
             ],
             resources: [
-                "DentalScanner/**/*.storyboard"
+                "DentalScanner/**/*.storyboard",
+                "DentalScanner/**/*.xcassets"
             ],
             dependencies: OpenCV.dependencies
         )
