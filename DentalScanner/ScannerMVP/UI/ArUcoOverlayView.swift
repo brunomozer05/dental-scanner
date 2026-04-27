@@ -16,8 +16,6 @@ struct ArUcoOverlayView: View {
     private let markerFastMotionDistanceThreshold: CGFloat = 6
     private let markerMotionResponseScale: CGFloat = 20
     private let markerPredictionFactor: CGFloat = 0.6
-    private let markerBracketLength: CGFloat = 22
-    private let markerOverlayColor = Color(red: 0.62, green: 0.95, blue: 0.92)
 
     var body: some View {
         GeometryReader { proxy in
@@ -29,14 +27,13 @@ struct ArUcoOverlayView: View {
                     let marker = trackedMarker.projectedMarker
                     let progress = tagCoverages[trackedMarker.markerId]?.progress ?? trackedMarker.progress
 
-                    ZStack {
-                        markerOverlay(marker: marker, previewSize: proxy.size)
-
-                        TagProgressBubble(progress: progress)
-                            .position(bubblePosition(for: marker, in: proxy.size))
-                    }
+                    TagAROverlayView(
+                        markerId: trackedMarker.markerId,
+                        corners: marker.corners,
+                        progress: progress
+                    )
                     .frame(width: proxy.size.width, height: proxy.size.height)
-                    .transition(.opacity)
+                    .transition(.scale(scale: 0.96).combined(with: .opacity))
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
@@ -65,19 +62,6 @@ struct ArUcoOverlayView: View {
                 corners: detection.corners.map(project)
             )
         }
-    }
-
-    private func markerOverlay(marker: ProjectedMarker, previewSize: CGSize) -> some View {
-        ZStack {
-            ForEach(marker.corners.indices, id: \.self) { cornerIndex in
-                cornerBracketPath(at: cornerIndex, corners: marker.corners)
-                    .stroke(
-                        markerOverlayColor.opacity(0.84),
-                        style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round)
-                    )
-            }
-        }
-        .frame(width: previewSize.width, height: previewSize.height)
     }
 
     private func makeAspectFillProjection(previewSize: CGSize) -> ((CGPoint) -> CGPoint)? {
@@ -155,62 +139,6 @@ struct ArUcoOverlayView: View {
         case .portrait, .portraitUpsideDown:
             return rawFrameWidth > rawFrameHeight
         }
-    }
-
-    private func cornerBracketPath(at index: Int, corners: [CGPoint]) -> Path {
-        var path = Path()
-        guard corners.indices.contains(index), corners.count >= 3 else {
-            return path
-        }
-
-        let corner = corners[index]
-        let previousCorner = corners[(index + corners.count - 1) % corners.count]
-        let nextCorner = corners[(index + 1) % corners.count]
-        let bracketLength = min(
-            markerBracketLength,
-            min(
-                distance(from: corner, to: previousCorner) * 0.34,
-                distance(from: corner, to: nextCorner) * 0.34
-            )
-        )
-        let previousEndpoint = point(from: corner, toward: previousCorner, length: bracketLength)
-        let nextEndpoint = point(from: corner, toward: nextCorner, length: bracketLength)
-
-        path.move(to: previousEndpoint)
-        path.addLine(to: corner)
-        path.addLine(to: nextEndpoint)
-
-        return path
-    }
-
-    private func distance(from start: CGPoint, to end: CGPoint) -> CGFloat {
-        hypot(end.x - start.x, end.y - start.y)
-    }
-
-    private func point(from start: CGPoint, toward end: CGPoint, length: CGFloat) -> CGPoint {
-        let deltaX = end.x - start.x
-        let deltaY = end.y - start.y
-        let distance = hypot(deltaX, deltaY)
-
-        guard distance > CGFloat.ulpOfOne else {
-            return start
-        }
-
-        let scale = min(length, distance) / distance
-        return CGPoint(
-            x: start.x + deltaX * scale,
-            y: start.y + deltaY * scale
-        )
-    }
-
-    private func bubblePosition(for marker: ProjectedMarker, in previewSize: CGSize) -> CGPoint {
-        let center = markerCenter(for: marker.corners)
-        let bubbleRadius: CGFloat = 23
-        let verticalOffset: CGFloat = 44
-        let x = min(max(center.x, bubbleRadius), max(previewSize.width - bubbleRadius, bubbleRadius))
-        let y = min(max(center.y - verticalOffset, bubbleRadius), max(previewSize.height - bubbleRadius, bubbleRadius))
-
-        return CGPoint(x: x, y: y)
     }
 
     private func updateTrackedMarkers(with markers: [ProjectedMarker], timestamp: Date = Date()) {
@@ -371,51 +299,172 @@ struct ArUcoOverlayView: View {
     }
 }
 
-private struct TagProgressBubble: View {
+private struct TagAROverlayView: View {
+    let markerId: Int
+    let corners: [CGPoint]
     let progress: Double
+
+    private let accentColor = Color(red: 0.23, green: 0.51, blue: 0.96)
+    private let depthOffset = CGSize(width: 9, height: -9)
+    private let nodeSize: CGFloat = 5
 
     var body: some View {
         ZStack {
-            Circle()
-                .fill(.ultraThinMaterial)
-                .overlay {
-                    Circle()
-                        .fill(progressColor.opacity(0.14))
-                }
+            boxPath(frontCorners: corners, backCorners: backCorners)
+                .stroke(accentColor.opacity(0.24), lineWidth: 5)
+                .blur(radius: 5)
 
-            Circle()
-                .trim(from: 0, to: clampedProgress / 100.0)
+            polygonPath(corners: backCorners)
                 .stroke(
-                    progressColor.opacity(0.88),
-                    style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                    accentColor.opacity(0.32),
+                    style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round)
                 )
-                .rotationEffect(.degrees(-90))
 
-            Text(String(format: "%.0f%%", clampedProgress))
-                .font(.caption2.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(.white)
+            connectorPath(frontCorners: corners, backCorners: backCorners)
+                .stroke(
+                    accentColor.opacity(0.46),
+                    style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round)
+                )
+
+            polygonPath(corners: corners)
+                .stroke(
+                    accentColor.opacity(0.92),
+                    style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round)
+                )
+
+            topProgressPath(corners: corners, progress: clampedProgress / 100.0)
+                .stroke(
+                    accentColor.opacity(0.98),
+                    style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round)
+                )
+                .shadow(color: accentColor.opacity(0.55), radius: 4, x: 0, y: 0)
+
+            ForEach(Array(corners.enumerated()), id: \.offset) { item in
+                cornerNode(size: nodeSize)
+                    .position(item.element)
+            }
+
+            ForEach(Array(backCorners.enumerated()), id: \.offset) { item in
+                cornerNode(size: nodeSize * 0.72)
+                    .opacity(0.55)
+                    .position(item.element)
+            }
+
+            tagLabel
+                .position(labelPosition)
         }
-        .frame(width: 44, height: 44)
-        .overlay {
-            Circle()
-                .stroke(.white.opacity(0.22), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.18), radius: 3, x: 0, y: 1)
     }
 
     private var clampedProgress: Double {
         min(max(progress, 0), 100)
     }
 
-    private var progressColor: Color {
-        switch clampedProgress {
-        case 80...:
-            return Color(red: 0.42, green: 0.95, blue: 0.72)
-        case 40..<80:
-            return Color(red: 0.95, green: 0.78, blue: 0.36)
-        default:
-            return Color(red: 0.95, green: 0.42, blue: 0.42)
+    private var backCorners: [CGPoint] {
+        corners.map { corner in
+            CGPoint(
+                x: corner.x + depthOffset.width,
+                y: corner.y + depthOffset.height
+            )
         }
+    }
+
+    private var labelPosition: CGPoint {
+        guard corners.count >= 2 else {
+            return .zero
+        }
+
+        let topCenter = midpoint(corners[0], corners[1])
+        return CGPoint(x: topCenter.x + 5, y: topCenter.y - 18)
+    }
+
+    private var tagLabel: some View {
+        HStack(spacing: 5) {
+            Text("ID \(markerId)")
+                .foregroundStyle(.white.opacity(0.64))
+
+            Text(String(format: "%.0f%%", clampedProgress))
+                .foregroundStyle(.white)
+                .monospacedDigit()
+        }
+        .font(.caption2.weight(.semibold))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(accentColor.opacity(0.28), lineWidth: 1)
+        }
+    }
+
+    private func cornerNode(size: CGFloat) -> some View {
+        Circle()
+            .fill(Color.white.opacity(0.96))
+            .frame(width: size, height: size)
+            .overlay {
+                Circle()
+                    .stroke(accentColor.opacity(0.92), lineWidth: 1)
+            }
+            .shadow(color: accentColor.opacity(0.65), radius: 3, x: 0, y: 0)
+    }
+
+    private func polygonPath(corners: [CGPoint]) -> Path {
+        var path = Path()
+        guard let firstCorner = corners.first else {
+            return path
+        }
+
+        path.move(to: firstCorner)
+        for corner in corners.dropFirst() {
+            path.addLine(to: corner)
+        }
+        path.closeSubpath()
+        return path
+    }
+
+    private func connectorPath(frontCorners: [CGPoint], backCorners: [CGPoint]) -> Path {
+        var path = Path()
+        guard frontCorners.count == backCorners.count else {
+            return path
+        }
+
+        for index in frontCorners.indices {
+            path.move(to: frontCorners[index])
+            path.addLine(to: backCorners[index])
+        }
+
+        return path
+    }
+
+    private func boxPath(frontCorners: [CGPoint], backCorners: [CGPoint]) -> Path {
+        var path = polygonPath(corners: frontCorners)
+        path.addPath(polygonPath(corners: backCorners))
+        path.addPath(connectorPath(frontCorners: frontCorners, backCorners: backCorners))
+        return path
+    }
+
+    private func topProgressPath(corners: [CGPoint], progress: Double) -> Path {
+        var path = Path()
+        guard corners.count >= 2 else {
+            return path
+        }
+
+        let start = corners[0]
+        let end = corners[1]
+        let progressEnd = CGPoint(
+            x: start.x + (end.x - start.x) * CGFloat(progress),
+            y: start.y + (end.y - start.y) * CGFloat(progress)
+        )
+
+        path.move(to: start)
+        path.addLine(to: progressEnd)
+        return path
+    }
+
+    private func midpoint(_ first: CGPoint, _ second: CGPoint) -> CGPoint {
+        CGPoint(
+            x: (first.x + second.x) / 2,
+            y: (first.y + second.y) / 2
+        )
     }
 }
