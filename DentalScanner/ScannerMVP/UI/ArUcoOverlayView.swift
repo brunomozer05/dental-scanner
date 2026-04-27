@@ -9,9 +9,19 @@ struct ArUcoOverlayView: View {
 
     var body: some View {
         GeometryReader { proxy in
+            let markers = projectedMarkers(in: proxy.size)
+
             ZStack {
-                ForEach(Array(projectedMarkers(in: proxy.size).enumerated()), id: \.offset) { item in
+                ForEach(Array(markers.enumerated()), id: \.offset) { item in
                     markerOverlay(marker: item.element, previewSize: proxy.size)
+                }
+
+                ForEach(Array(markers.enumerated()), id: \.offset) { item in
+                    let marker = item.element
+                    let progress = tagCoverages[marker.markerId]?.progress ?? 0
+
+                    TagProgressBubble(progress: progress)
+                        .position(bubblePosition(for: marker, in: proxy.size))
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
@@ -51,53 +61,8 @@ struct ArUcoOverlayView: View {
                     }
                     .position(cornerItem.element)
             }
-
-            markerCoverageLabel(for: marker)
-                .position(labelPosition(for: marker.corners, in: previewSize))
         }
         .frame(width: previewSize.width, height: previewSize.height)
-    }
-
-    private func markerCoverageLabel(for marker: ProjectedMarker) -> some View {
-        let coverage = tagCoverages[marker.markerId]
-        let progress = coverage?.progress ?? 0
-        let color = coverage == nil ? Color.yellow : coverageColor(for: progress)
-
-        return VStack(alignment: .leading, spacing: 3) {
-            Text("ID \(marker.markerId)")
-                .font(.caption2.weight(.semibold))
-
-            if coverage != nil {
-                HStack(spacing: 4) {
-                    Text(String(format: "%.0f%%", progress))
-                        .font(.caption2.weight(.bold))
-
-                    Text("\(coverage?.coveredBinCount ?? 0)/\(coverage?.requiredBinCount ?? 0)")
-                        .font(.caption2.monospacedDigit())
-                        .opacity(0.8)
-                }
-            }
-        }
-        .foregroundStyle(.black)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
-        .background(color.opacity(0.92))
-        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .stroke(.black.opacity(0.65), lineWidth: 1)
-        }
-    }
-
-    private func coverageColor(for progress: Double) -> Color {
-        switch progress {
-        case 80...:
-            return .green
-        case 45..<80:
-            return .yellow
-        default:
-            return .red
-        }
     }
 
     private func makeAspectFillProjection(previewSize: CGSize) -> ((CGPoint) -> CGPoint)? {
@@ -192,17 +157,70 @@ struct ArUcoOverlayView: View {
         return path
     }
 
-    private func labelPosition(for corners: [CGPoint], in previewSize: CGSize) -> CGPoint {
-        let minX = corners.map(\.x).min() ?? 0
-        let minY = corners.map(\.y).min() ?? 0
-        let labelX = min(max(minX, 28), max(previewSize.width - 28, 28))
-        let labelY = min(max(minY - 14, 12), max(previewSize.height - 12, 12))
+    private func bubblePosition(for marker: ProjectedMarker, in previewSize: CGSize) -> CGPoint {
+        let center = markerCenter(for: marker.corners)
+        let bubbleRadius: CGFloat = 23
+        let verticalOffset: CGFloat = 44
+        let x = min(max(center.x, bubbleRadius), max(previewSize.width - bubbleRadius, bubbleRadius))
+        let y = min(max(center.y - verticalOffset, bubbleRadius), max(previewSize.height - bubbleRadius, bubbleRadius))
 
-        return CGPoint(x: labelX, y: labelY)
+        return CGPoint(x: x, y: y)
+    }
+
+    private func markerCenter(for corners: [CGPoint]) -> CGPoint {
+        guard !corners.isEmpty else {
+            return .zero
+        }
+
+        let sum = corners.reduce(CGPoint.zero) { partialResult, corner in
+            CGPoint(
+                x: partialResult.x + corner.x,
+                y: partialResult.y + corner.y
+            )
+        }
+
+        return CGPoint(
+            x: sum.x / CGFloat(corners.count),
+            y: sum.y / CGFloat(corners.count)
+        )
     }
 
     private struct ProjectedMarker {
         let markerId: Int
         let corners: [CGPoint]
+    }
+}
+
+private struct TagProgressBubble: View {
+    let progress: Double
+
+    var body: some View {
+        Text(String(format: "%.0f%%", clampedProgress))
+            .font(.caption.weight(.bold))
+            .monospacedDigit()
+            .foregroundStyle(.black)
+            .frame(width: 46, height: 46)
+            .background(progressColor.opacity(0.92))
+            .clipShape(Circle())
+            .overlay {
+                Circle()
+                    .stroke(.black.opacity(0.7), lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
+    }
+
+    private var clampedProgress: Double {
+        min(max(progress, 0), 100)
+    }
+
+    private var progressColor: Color {
+        switch clampedProgress {
+        case 80...:
+            return .green
+        case 40..<80:
+            return .yellow
+        default:
+            return .red
+        }
     }
 }
