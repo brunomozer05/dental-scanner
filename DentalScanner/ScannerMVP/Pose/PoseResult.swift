@@ -8,6 +8,7 @@ struct PoseResult: Equatable {
     let translationVector: SIMD3<Double>
     let distanceMm: Double
     let reprojectionError: Double
+    let markerAreaPixels: Double
 
     init(
         markerId: Int,
@@ -15,7 +16,8 @@ struct PoseResult: Equatable {
         rotationMatrix: simd_double3x3? = nil,
         translationVector: SIMD3<Double>,
         distanceMm: Double,
-        reprojectionError: Double
+        reprojectionError: Double,
+        markerAreaPixels: Double = 0.0
     ) {
         self.markerId = markerId
         self.rotationVector = rotationVector
@@ -23,6 +25,7 @@ struct PoseResult: Equatable {
         self.translationVector = translationVector
         self.distanceMm = distanceMm
         self.reprojectionError = reprojectionError
+        self.markerAreaPixels = markerAreaPixels
     }
 
     static func == (lhs: PoseResult, rhs: PoseResult) -> Bool {
@@ -31,7 +34,8 @@ struct PoseResult: Equatable {
             matrixEquals(lhs.rotationMatrix, rhs.rotationMatrix) &&
             lhs.translationVector == rhs.translationVector &&
             lhs.distanceMm == rhs.distanceMm &&
-            lhs.reprojectionError == rhs.reprojectionError
+            lhs.reprojectionError == rhs.reprojectionError &&
+            lhs.markerAreaPixels == rhs.markerAreaPixels
     }
 
     private static func matrixEquals(

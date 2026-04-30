@@ -92,8 +92,27 @@ final class PoseEstimator {
             rotationMatrix: try matrix3x3(from: bridgeResult.rotationMatrix, name: "rotationMatrix"),
             translationVector: try vector3(from: bridgeResult.translationVector, name: "translationVector"),
             distanceMm: bridgeResult.distanceMm,
-            reprojectionError: bridgeResult.reprojectionError
+            reprojectionError: bridgeResult.reprojectionError,
+            markerAreaPixels: Self.markerAreaPixels(for: detection.corners)
         )
+    }
+
+    private static func markerAreaPixels(for corners: [CGPoint]) -> Double {
+        guard corners.count >= 3 else {
+            return 0.0
+        }
+
+        var signedArea = 0.0
+        for index in corners.indices {
+            let nextIndex = (index + 1) % corners.count
+            let corner = corners[index]
+            let nextCorner = corners[nextIndex]
+            signedArea += Double(corner.x) * Double(nextCorner.y)
+            signedArea -= Double(nextCorner.x) * Double(corner.y)
+        }
+
+        let area = abs(signedArea) * 0.5
+        return area.isFinite ? area : 0.0
     }
 
     private func vector3(from values: [NSNumber], name: String) throws -> SIMD3<Double> {

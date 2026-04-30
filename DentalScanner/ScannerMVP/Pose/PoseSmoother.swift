@@ -72,7 +72,8 @@ final class PoseSmoother {
             rotationMatrix: smoothedRotationMatrix,
             translationVector: smoothedPosition,
             distanceMm: simd_length(smoothedPosition),
-            reprojectionError: previous.reprojectionError * retained + current.reprojectionError * clampedAlpha
+            reprojectionError: previous.reprojectionError * retained + current.reprojectionError * clampedAlpha,
+            markerAreaPixels: previous.markerAreaPixels * retained + current.markerAreaPixels * clampedAlpha
         )
     }
 }

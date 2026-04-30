@@ -8,6 +8,8 @@ final class MultiFramePoseAccumulator {
         let maxTranslationOutlierDistanceMm: Double
         let minimumSamplesBeforeOutlierRejection: Int
         let minimumWeightedReprojectionError: Double
+        let minimumFrameWeight: Double
+        let maximumFrameWeight: Double
         let minimumAngularDiversityRadians: Double
 
         static let scannerDefault = Configuration(
@@ -15,7 +17,9 @@ final class MultiFramePoseAccumulator {
             maxSamplesPerMarker: 90,
             maxTranslationOutlierDistanceMm: 6.0,
             minimumSamplesBeforeOutlierRejection: 4,
-            minimumWeightedReprojectionError: 0.05,
+            minimumWeightedReprojectionError: 0.001,
+            minimumFrameWeight: 0.1,
+            maximumFrameWeight: 10.0,
             minimumAngularDiversityRadians: Double.pi / 60.0
         )
     }
@@ -24,6 +28,7 @@ final class MultiFramePoseAccumulator {
     private let lock = NSLock()
     private var anchorMarkerId: Int?
     private var samplesByMarkerId: [Int: [PoseResult]] = [:]
+    private var maximumMarkerAreaPixelsByMarkerId: [Int: Double] = [:]
     private var acceptedViewpointRotations: [Quaternion] = []
 
     init(configuration: Configuration = .scannerDefault) {
@@ -36,6 +41,7 @@ final class MultiFramePoseAccumulator {
 
         anchorMarkerId = nil
         samplesByMarkerId.removeAll()
+        maximumMarkerAreaPixelsByMarkerId.removeAll()
         acceptedViewpointRotations.removeAll()
     }
 
@@ -93,11 +99,14 @@ final class MultiFramePoseAccumulator {
         pose.reprojectionError.isFinite &&
             pose.reprojectionError <= configuration.maxReprojectionError &&
             pose.distanceMm.isFinite &&
+            pose.markerAreaPixels.isFinite &&
             Self.isFinite(pose.rotationVector) &&
             Self.isFinite(pose.translationVector)
     }
 
     private func append(_ pose: PoseResult) {
+        recordMaximumMarkerArea(for: pose)
+
         var samples = samplesByMarkerId[pose.markerId, default: []]
         samples.append(pose)
 
@@ -106,6 +115,15 @@ final class MultiFramePoseAccumulator {
         }
 
         samplesByMarkerId[pose.markerId] = samples
+    }
+
+    private func recordMaximumMarkerArea(for pose: PoseResult) {
+        guard pose.markerAreaPixels.isFinite, pose.markerAreaPixels > 0 else {
+            return
+        }
+
+        let currentMaximum = maximumMarkerAreaPixelsByMarkerId[pose.markerId] ?? 0.0
+        maximumMarkerAreaPixelsByMarkerId[pose.markerId] = max(currentMaximum, pose.markerAreaPixels)
     }
 
     private func shouldAcceptFrame(
@@ -172,11 +190,14 @@ final class MultiFramePoseAccumulator {
         let reprojectionError = weightedSamples.reduce(0.0) {
             $0 + $1.pose.reprojectionError * $1.weight
         } / totalWeight
+        let markerAreaPixels = weightedSamples.reduce(0.0) {
+            $0 + $1.pose.markerAreaPixels * $1.weight
+        } / totalWeight
         guard let rotationQuaternion = weightedAverageQuaternion(from: weightedSamples)
         else {
             return nil
         }
-        let rotationMatrix = rotationQuaternion.rotationMatrix
+        let rotationMatrix = simd_double3x3(rotationQuaternion)
         guard let rotationVector = Self.rotationVector(from: rotationMatrix) else {
             return nil
         }
@@ -194,21 +215,26 @@ final class MultiFramePoseAccumulator {
             rotationMatrix: rotationMatrix,
             translationVector: translationVector,
             distanceMm: simd_length(translationVector),
-            reprojectionError: reprojectionError
+            reprojectionError: reprojectionError,
+            markerAreaPixels: markerAreaPixels
         )
     }
 
     private func weightedPoseSample(from pose: PoseResult) -> WeightedPoseSample? {
-        let boundedReprojectionError = min(
-            max(pose.reprojectionError, configuration.minimumWeightedReprojectionError),
-            configuration.maxReprojectionError
+        let reprojectionWeight = 1.0 / max(
+            pose.reprojectionError,
+            configuration.minimumWeightedReprojectionError
         )
-        let weight = 1.0 / (boundedReprojectionError * boundedReprojectionError)
+        let rawWeight = reprojectionWeight * normalizedMarkerArea(for: pose)
+        let weight = min(
+            max(rawWeight, configuration.minimumFrameWeight),
+            configuration.maximumFrameWeight
+        )
         guard weight.isFinite, weight > 0 else {
             return nil
         }
 
-        guard let quaternion = Quaternion(rotationMatrix: pose.rotationMatrix) else {
+        guard let quaternion = PoseMath.quaternion(fromRotationMatrix: pose.rotationMatrix) else {
             return nil
         }
 
@@ -219,17 +245,46 @@ final class MultiFramePoseAccumulator {
         )
     }
 
-    private func weightedAverageQuaternion(from weightedSamples: [WeightedPoseSample]) -> Quaternion? {
-        guard let referenceQuaternion = weightedSamples.first?.quaternion else {
+    private func normalizedMarkerArea(for pose: PoseResult) -> Double {
+        guard pose.markerAreaPixels.isFinite, pose.markerAreaPixels > 0 else {
+            return 1.0
+        }
+
+        guard let maximumMarkerAreaPixels = maximumMarkerAreaPixelsByMarkerId[pose.markerId],
+              maximumMarkerAreaPixels.isFinite,
+              maximumMarkerAreaPixels > 0
+        else {
+            return 1.0
+        }
+
+        return min(max(pose.markerAreaPixels / maximumMarkerAreaPixels, 0.0), 1.0)
+    }
+
+    private func weightedAverageQuaternion(from weightedSamples: [WeightedPoseSample]) -> simd_quatd? {
+        var accumulatedRotation: simd_quatd?
+        var totalWeight = 0.0
+
+        for sample in weightedSamples {
+            let nextTotalWeight = totalWeight + sample.weight
+            guard nextTotalWeight.isFinite, nextTotalWeight > 0 else {
+                return nil
+            }
+
+            if let currentRotation = accumulatedRotation {
+                let alpha = sample.weight / nextTotalWeight
+                accumulatedRotation = simd_slerp(currentRotation, sample.quaternion, alpha)
+            } else {
+                accumulatedRotation = sample.quaternion
+            }
+
+            totalWeight = nextTotalWeight
+        }
+
+        guard let accumulatedRotation, PoseMath.isFinite(accumulatedRotation) else {
             return nil
         }
 
-        let accumulatedQuaternion = weightedSamples.reduce(Quaternion.zero) { partialResult, sample in
-            let alignedQuaternion = sample.quaternion.aligned(to: referenceQuaternion)
-            return partialResult + alignedQuaternion.scaled(by: sample.weight)
-        }
-
-        return accumulatedQuaternion.normalized()
+        return accumulatedRotation
     }
 
     private func samplesAfterOutlierRejection(_ samples: [PoseResult]) -> [PoseResult] {
@@ -282,7 +337,8 @@ final class MultiFramePoseAccumulator {
             rotationMatrix: relativeRotationMatrix,
             translationVector: relativeTranslation,
             distanceMm: simd_length(relativeTranslation),
-            reprojectionError: pose.reprojectionError
+            reprojectionError: pose.reprojectionError,
+            markerAreaPixels: pose.markerAreaPixels
         )
     }
 
@@ -390,7 +446,7 @@ final class MultiFramePoseAccumulator {
     private struct WeightedPoseSample {
         let pose: PoseResult
         let weight: Double
-        let quaternion: Quaternion
+        let quaternion: simd_quatd
     }
 
     private struct Quaternion {
