@@ -412,7 +412,7 @@ private struct TagAROverlayView: View {
     }
 
     private var cardVerticalOffset: CGFloat {
-        80 * clampedDisplayScale
+        112 * clampedDisplayScale
     }
 
     private var markerCenter: CGPoint {

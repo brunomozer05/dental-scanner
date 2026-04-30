@@ -9,7 +9,6 @@ struct ScannerView: View {
     @State private var scaleValidationRealDistanceText = ""
     @State private var previewOrientation: CameraPreviewOrientation = .landscapeRight
     @State private var isDebugPanelExpanded = false
-    @State private var isScannerPaused = false
     @State private var stlViewerPresentation: STLViewerPresentation?
 
     private let panelBackgroundColor = Color(red: 0.11, green: 0.11, blue: 0.12)
@@ -49,10 +48,7 @@ struct ScannerView: View {
 
             VStack {
                 HStack(alignment: .top, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        scannerStatusCard
-                        scannerTagListPanel
-                    }
+                    scannerTagListPanel
 
                     Spacer(minLength: 12)
 
@@ -63,17 +59,15 @@ struct ScannerView: View {
 
                 Spacer()
 
-                HStack(alignment: .bottom, spacing: 16) {
-                    cancelScanButton
-
-                    Spacer()
-
+                ZStack(alignment: .bottom) {
                     scannerBottomBar
 
-                    Spacer()
-
-                    pauseScanButton
+                    HStack {
+                        cancelScanButton
+                        Spacer()
+                    }
                 }
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal, 14)
                 .padding(.bottom, 14)
             }
@@ -100,7 +94,6 @@ struct ScannerView: View {
         .supportedInterfaceOrientations(.landscape)
         .animation(.easeInOut(duration: 0.18), value: isDebugPanelExpanded)
         .task {
-            isScannerPaused = false
             applyPreviewOrientation(previewOrientation)
             updateLandscapePreviewOrientation()
             await viewModel.startCamera()
@@ -175,23 +168,6 @@ struct ScannerView: View {
         }
     }
 
-    private var scannerStatusCard: some View {
-        ScannerGlassPanel(cornerRadius: 16) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(scannerStatusTitle)
-                    .font(.caption.weight(.bold))
-                    .tracking(1.4)
-                    .foregroundStyle(scannerAccentColor.opacity(0.95))
-
-                Text(scannerStatusSubtitle)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.72))
-                    .lineLimit(1)
-            }
-        }
-        .frame(width: 226, alignment: .leading)
-    }
-
     private var scannerTagListPanel: some View {
         ScannerGlassPanel(cornerRadius: 16) {
             VStack(alignment: .leading, spacing: 9) {
@@ -230,16 +206,6 @@ struct ScannerView: View {
                 isActive: viewModel.isTorchEnabled
             ) {
                 viewModel.toggleTorch()
-            }
-
-            ScannerCircleButton(
-                systemImage: "square.and.arrow.up",
-                accessibilityLabel: "Exportar STL",
-                accentColor: scannerAccentColor,
-                isEnabled: viewModel.canExportSTL,
-                isActive: false
-            ) {
-                viewModel.exportCurrentImplantsAsSTL()
             }
 
             ScannerCircleButton(
@@ -306,21 +272,8 @@ struct ScannerView: View {
             isEnabled: true,
             isActive: false
         ) {
-            isScannerPaused = false
             viewModel.stopCamera()
             onCancel?()
-        }
-    }
-
-    private var pauseScanButton: some View {
-        ScannerCircleButton(
-            systemImage: isScannerPaused ? "play.fill" : "pause.fill",
-            accessibilityLabel: isScannerPaused ? "Retomar" : "Pausar",
-            accentColor: scannerAccentColor,
-            isEnabled: true,
-            isActive: isScannerPaused
-        ) {
-            toggleScannerPause()
         }
     }
 
@@ -338,46 +291,7 @@ struct ScannerView: View {
     }
 
     private func startOrRestartScanFromHUD() {
-        if isScannerPaused {
-            isScannerPaused = false
-            Task {
-                await viewModel.startCamera()
-            }
-        }
-
         viewModel.startScan()
-    }
-
-    private func toggleScannerPause() {
-        if isScannerPaused {
-            isScannerPaused = false
-            Task {
-                await viewModel.startCamera()
-            }
-        } else {
-            isScannerPaused = true
-            viewModel.stopCamera()
-        }
-    }
-
-    private var scannerStatusTitle: String {
-        switch viewModel.scanState {
-        case .idle:
-            return isScannerPaused ? "PAUSADO" : "PRONTO"
-        case .scanning, .stabilizing:
-            return isScannerPaused ? "PAUSADO" : "ESCANEANDO"
-        case .ready:
-            return "CONCLUIDO"
-        }
-    }
-
-    private var scannerStatusSubtitle: String {
-        switch viewModel.scanState {
-        case .ready:
-            return "Modelo pronto para revisar"
-        default:
-            return isScannerPaused ? "Toque em retomar para continuar" : "Mova ao redor para melhor cobertura"
-        }
     }
 
     private var scannerQualityLabel: String {
@@ -442,7 +356,6 @@ struct ScannerView: View {
             Spacer(minLength: 4)
 
             compactTorchButton
-            compactExportButton
             debugPanelToggleButton
         }
         .padding(8)
@@ -553,20 +466,6 @@ struct ScannerView: View {
         .buttonStyle(.plain)
         .disabled(!viewModel.isTorchAvailable)
         .opacity(viewModel.isTorchAvailable ? 1 : 0.65)
-    }
-
-    private var compactExportButton: some View {
-        Button {
-            viewModel.exportCurrentImplantsAsSTL()
-        } label: {
-            Image(systemName: "square.and.arrow.up")
-                .font(.body.weight(.semibold))
-                .frame(width: 34, height: 34)
-                .foregroundStyle(viewModel.canExportSTL ? Color.white : Color.white.opacity(0.35))
-        }
-        .buttonStyle(.plain)
-        .disabled(!viewModel.canExportSTL)
-        .opacity(viewModel.canExportSTL ? 1 : 0.65)
     }
 
     private var scanWorkflowPanel: some View {
