@@ -123,6 +123,9 @@ struct ScannerView: View {
             viewModel.stopCamera()
             UIDevice.current.endGeneratingDeviceOrientationNotifications()
         }
+        .onChange(of: scaleValidationRealDistanceText) { _, _ in
+            updatePrecisionValidationExpectedDistance()
+        }
         .fullScreenCover(
             item: $stlViewerPresentation,
             onDismiss: {
@@ -153,6 +156,10 @@ struct ScannerView: View {
         if shouldReapplyTorch && didChangeOrientation {
             viewModel.handleScannerOrientationChanged()
         }
+    }
+
+    private func updatePrecisionValidationExpectedDistance() {
+        viewModel.setPrecisionValidationExpectedDistanceMillimeters(parsedScaleValidationRealDistanceMm)
     }
 
     private func scannerPreviewOrientation(from deviceOrientation: UIDeviceOrientation) -> CameraPreviewOrientation? {
@@ -977,7 +984,19 @@ struct ScannerView: View {
     }
 
     private var formattedScaleValidationTagAbsoluteError: String {
-        formattedMillimeterValue(scaleValidationAbsoluteErrorMm(for: viewModel.selectedTagDistanceMm))
+        formattedMillimeterValue(viewModel.precisionValidationCurrentErrorMm)
+    }
+
+    private var formattedScaleValidationAverageError: String {
+        formattedMillimeterValue(viewModel.precisionValidationAverageErrorMm)
+    }
+
+    private var formattedScaleValidationSampleCount: String {
+        guard viewModel.precisionValidationSampleCount > 0 else {
+            return "-"
+        }
+
+        return "\(viewModel.precisionValidationSampleCount)"
     }
 
     private var formattedScaleValidationTagPercentError: String {
@@ -1166,9 +1185,12 @@ struct ScannerView: View {
                     .monospacedDigit()
             }
 
+            metricRow(title: "Marcadores", value: formattedSelectedImplantMarkers)
             metricRow(title: "Real informado", value: formattedScaleValidationRealDistance)
             metricRow(title: "Medida app tag", value: formattedSelectedTagDistance)
-            metricRow(title: "Erro tag", value: formattedScaleValidationTagAbsoluteError)
+            metricRow(title: "Erro atual tag", value: formattedScaleValidationTagAbsoluteError)
+            metricRow(title: "Erro medio tag", value: formattedScaleValidationAverageError)
+            metricRow(title: "Amostras erro", value: formattedScaleValidationSampleCount)
             metricRow(title: "Erro tag %", value: formattedScaleValidationTagPercentError)
             metricRow(title: "Fator tag", value: formattedScaleValidationTagCorrectionFactor)
             metricRow(title: "Medida app implante", value: formattedScaleValidationAppDistance)

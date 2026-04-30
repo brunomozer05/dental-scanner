@@ -49,6 +49,7 @@ final class ScannerViewModel: ObservableObject {
         static let minimumRequiredAngularCoveragePercent: Double = 25.0
         static let maximumRequiredAngularCoveragePercent: Double = 100.0
         static let angularCoverageStepPercent: Double = 5.0
+        static let precisionErrorHistoryLimit: Int = 30
     }
 
     enum CameraState: Equatable {
@@ -123,6 +124,10 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var selectedImplantMarkerIds: [Int] = []
     @Published private(set) var selectedTagDistanceMm: Double?
     @Published private(set) var selectedImplantDistanceMm: Double?
+    @Published private(set) var precisionValidationExpectedDistanceMm: Double?
+    @Published private(set) var precisionValidationCurrentErrorMm: Double?
+    @Published private(set) var precisionValidationAverageErrorMm: Double?
+    @Published private(set) var precisionValidationSampleCount: Int = 0
     @Published private(set) var scanState: ScanState = .idle
     @Published private(set) var scanProgress: Double = 0
     @Published private(set) var scanQualityScore: Double = 0
@@ -162,6 +167,7 @@ final class ScannerViewModel: ObservableObject {
     private var scanPoseTranslationHistory: [SIMD3<Double>] = []
     private var scanCoverageBinsByMarkerId: [Int: Set<Int>] = [:]
     private var scanFrameCountsByMarkerId: [Int: Int] = [:]
+    private var precisionValidationErrorHistory: [Double] = []
     private var finalPoseObservations: [FinalPoseObservation] = []
     private var didApplyFinalPoseRefinement = false
 
@@ -364,6 +370,26 @@ final class ScannerViewModel: ObservableObject {
 
         selectedTagDistanceMm = selectedTagDistance(in: consolidatedPoseResults())
         selectedImplantDistanceMm = selectedImplantDistance(in: implantPoseResults)
+        resetPrecisionValidationHistory()
+        updatePrecisionValidationCurrentError()
+    }
+
+    @MainActor
+    func setPrecisionValidationExpectedDistanceMillimeters(_ expectedDistanceMm: Double?) {
+        guard let expectedDistanceMm else {
+            precisionValidationExpectedDistanceMm = nil
+            resetPrecisionValidationHistory()
+            updatePrecisionValidationCurrentError()
+            return
+        }
+
+        guard expectedDistanceMm.isFinite, expectedDistanceMm > 0 else {
+            return
+        }
+
+        precisionValidationExpectedDistanceMm = expectedDistanceMm
+        resetPrecisionValidationHistory()
+        updatePrecisionValidationCurrentError()
     }
 
     @MainActor
@@ -632,6 +658,7 @@ final class ScannerViewModel: ObservableObject {
                 self.selectedImplantDistanceMm = self.selectedImplantDistance(
                     in: implantMetrics.implantPoseResults
                 )
+                self.updatePrecisionValidationCurrentError()
                 self.recordScanFrame(
                     rawPoseResults: poseMetrics.rawPoseResults,
                     consolidatedPoseResults: consolidatedPoseResults,
@@ -666,6 +693,7 @@ final class ScannerViewModel: ObservableObject {
         scanPoseTranslationHistory = []
         scanCoverageBinsByMarkerId = [:]
         scanFrameCountsByMarkerId = [:]
+        resetPrecisionValidationHistory()
         finalPoseObservations = []
         didApplyFinalPoseRefinement = false
     }
@@ -694,6 +722,7 @@ final class ScannerViewModel: ObservableObject {
         self.finalPoseObservations.append(contentsOf: finalPoseObservations)
         scanReprojectionErrors.append(frameReprojectionError)
         recordAngularCoverage(from: rawPoseResults)
+        recordPrecisionValidationSample(from: consolidatedPoseResults)
 
         if let representativePose = consolidatedPoseResults.sorted(by: { $0.markerId < $1.markerId }).first {
             scanPoseTranslationHistory.append(representativePose.translationVector)
@@ -795,6 +824,7 @@ final class ScannerViewModel: ObservableObject {
         selectedImplantDistanceMm = selectedImplantDistance(
             in: implantMetrics.implantPoseResults
         )
+        updatePrecisionValidationCurrentError()
     }
 
     private var minimumStabilizingFrameCount: Int {
@@ -1201,13 +1231,17 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private func selectedTagDistance(in rawPoseResults: [PoseResult]) -> Double? {
+        markerDistance(in: rawPoseResults)
+    }
+
+    private func markerDistance(in poseResults: [PoseResult]) -> Double? {
         guard selectedImplantMarkerIds.count == 2 else {
             return nil
         }
 
         var posesByMarkerId: [Int: PoseResult] = [:]
-        for rawPoseResult in rawPoseResults {
-            posesByMarkerId[rawPoseResult.markerId] = rawPoseResult
+        for poseResult in poseResults {
+            posesByMarkerId[poseResult.markerId] = poseResult
         }
 
         guard let firstPose = posesByMarkerId[selectedImplantMarkerIds[0]],
@@ -1216,7 +1250,63 @@ final class ScannerViewModel: ObservableObject {
             return nil
         }
 
-        return simd_distance(firstPose.translationVector, secondPose.translationVector)
+        return Self.distance(between: firstPose, and: secondPose)
+    }
+
+    private static func distance(between firstPose: PoseResult, and secondPose: PoseResult) -> Double {
+        distance(between: firstPose.translationVector, and: secondPose.translationVector)
+    }
+
+    private static func distance(
+        between firstPosition: SIMD3<Double>,
+        and secondPosition: SIMD3<Double>
+    ) -> Double {
+        simd_length(firstPosition - secondPosition)
+    }
+
+    private func recordPrecisionValidationSample(from poseResults: [PoseResult]) {
+        guard let expectedDistanceMm = precisionValidationExpectedDistanceMm,
+              let measuredDistanceMm = markerDistance(in: poseResults)
+        else {
+            updatePrecisionValidationCurrentError()
+            return
+        }
+
+        let errorMm = abs(measuredDistanceMm - expectedDistanceMm)
+        guard errorMm.isFinite else {
+            updatePrecisionValidationCurrentError()
+            return
+        }
+
+        precisionValidationErrorHistory.append(errorMm)
+
+        if precisionValidationErrorHistory.count > ScanConfiguration.precisionErrorHistoryLimit {
+            precisionValidationErrorHistory.removeFirst(
+                precisionValidationErrorHistory.count - ScanConfiguration.precisionErrorHistoryLimit
+            )
+        }
+
+        precisionValidationCurrentErrorMm = errorMm
+        precisionValidationAverageErrorMm = average(precisionValidationErrorHistory)
+        precisionValidationSampleCount = precisionValidationErrorHistory.count
+    }
+
+    private func updatePrecisionValidationCurrentError() {
+        guard let expectedDistanceMm = precisionValidationExpectedDistanceMm,
+              let measuredDistanceMm = selectedTagDistanceMm
+        else {
+            precisionValidationCurrentErrorMm = nil
+            return
+        }
+
+        let errorMm = abs(measuredDistanceMm - expectedDistanceMm)
+        precisionValidationCurrentErrorMm = errorMm.isFinite ? errorMm : nil
+    }
+
+    private func resetPrecisionValidationHistory() {
+        precisionValidationErrorHistory = []
+        precisionValidationAverageErrorMm = nil
+        precisionValidationSampleCount = 0
     }
 
     private func consolidatedPoseResults() -> [PoseResult] {
