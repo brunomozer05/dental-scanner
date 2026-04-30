@@ -442,7 +442,7 @@ final class CameraFrameService: NSObject {
         )
     }
 
-    private func extractIntrinsicMatrix(from sampleBuffer: CMSampleBuffer) -> simd_float3x3? {
+    private func extractIntrinsicMatrix(from sampleBuffer: CMSampleBuffer) -> simd_double3x3? {
         guard let data = CMGetAttachment(
             sampleBuffer,
             key: kCMSampleBufferAttachmentKey_CameraIntrinsicMatrix,
@@ -460,7 +460,23 @@ final class CameraFrameService: NSObject {
             data.copyBytes(to: destination)
         }
 
-        return matrix
+        return simd_double3x3(columns: (
+            SIMD3(
+                Double(matrix.columns.0.x),
+                Double(matrix.columns.0.y),
+                Double(matrix.columns.0.z)
+            ),
+            SIMD3(
+                Double(matrix.columns.1.x),
+                Double(matrix.columns.1.y),
+                Double(matrix.columns.1.z)
+            ),
+            SIMD3(
+                Double(matrix.columns.2.x),
+                Double(matrix.columns.2.y),
+                Double(matrix.columns.2.z)
+            )
+        ))
     }
 
     private func deliver(error: Error) {

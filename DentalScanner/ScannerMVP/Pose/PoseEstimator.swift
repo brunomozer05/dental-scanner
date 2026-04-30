@@ -83,10 +83,7 @@ final class PoseEstimator {
         let bridgeResult = try bridge.estimatePose(
             corners: corners,
             markerSizeMillimeters: markerSizeMillimeters,
-            focalLengthX: intrinsics.focalLengthX,
-            focalLengthY: intrinsics.focalLengthY,
-            principalPointX: intrinsics.principalPointX,
-            principalPointY: intrinsics.principalPointY
+            cameraMatrix: intrinsics.openCVCameraMatrixValues
         )
 
         return PoseResult(

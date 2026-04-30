@@ -13,7 +13,7 @@ struct CameraFrame {
         let lensAperture: Float?
         let exposureDuration: CMTime?
         let iso: Float?
-        let intrinsicMatrix: simd_float3x3?
+        let intrinsicMatrix: simd_double3x3?
     }
 
     let pixelBuffer: CVPixelBuffer

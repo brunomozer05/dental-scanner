@@ -246,6 +246,32 @@ static NSArray<NSNumber *> *BuildMatrix3x3(const cv::Mat &matrix) {
     ];
 }
 
+static double NumberArrayValue(NSArray<NSNumber *> *values, NSUInteger index) {
+    return [[values objectAtIndex:index] doubleValue];
+}
+
+static bool IsValidCameraMatrixValues(NSArray<NSNumber *> *values) {
+    if (values.count != 9) {
+        return false;
+    }
+
+    for (NSNumber *value in values) {
+        if (!std::isfinite(value.doubleValue)) {
+            return false;
+        }
+    }
+
+    return NumberArrayValue(values, 0) > 0.0 &&
+        NumberArrayValue(values, 4) > 0.0;
+}
+
+static cv::Mat BuildCameraMatrix(NSArray<NSNumber *> *values) {
+    return (cv::Mat_<double>(3, 3) <<
+        NumberArrayValue(values, 0), NumberArrayValue(values, 1), NumberArrayValue(values, 2),
+        NumberArrayValue(values, 3), NumberArrayValue(values, 4), NumberArrayValue(values, 5),
+        NumberArrayValue(values, 6), NumberArrayValue(values, 7), NumberArrayValue(values, 8));
+}
+
 static std::vector<cv::Point3f> BuildMarkerObjectPoints(double markerSizeMillimeters) {
     float halfSize = static_cast<float>(markerSizeMillimeters / 2.0);
 
@@ -399,21 +425,15 @@ static bool IsFinitePositive(double value) {
 
 - (nullable OpenCVArucoPoseResult *)estimatePoseForCorners:(NSArray<OpenCVArucoImagePoint *> *)corners
                                     markerSizeMillimeters:(double)markerSizeMillimeters
-                                             focalLengthX:(double)focalLengthX
-                                             focalLengthY:(double)focalLengthY
-                                          principalPointX:(double)principalPointX
-                                          principalPointY:(double)principalPointY
+                                             cameraMatrix:(NSArray<NSNumber *> *)cameraMatrixValues
                                                     error:(NSError **)error {
 #if DENTAL_SCANNER_HAS_OPENCV
     if (corners.count != 4 ||
         !IsFinitePositive(markerSizeMillimeters) ||
-        !IsFinitePositive(focalLengthX) ||
-        !IsFinitePositive(focalLengthY) ||
-        !std::isfinite(principalPointX) ||
-        !std::isfinite(principalPointY)) {
+        !IsValidCameraMatrixValues(cameraMatrixValues)) {
         SetBridgeError(error,
                        OpenCVArucoPoseBridgeErrorInvalidPoseInput,
-                       @"Pose estimation requires 4 corners, positive marker size, and valid camera intrinsics.");
+                       @"Pose estimation requires 4 corners, positive marker size, and a valid 3x3 camera matrix.");
         return nil;
     }
 
@@ -426,10 +446,7 @@ static bool IsFinitePositive(double value) {
 
     try {
         std::vector<cv::Point3f> objectPoints = BuildMarkerObjectPoints(markerSizeMillimeters);
-        cv::Mat cameraMatrix = (cv::Mat_<double>(3, 3) <<
-            focalLengthX, 0.0, principalPointX,
-            0.0, focalLengthY, principalPointY,
-            0.0, 0.0, 1.0);
+        cv::Mat cameraMatrix = BuildCameraMatrix(cameraMatrixValues);
         cv::Mat distCoeffs = cv::Mat::zeros(1, 5, CV_64F);
         cv::Mat rotationVector;
         cv::Mat translationVector;
