@@ -154,6 +154,7 @@ final class ScannerViewModel: ObservableObject {
     private let finalPoseRefiner: FinalPoseRefiner
     private let poseSmoother = PoseSmoother()
     private let stlExporter: STLExporter
+    private let scanStorageManager: ScanStorageManager
     private var shouldRunCamera = false
     private var totalFramesCounter: Int = 0
     private var recentFrameTimestamps: [Double] = []
@@ -210,7 +211,8 @@ final class ScannerViewModel: ObservableObject {
         poseEstimator: PoseEstimator = PoseEstimator(),
         multiFramePoseAccumulator: MultiFramePoseAccumulator = MultiFramePoseAccumulator(),
         finalPoseRefiner: FinalPoseRefiner = FinalPoseRefiner(),
-        stlExporter: STLExporter = STLExporter()
+        stlExporter: STLExporter = STLExporter(),
+        scanStorageManager: ScanStorageManager = ScanStorageManager()
     ) {
         self.cameraService = cameraService
         self.arUcoDetector = arUcoDetector
@@ -219,6 +221,7 @@ final class ScannerViewModel: ObservableObject {
         self.multiFramePoseAccumulator = multiFramePoseAccumulator
         self.finalPoseRefiner = finalPoseRefiner
         self.stlExporter = stlExporter
+        self.scanStorageManager = scanStorageManager
         self.isOpenCVAvailable = arUcoDetector.isOpenCVAvailable
         bindCameraCallbacks()
     }
@@ -465,27 +468,7 @@ final class ScannerViewModel: ObservableObject {
         }
 
         applyFinalPoseRefinementIfNeeded()
-        let currentImplantPoses = implantPoseResults
-        guard !currentImplantPoses.isEmpty else {
-            stlExportURL = nil
-            stlExportedImplantCount = 0
-            stlExportErrorMessage = STLExporter.ExportError.emptyImplantList.localizedDescription
-            return nil
-        }
-
-        do {
-            let fileURL = makeTemporarySTLFileURL()
-            try stlExporter.writeASCIISTL(for: currentImplantPoses, to: fileURL)
-            stlExportURL = fileURL
-            stlExportedImplantCount = currentImplantPoses.count
-            stlExportErrorMessage = nil
-            return fileURL
-        } catch {
-            stlExportURL = nil
-            stlExportedImplantCount = 0
-            stlExportErrorMessage = error.localizedDescription
-            return nil
-        }
+        return saveCurrentScanIfNeeded()
     }
 
     private func bindCameraCallbacks() {
@@ -772,6 +755,7 @@ final class ScannerViewModel: ObservableObject {
 
         if isReady {
             applyFinalPoseRefinementIfNeeded()
+            saveCurrentScanIfNeeded()
             scanState = .ready
             scanProgress = 100
             scanQualityStatus = "Pronto para exportar"
@@ -1459,10 +1443,39 @@ final class ScannerViewModel: ObservableObject {
         errorMessage = makeErrorMessage(from: error)
     }
 
-    private func makeTemporarySTLFileURL() -> URL {
-        let timestamp = Int(Date().timeIntervalSince1970)
-        return FileManager.default.temporaryDirectory
-            .appendingPathComponent("dental-implants-\(timestamp).stl")
+    @MainActor
+    private func saveCurrentScanIfNeeded() -> URL? {
+        if let stlExportURL,
+           FileManager.default.fileExists(atPath: stlExportURL.path) {
+            return stlExportURL
+        }
+
+        let currentImplantPoses = implantPoseResults
+        guard !currentImplantPoses.isEmpty else {
+            stlExportURL = nil
+            stlExportedImplantCount = 0
+            stlExportErrorMessage = STLExporter.ExportError.emptyImplantList.localizedDescription
+            return nil
+        }
+
+        do {
+            let stl = try stlExporter.makeASCIISTL(for: currentImplantPoses)
+            guard let stlData = stl.data(using: .utf8) else {
+                throw ScanStorageManager.StorageError.unableToEncodeSTL
+            }
+
+            let scanName = ScanStorageManager.automaticScanFileName()
+            let scan = try scanStorageManager.saveScan(stlData: stlData, name: scanName)
+            stlExportURL = scan.fileURL
+            stlExportedImplantCount = currentImplantPoses.count
+            stlExportErrorMessage = nil
+            return scan.fileURL
+        } catch {
+            stlExportURL = nil
+            stlExportedImplantCount = 0
+            stlExportErrorMessage = error.localizedDescription
+            return nil
+        }
     }
 
     private struct FrameMetrics {
