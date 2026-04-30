@@ -31,6 +31,13 @@ struct ScanListView: View {
                             } label: {
                                 Label("Deletar", systemImage: "trash")
                             }
+
+                            Button {
+                                shareFile(url: scan.fileURL)
+                            } label: {
+                                Label("Compartilhar", systemImage: "square.and.arrow.up")
+                            }
+                            .tint(Color(red: 0.23, green: 0.51, blue: 0.96))
                         }
                     }
                     .listStyle(.plain)
