@@ -272,6 +272,53 @@ static cv::Mat BuildCameraMatrix(NSArray<NSNumber *> *values) {
         NumberArrayValue(values, 6), NumberArrayValue(values, 7), NumberArrayValue(values, 8));
 }
 
+static bool BuildObjectPoints(NSArray<NSNumber *> *values,
+                              std::vector<cv::Point3f> &objectPoints) {
+    if (values.count < 12 || values.count % 3 != 0) {
+        return false;
+    }
+
+    objectPoints.clear();
+    objectPoints.reserve(values.count / 3);
+
+    for (NSUInteger index = 0; index < values.count; index += 3) {
+        double x = NumberArrayValue(values, index);
+        double y = NumberArrayValue(values, index + 1);
+        double z = NumberArrayValue(values, index + 2);
+
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+            return false;
+        }
+
+        objectPoints.push_back(cv::Point3f(static_cast<float>(x),
+                                           static_cast<float>(y),
+                                           static_cast<float>(z)));
+    }
+
+    return true;
+}
+
+static bool BuildImagePoints(NSArray<OpenCVArucoImagePoint *> *values,
+                             std::vector<cv::Point2f> &imagePoints) {
+    if (values.count < 4) {
+        return false;
+    }
+
+    imagePoints.clear();
+    imagePoints.reserve(values.count);
+
+    for (OpenCVArucoImagePoint *point in values) {
+        if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
+            return false;
+        }
+
+        imagePoints.push_back(cv::Point2f(static_cast<float>(point.x),
+                                          static_cast<float>(point.y)));
+    }
+
+    return true;
+}
+
 static std::vector<cv::Point3f> BuildMarkerObjectPoints(double markerSizeMillimeters) {
     float halfSize = static_cast<float>(markerSizeMillimeters / 2.0);
 
@@ -487,6 +534,93 @@ static bool IsFinitePositive(double value) {
                                                    reprojectionError:reprojectionError];
     } catch (const cv::Exception &exception) {
         NSString *description = [NSString stringWithFormat:@"OpenCV solvePnP failed: %s", exception.what()];
+        SetBridgeError(error, OpenCVArucoPoseBridgeErrorPoseEstimationFailed, description);
+        return nil;
+    }
+#else
+    SetBridgeError(error,
+                   OpenCVArucoPoseBridgeErrorOpenCVUnavailable,
+                   @"OpenCV headers are not available to this target.");
+    return nil;
+#endif
+}
+
+- (nullable OpenCVArucoPoseResult *)refinePoseWithObjectPoints:(NSArray<NSNumber *> *)objectPointValues
+                                                   imagePoints:(NSArray<OpenCVArucoImagePoint *> *)imagePointValues
+                                                  cameraMatrix:(NSArray<NSNumber *> *)cameraMatrixValues
+                                                         error:(NSError **)error {
+#if DENTAL_SCANNER_HAS_OPENCV
+    if (!IsValidCameraMatrixValues(cameraMatrixValues)) {
+        SetBridgeError(error,
+                       OpenCVArucoPoseBridgeErrorInvalidPoseInput,
+                       @"Final pose refinement requires a valid 3x3 camera matrix.");
+        return nil;
+    }
+
+    std::vector<cv::Point3f> objectPoints;
+    std::vector<cv::Point2f> imagePoints;
+    if (!BuildObjectPoints(objectPointValues, objectPoints) ||
+        !BuildImagePoints(imagePointValues, imagePoints) ||
+        objectPoints.size() != imagePoints.size()) {
+        SetBridgeError(error,
+                       OpenCVArucoPoseBridgeErrorInvalidPoseInput,
+                       @"Final pose refinement requires matching object and image points.");
+        return nil;
+    }
+
+    try {
+        cv::Mat cameraMatrix = BuildCameraMatrix(cameraMatrixValues);
+        cv::Mat distCoeffs = cv::Mat::zeros(1, 5, CV_64F);
+        cv::Mat rotationVector;
+        cv::Mat translationVector;
+        cv::Mat rotationMatrix;
+
+        bool didSolve = cv::solvePnP(objectPoints,
+                                     imagePoints,
+                                     cameraMatrix,
+                                     distCoeffs,
+                                     rotationVector,
+                                     translationVector,
+                                     false,
+                                     cv::SOLVEPNP_ITERATIVE);
+        if (!didSolve) {
+            SetBridgeError(error,
+                           OpenCVArucoPoseBridgeErrorPoseEstimationFailed,
+                           @"OpenCV final solvePnP did not return a valid pose.");
+            return nil;
+        }
+
+        cv::TermCriteria criteria(cv::TermCriteria::EPS + cv::TermCriteria::MAX_ITER,
+                                  30,
+                                  1e-6);
+        cv::solvePnPRefineLM(objectPoints,
+                             imagePoints,
+                             cameraMatrix,
+                             distCoeffs,
+                             rotationVector,
+                             translationVector,
+                             criteria);
+
+        cv::Rodrigues(rotationVector, rotationMatrix);
+
+        std::vector<cv::Point2f> projectedPoints;
+        cv::projectPoints(objectPoints,
+                          rotationVector,
+                          translationVector,
+                          cameraMatrix,
+                          distCoeffs,
+                          projectedPoints);
+
+        double distanceMm = cv::norm(translationVector);
+        double reprojectionError = ComputeRMSReprojectionError(imagePoints, projectedPoints);
+
+        return [[OpenCVArucoPoseResult alloc] initWithRotationVector:BuildVector3(rotationVector)
+                                                      rotationMatrix:BuildMatrix3x3(rotationMatrix)
+                                                   translationVector:BuildVector3(translationVector)
+                                                          distanceMm:distanceMm
+                                                   reprojectionError:reprojectionError];
+    } catch (const cv::Exception &exception) {
+        NSString *description = [NSString stringWithFormat:@"OpenCV final pose refinement failed: %s", exception.what()];
         SetBridgeError(error, OpenCVArucoPoseBridgeErrorPoseEstimationFailed, description);
         return nil;
     }

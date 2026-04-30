@@ -98,6 +98,12 @@ typedef NS_ERROR_ENUM(OpenCVArucoPoseBridgeErrorDomain, OpenCVArucoPoseBridgeErr
                                                     error:(NSError * _Nullable * _Nullable)error
     NS_SWIFT_NAME(estimatePose(corners:markerSizeMillimeters:cameraMatrix:));
 
+- (nullable OpenCVArucoPoseResult *)refinePoseWithObjectPoints:(NSArray<NSNumber *> *)objectPoints
+                                                   imagePoints:(NSArray<OpenCVArucoImagePoint *> *)imagePoints
+                                                  cameraMatrix:(NSArray<NSNumber *> *)cameraMatrix
+                                                         error:(NSError * _Nullable * _Nullable)error
+    NS_SWIFT_NAME(refinePose(objectPoints:imagePoints:cameraMatrix:));
+
 @end
 
 NS_ASSUME_NONNULL_END

@@ -146,6 +146,7 @@ final class ScannerViewModel: ObservableObject {
     private let arUcoConsistencyFilter: ArUcoConsistencyFilter
     private let poseEstimator: PoseEstimator
     private let multiFramePoseAccumulator: MultiFramePoseAccumulator
+    private let finalPoseRefiner: FinalPoseRefiner
     private let poseSmoother = PoseSmoother()
     private let stlExporter: STLExporter
     private var shouldRunCamera = false
@@ -161,6 +162,8 @@ final class ScannerViewModel: ObservableObject {
     private var scanPoseTranslationHistory: [SIMD3<Double>] = []
     private var scanCoverageBinsByMarkerId: [Int: Set<Int>] = [:]
     private var scanFrameCountsByMarkerId: [Int: Int] = [:]
+    private var finalPoseObservations: [FinalPoseObservation] = []
+    private var didApplyFinalPoseRefinement = false
 
     var captureSession: AVCaptureSession {
         cameraService.captureSession
@@ -200,6 +203,7 @@ final class ScannerViewModel: ObservableObject {
         arUcoConsistencyFilter: ArUcoConsistencyFilter = ArUcoConsistencyFilter(),
         poseEstimator: PoseEstimator = PoseEstimator(),
         multiFramePoseAccumulator: MultiFramePoseAccumulator = MultiFramePoseAccumulator(),
+        finalPoseRefiner: FinalPoseRefiner = FinalPoseRefiner(),
         stlExporter: STLExporter = STLExporter()
     ) {
         self.cameraService = cameraService
@@ -207,6 +211,7 @@ final class ScannerViewModel: ObservableObject {
         self.arUcoConsistencyFilter = arUcoConsistencyFilter
         self.poseEstimator = poseEstimator
         self.multiFramePoseAccumulator = multiFramePoseAccumulator
+        self.finalPoseRefiner = finalPoseRefiner
         self.stlExporter = stlExporter
         self.isOpenCVAvailable = arUcoDetector.isOpenCVAvailable
         bindCameraCallbacks()
@@ -433,6 +438,7 @@ final class ScannerViewModel: ObservableObject {
             return nil
         }
 
+        applyFinalPoseRefinementIfNeeded()
         let currentImplantPoses = implantPoseResults
         guard !currentImplantPoses.isEmpty else {
             stlExportURL = nil
@@ -577,6 +583,14 @@ final class ScannerViewModel: ObservableObject {
         let implantMetrics = shouldCollectScanFrame
             ? estimateImplantPoses(from: consolidatedPoseResults)
             : ImplantMetrics(implantPoseResults: [])
+        let frameFinalPoseObservations = shouldCollectScanFrame
+            ? makeFinalPoseObservations(
+                from: arucoMetrics.detections,
+                poseResults: poseMetrics.rawPoseResults,
+                in: frame,
+                markerSizeMillimeters: markerSizeMillimeters
+            )
+            : []
 
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -621,7 +635,8 @@ final class ScannerViewModel: ObservableObject {
                 self.recordScanFrame(
                     rawPoseResults: poseMetrics.rawPoseResults,
                     consolidatedPoseResults: consolidatedPoseResults,
-                    implantPoseResults: implantMetrics.implantPoseResults
+                    implantPoseResults: implantMetrics.implantPoseResults,
+                    finalPoseObservations: frameFinalPoseObservations
                 )
             }
         }
@@ -651,13 +666,16 @@ final class ScannerViewModel: ObservableObject {
         scanPoseTranslationHistory = []
         scanCoverageBinsByMarkerId = [:]
         scanFrameCountsByMarkerId = [:]
+        finalPoseObservations = []
+        didApplyFinalPoseRefinement = false
     }
 
     @MainActor
     private func recordScanFrame(
         rawPoseResults: [PoseResult],
         consolidatedPoseResults: [PoseResult],
-        implantPoseResults: [ImplantPose]
+        implantPoseResults: [ImplantPose],
+        finalPoseObservations: [FinalPoseObservation]
     ) {
         guard scanState.isCollectingFrames else {
             return
@@ -673,6 +691,7 @@ final class ScannerViewModel: ObservableObject {
         }
 
         scanValidFrameCount += 1
+        self.finalPoseObservations.append(contentsOf: finalPoseObservations)
         scanReprojectionErrors.append(frameReprojectionError)
         recordAngularCoverage(from: rawPoseResults)
 
@@ -723,6 +742,7 @@ final class ScannerViewModel: ObservableObject {
         scanQualityScore = combinedQualityScore * 100.0
 
         if isReady {
+            applyFinalPoseRefinementIfNeeded()
             scanState = .ready
             scanProgress = 100
             scanQualityStatus = "Pronto para exportar"
@@ -743,6 +763,38 @@ final class ScannerViewModel: ObservableObject {
         } else {
             scanQualityStatus = scanState == .stabilizing ? "Estabilizando" : "Capturando"
         }
+    }
+
+    @MainActor
+    private func applyFinalPoseRefinementIfNeeded() {
+        guard !didApplyFinalPoseRefinement,
+              !finalPoseObservations.isEmpty
+        else {
+            return
+        }
+
+        didApplyFinalPoseRefinement = true
+
+        let currentPoseResults = consolidatedPoseResults()
+        let refinedPoseResults = finalPoseRefiner.refine(
+            observations: finalPoseObservations,
+            currentPoseResults: currentPoseResults
+        )
+        guard !refinedPoseResults.isEmpty,
+              refinedPoseResults != currentPoseResults
+        else {
+            return
+        }
+
+        fusedPoseResults = refinedPoseResults
+
+        let implantMetrics = estimateImplantPoses(from: refinedPoseResults)
+        implantPoseResults = implantMetrics.implantPoseResults
+        implantPoseResult = implantMetrics.implantPoseResults.first
+        selectedTagDistanceMm = selectedTagDistance(in: refinedPoseResults)
+        selectedImplantDistanceMm = selectedImplantDistance(
+            in: implantMetrics.implantPoseResults
+        )
     }
 
     private var minimumStabilizingFrameCount: Int {
@@ -1105,6 +1157,47 @@ final class ScannerViewModel: ObservableObject {
                 )
             }
         )
+    }
+
+    private func makeFinalPoseObservations(
+        from detections: [ArUcoDetectionResult],
+        poseResults: [PoseResult],
+        in frame: CameraFrame,
+        markerSizeMillimeters: Double
+    ) -> [FinalPoseObservation] {
+        guard markerSizeMillimeters.isFinite,
+              markerSizeMillimeters > 0,
+              let cameraMatrix = frame.metadata.intrinsicMatrix
+        else {
+            return []
+        }
+
+        let objectPoints = FinalPoseObservation.markerObjectPoints(
+            markerSizeMillimeters: markerSizeMillimeters
+        )
+        var detectionsByMarkerId: [Int: ArUcoDetectionResult] = [:]
+        for detection in detections {
+            detectionsByMarkerId[detection.markerId] = detection
+        }
+
+        return poseResults.compactMap { poseResult in
+            guard poseResult.reprojectionError.isFinite,
+                  poseResult.reprojectionError <= ScanConfiguration.maximumAverageReprojectionError,
+                  let detection = detectionsByMarkerId[poseResult.markerId],
+                  detection.corners.count == objectPoints.count
+            else {
+                return nil
+            }
+
+            return FinalPoseObservation(
+                markerId: poseResult.markerId,
+                objectPoints: objectPoints,
+                imagePoints: detection.corners,
+                cameraMatrix: cameraMatrix,
+                reprojectionError: poseResult.reprojectionError,
+                markerAreaPixels: poseResult.markerAreaPixels
+            )
+        }
     }
 
     private func selectedTagDistance(in rawPoseResults: [PoseResult]) -> Double? {
