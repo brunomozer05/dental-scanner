@@ -25,7 +25,7 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private enum PoseFilterConfiguration {
-        static let smoothingAlpha: Double = 0.35
+        static let smoothingAlpha: Double = 0.3
         static let outlierDistanceDeltaMm: Double = 80.0
         static let outlierResetFrameCount: Int = 3
         static let stableFrameCount: Int = 3
@@ -146,6 +146,7 @@ final class ScannerViewModel: ObservableObject {
     private let arUcoConsistencyFilter: ArUcoConsistencyFilter
     private let poseEstimator: PoseEstimator
     private let multiFramePoseAccumulator: MultiFramePoseAccumulator
+    private let poseSmoother = PoseSmoother()
     private let stlExporter: STLExporter
     private var shouldRunCamera = false
     private var totalFramesCounter: Int = 0
@@ -842,7 +843,7 @@ final class ScannerViewModel: ObservableObject {
         }
 
         let cameraToTagDirectionInCameraSpace = poseResult.translationVector / cameraToTagLength
-        let markerRotation = Self.rotationMatrix(fromRodrigues: poseResult.rotationVector)
+        let markerRotation = poseResult.rotationMatrix
         let cameraToTagDirectionInMarkerSpace = simd_transpose(markerRotation) *
             cameraToTagDirectionInCameraSpace
         let directionLength = simd_length(cameraToTagDirectionInMarkerSpace)
@@ -1151,6 +1152,7 @@ final class ScannerViewModel: ObservableObject {
     private func stabilizePose(_ rawPose: PoseResult) -> (pose: PoseResult, stabilityStatus: String) {
         guard let filteredPoseResult else {
             self.filteredPoseResult = rawPose
+            poseSmoother.seed(with: rawPose)
             acceptedPoseFrameCount = 1
             consecutivePoseOutlierCount = 0
             return (rawPose, "Instavel")
@@ -1158,6 +1160,7 @@ final class ScannerViewModel: ObservableObject {
 
         guard filteredPoseResult.markerId == rawPose.markerId else {
             self.filteredPoseResult = rawPose
+            poseSmoother.seed(with: rawPose)
             acceptedPoseFrameCount = 1
             consecutivePoseOutlierCount = 0
             return (rawPose, "Instavel")
@@ -1170,6 +1173,7 @@ final class ScannerViewModel: ObservableObject {
 
             if consecutivePoseOutlierCount >= PoseFilterConfiguration.outlierResetFrameCount {
                 self.filteredPoseResult = rawPose
+                poseSmoother.seed(with: rawPose)
                 acceptedPoseFrameCount = 1
                 consecutivePoseOutlierCount = 0
                 return (rawPose, "Instavel")
@@ -1190,20 +1194,16 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private func blendPose(previous: PoseResult, current: PoseResult) -> PoseResult {
-        let alpha = PoseFilterConfiguration.smoothingAlpha
-        let retained = 1.0 - alpha
-
-        return PoseResult(
-            markerId: current.markerId,
-            rotationVector: previous.rotationVector * retained + current.rotationVector * alpha,
-            translationVector: previous.translationVector * retained + current.translationVector * alpha,
-            distanceMm: previous.distanceMm * retained + current.distanceMm * alpha,
-            reprojectionError: previous.reprojectionError * retained + current.reprojectionError * alpha
+        poseSmoother.smooth(
+            previous: previous,
+            current: current,
+            alpha: PoseFilterConfiguration.smoothingAlpha
         )
     }
 
     private func resetPoseFilter() {
         filteredPoseResult = nil
+        poseSmoother.reset()
         acceptedPoseFrameCount = 0
         consecutivePoseOutlierCount = 0
     }

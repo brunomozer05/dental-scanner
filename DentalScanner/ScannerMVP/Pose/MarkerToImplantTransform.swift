@@ -23,7 +23,7 @@ struct MarkerToImplantTransform {
     }
 
     func applyOffset(to tagPose: PoseResult) -> ImplantPose {
-        let tagRotation = Self.rotationMatrix(fromRodrigues: tagPose.rotationVector)
+        let tagRotation = tagPose.rotationMatrix
         let implantOffsetRotation = Self.rotationMatrix(fromRodrigues: rotationVector)
         let implantTranslation = tagPose.translationVector + tagRotation * translationMm
         let implantRotation = tagRotation * implantOffsetRotation

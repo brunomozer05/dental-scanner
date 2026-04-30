@@ -61,12 +61,14 @@ static void SetBridgeError(NSError **error, OpenCVArucoPoseBridgeError code, NSS
 @implementation OpenCVArucoPoseResult
 
 - (instancetype)initWithRotationVector:(NSArray<NSNumber *> *)rotationVector
+                        rotationMatrix:(NSArray<NSNumber *> *)rotationMatrix
                      translationVector:(NSArray<NSNumber *> *)translationVector
                             distanceMm:(double)distanceMm
                      reprojectionError:(double)reprojectionError {
     self = [super init];
     if (self) {
         _rotationVector = [rotationVector copy];
+        _rotationMatrix = [rotationMatrix copy];
         _translationVector = [translationVector copy];
         _distanceMm = distanceMm;
         _reprojectionError = reprojectionError;
@@ -132,6 +134,51 @@ private:
     bool isLocked_;
 };
 
+static bool CanRefineCornerSubpixel(const cv::Point2f &corner,
+                                    const cv::Size &imageSize,
+                                    const cv::Size &winSize) {
+    return corner.x >= winSize.width &&
+        corner.y >= winSize.height &&
+        corner.x < imageSize.width - winSize.width &&
+        corner.y < imageSize.height - winSize.height;
+}
+
+static bool CanRefineMarkerCornersSubpixel(const std::vector<cv::Point2f> &corners,
+                                           const cv::Size &imageSize,
+                                           const cv::Size &winSize) {
+    if (corners.empty()) {
+        return false;
+    }
+
+    for (const cv::Point2f &corner : corners) {
+        if (!CanRefineCornerSubpixel(corner, imageSize, winSize)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static void RefineMarkerCornersSubpixel(const cv::Mat &grayImage,
+                                        std::vector<std::vector<cv::Point2f>> &corners) {
+    if (grayImage.empty() || corners.empty()) {
+        return;
+    }
+
+    const cv::Size winSize(5, 5);
+    const cv::Size zeroZone(-1, -1);
+    const cv::TermCriteria criteria(cv::TermCriteria::EPS + cv::TermCriteria::MAX_ITER,
+                                    30,
+                                    0.01);
+    const cv::Size imageSize = grayImage.size();
+
+    for (std::vector<cv::Point2f> &markerCorners : corners) {
+        if (CanRefineMarkerCornersSubpixel(markerCorners, imageSize, winSize)) {
+            cv::cornerSubPix(grayImage, markerCorners, winSize, zeroZone, criteria);
+        }
+    }
+}
+
 static size_t DetectAruco4x4Markers(const cv::Mat &grayImage,
                                     std::vector<std::vector<cv::Point2f>> &corners,
                                     std::vector<int> &ids) {
@@ -153,6 +200,7 @@ static size_t DetectAruco4x4Markers(const cv::Mat &grayImage,
 
     std::vector<std::vector<cv::Point2f>> rejectedCorners;
     detector.detectMarkers(grayImage, corners, ids, rejectedCorners);
+    RefineMarkerCornersSubpixel(grayImage, corners);
 
     return rejectedCorners.size();
 }
@@ -181,6 +229,20 @@ static NSArray<NSNumber *> *BuildVector3(const cv::Mat &vector) {
         @(VectorValue(vector, 0)),
         @(VectorValue(vector, 1)),
         @(VectorValue(vector, 2))
+    ];
+}
+
+static NSArray<NSNumber *> *BuildMatrix3x3(const cv::Mat &matrix) {
+    return @[
+        @(matrix.at<double>(0, 0)),
+        @(matrix.at<double>(0, 1)),
+        @(matrix.at<double>(0, 2)),
+        @(matrix.at<double>(1, 0)),
+        @(matrix.at<double>(1, 1)),
+        @(matrix.at<double>(1, 2)),
+        @(matrix.at<double>(2, 0)),
+        @(matrix.at<double>(2, 1)),
+        @(matrix.at<double>(2, 2))
     ];
 }
 
@@ -371,6 +433,7 @@ static bool IsFinitePositive(double value) {
         cv::Mat distCoeffs = cv::Mat::zeros(1, 5, CV_64F);
         cv::Mat rotationVector;
         cv::Mat translationVector;
+        cv::Mat rotationMatrix;
 
         bool didSolve = cv::solvePnP(objectPoints,
                                      imagePoints,
@@ -387,6 +450,8 @@ static bool IsFinitePositive(double value) {
             return nil;
         }
 
+        cv::Rodrigues(rotationVector, rotationMatrix);
+
         std::vector<cv::Point2f> projectedPoints;
         cv::projectPoints(objectPoints,
                           rotationVector,
@@ -399,6 +464,7 @@ static bool IsFinitePositive(double value) {
         double reprojectionError = ComputeRMSReprojectionError(imagePoints, projectedPoints);
 
         return [[OpenCVArucoPoseResult alloc] initWithRotationVector:BuildVector3(rotationVector)
+                                                      rotationMatrix:BuildMatrix3x3(rotationMatrix)
                                                    translationVector:BuildVector3(translationVector)
                                                           distanceMm:distanceMm
                                                    reprojectionError:reprojectionError];

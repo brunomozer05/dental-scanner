@@ -42,12 +42,14 @@ typedef NS_ERROR_ENUM(OpenCVArucoPoseBridgeErrorDomain, OpenCVArucoPoseBridgeErr
 @interface OpenCVArucoPoseResult : NSObject
 
 @property (nonatomic, copy, readonly) NSArray<NSNumber *> *rotationVector;
+@property (nonatomic, copy, readonly) NSArray<NSNumber *> *rotationMatrix;
 @property (nonatomic, copy, readonly) NSArray<NSNumber *> *translationVector;
 @property (nonatomic, readonly) double distanceMm;
 @property (nonatomic, readonly) double reprojectionError;
 
 - (instancetype)init NS_UNAVAILABLE;
 - (instancetype)initWithRotationVector:(NSArray<NSNumber *> *)rotationVector
+                        rotationMatrix:(NSArray<NSNumber *> *)rotationMatrix
                      translationVector:(NSArray<NSNumber *> *)translationVector
                             distanceMm:(double)distanceMm
                      reprojectionError:(double)reprojectionError NS_DESIGNATED_INITIALIZER;

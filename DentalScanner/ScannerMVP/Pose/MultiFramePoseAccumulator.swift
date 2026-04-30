@@ -61,7 +61,7 @@ final class MultiFramePoseAccumulator {
             return fusedPoseResults()
         }
 
-        let anchorRotation = Self.rotationMatrix(fromRodrigues: anchorPose.rotationVector)
+        let anchorRotation = anchorPose.rotationMatrix
         let inverseAnchorRotation = simd_transpose(anchorRotation)
         guard let viewpointRotation = Quaternion(rotationMatrix: anchorRotation),
               shouldAcceptFrame(
@@ -172,9 +172,12 @@ final class MultiFramePoseAccumulator {
         let reprojectionError = weightedSamples.reduce(0.0) {
             $0 + $1.pose.reprojectionError * $1.weight
         } / totalWeight
-        guard let rotationQuaternion = weightedAverageQuaternion(from: weightedSamples),
-              let rotationVector = Self.rotationVector(from: rotationQuaternion.rotationMatrix)
+        guard let rotationQuaternion = weightedAverageQuaternion(from: weightedSamples)
         else {
+            return nil
+        }
+        let rotationMatrix = rotationQuaternion.rotationMatrix
+        guard let rotationVector = Self.rotationVector(from: rotationMatrix) else {
             return nil
         }
 
@@ -188,6 +191,7 @@ final class MultiFramePoseAccumulator {
         return PoseResult(
             markerId: markerId,
             rotationVector: rotationVector,
+            rotationMatrix: rotationMatrix,
             translationVector: translationVector,
             distanceMm: simd_length(translationVector),
             reprojectionError: reprojectionError
@@ -204,8 +208,7 @@ final class MultiFramePoseAccumulator {
             return nil
         }
 
-        let rotationMatrix = Self.rotationMatrix(fromRodrigues: pose.rotationVector)
-        guard let quaternion = Quaternion(rotationMatrix: rotationMatrix) else {
+        guard let quaternion = Quaternion(rotationMatrix: pose.rotationMatrix) else {
             return nil
         }
 
@@ -262,7 +265,7 @@ final class MultiFramePoseAccumulator {
         relativeTo anchorPose: PoseResult,
         inverseAnchorRotation: simd_double3x3
     ) -> PoseResult? {
-        let poseRotation = rotationMatrix(fromRodrigues: pose.rotationVector)
+        let poseRotation = pose.rotationMatrix
         let relativeRotationMatrix = inverseAnchorRotation * poseRotation
         let relativeTranslation = inverseAnchorRotation * (pose.translationVector - anchorPose.translationVector)
 
@@ -276,6 +279,7 @@ final class MultiFramePoseAccumulator {
         return PoseResult(
             markerId: pose.markerId,
             rotationVector: relativeRotationVector,
+            rotationMatrix: relativeRotationMatrix,
             translationVector: relativeTranslation,
             distanceMm: simd_length(relativeTranslation),
             reprojectionError: pose.reprojectionError

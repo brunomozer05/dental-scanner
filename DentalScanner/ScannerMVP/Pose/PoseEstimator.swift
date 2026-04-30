@@ -7,7 +7,7 @@ final class PoseEstimator {
         case missingCameraIntrinsics
         case invalidCameraIntrinsics
         case invalidMarkerSize
-        case invalidBridgeVector(name: String, count: Int)
+        case invalidBridgeVector(name: String, count: Int, expected: Int)
 
         var errorDescription: String? {
             switch self {
@@ -17,8 +17,8 @@ final class PoseEstimator {
                 return "Camera intrinsics are invalid for pose estimation."
             case .invalidMarkerSize:
                 return "Marker size must be greater than zero."
-            case let .invalidBridgeVector(name, count):
-                return "OpenCV returned \(count) values for \(name); expected 3."
+            case let .invalidBridgeVector(name, count, expected):
+                return "OpenCV returned \(count) values for \(name); expected \(expected)."
             }
         }
     }
@@ -92,6 +92,7 @@ final class PoseEstimator {
         return PoseResult(
             markerId: detection.markerId,
             rotationVector: try vector3(from: bridgeResult.rotationVector, name: "rotationVector"),
+            rotationMatrix: try matrix3x3(from: bridgeResult.rotationMatrix, name: "rotationMatrix"),
             translationVector: try vector3(from: bridgeResult.translationVector, name: "translationVector"),
             distanceMm: bridgeResult.distanceMm,
             reprojectionError: bridgeResult.reprojectionError
@@ -100,9 +101,21 @@ final class PoseEstimator {
 
     private func vector3(from values: [NSNumber], name: String) throws -> SIMD3<Double> {
         guard values.count == 3 else {
-            throw EstimatorError.invalidBridgeVector(name: name, count: values.count)
+            throw EstimatorError.invalidBridgeVector(name: name, count: values.count, expected: 3)
         }
 
         return SIMD3(values[0].doubleValue, values[1].doubleValue, values[2].doubleValue)
+    }
+
+    private func matrix3x3(from values: [NSNumber], name: String) throws -> simd_double3x3 {
+        guard values.count == 9 else {
+            throw EstimatorError.invalidBridgeVector(name: name, count: values.count, expected: 9)
+        }
+
+        return PoseMath.matrixFromRows(
+            SIMD3(values[0].doubleValue, values[1].doubleValue, values[2].doubleValue),
+            SIMD3(values[3].doubleValue, values[4].doubleValue, values[5].doubleValue),
+            SIMD3(values[6].doubleValue, values[7].doubleValue, values[8].doubleValue)
+        )
     }
 }
