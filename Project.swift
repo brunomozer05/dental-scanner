@@ -84,7 +84,8 @@ let project = Project(
             ],
             resources: [
                 "DentalScanner/**/*.storyboard",
-                "DentalScanner/**/*.xcassets"
+                "DentalScanner/**/*.xcassets",
+                "DentalScanner/Models/**/*.stl"
             ],
             dependencies: OpenCV.dependencies
         )

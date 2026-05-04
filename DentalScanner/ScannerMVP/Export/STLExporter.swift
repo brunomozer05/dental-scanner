@@ -3,20 +3,21 @@ import simd
 
 struct STLExporter {
     struct Configuration {
-        let cylinderRadiusMillimeters: Double
-        let cylinderHeightMillimeters: Double
-        let cylinderSegmentCount: Int
+        let referenceModelScale: Double
+        let tagCenterToReferenceModelOffsetMillimeters: SIMD3<Double>
 
-        static let initialImplantMarker = Configuration(
-            cylinderRadiusMillimeters: 2.0,
-            cylinderHeightMillimeters: 10.0,
-            cylinderSegmentCount: 24
+        static let markerReference = Configuration(
+            referenceModelScale: 1.0,
+            tagCenterToReferenceModelOffsetMillimeters: SIMD3<Double>(0.0, 0.0, -5.0)
         )
     }
 
     enum ExportError: LocalizedError {
         case emptyImplantList
         case invalidConfiguration
+        case missingReferenceModel
+        case emptyReferenceModel
+        case invalidReferenceModel
         case unableToEncodeSTL
 
         var errorDescription: String? {
@@ -24,7 +25,13 @@ struct STLExporter {
             case .emptyImplantList:
                 return "Nenhum implante detectado para exportar."
             case .invalidConfiguration:
-                return "Configuracao de cilindro STL invalida."
+                return "Configuracao do modelo STL invalida."
+            case .missingReferenceModel:
+                return "Nao foi possivel encontrar marker_reference.stl no bundle."
+            case .emptyReferenceModel:
+                return "O STL de referencia nao contem triangulos."
+            case .invalidReferenceModel:
+                return "O STL de referencia nao esta em um formato suportado."
             case .unableToEncodeSTL:
                 return "Nao foi possivel codificar o STL ASCII."
             }
@@ -32,14 +39,8 @@ struct STLExporter {
     }
 
     private let configuration: Configuration
-    // The generated cylinder is Z-up; implant pose axes expect the implant shaft on local Y.
-    private static let cylinderToImplantAxisRotation = matrixFromRows(
-        SIMD3(1.0, 0.0, 0.0),
-        SIMD3(0.0, 0.0, 1.0),
-        SIMD3(0.0, -1.0, 0.0)
-    )
 
-    init(configuration: Configuration = .initialImplantMarker) {
+    init(configuration: Configuration = .markerReference) {
         self.configuration = configuration
     }
 
@@ -64,18 +65,22 @@ struct STLExporter {
             throw ExportError.emptyImplantList
         }
 
-        guard configuration.cylinderRadiusMillimeters.isFinite,
-              configuration.cylinderRadiusMillimeters > 0,
-              configuration.cylinderHeightMillimeters.isFinite,
-              configuration.cylinderHeightMillimeters > 0,
-              configuration.cylinderSegmentCount >= 8
+        guard configuration.referenceModelScale.isFinite,
+              configuration.referenceModelScale > 0,
+              isFinite(configuration.tagCenterToReferenceModelOffsetMillimeters)
         else {
             throw ExportError.invalidConfiguration
         }
 
+        let referenceTriangles = try loadReferenceModelTriangles()
         var triangles: [Triangle] = []
+        triangles.reserveCapacity(referenceTriangles.count * implantPoses.count)
+
         for implantPose in implantPoses.sorted(by: { $0.markerId < $1.markerId }) {
-            triangles.append(contentsOf: cylinderTriangles(for: implantPose))
+            triangles.append(contentsOf: transformedReferenceTriangles(
+                referenceTriangles,
+                using: implantPose
+            ))
         }
 
         var lines: [String] = []
@@ -97,60 +102,155 @@ struct STLExporter {
         return lines.joined(separator: "\n") + "\n"
     }
 
-    private func cylinderTriangles(for implantPose: ImplantPose) -> [Triangle] {
-        let segmentCount = configuration.cylinderSegmentCount
-        let radius = configuration.cylinderRadiusMillimeters
-        let halfHeight = configuration.cylinderHeightMillimeters / 2.0
-        let bottomCenter = worldPoint(SIMD3(0.0, 0.0, -halfHeight), using: implantPose)
-        let topCenter = worldPoint(SIMD3(0.0, 0.0, halfHeight), using: implantPose)
-
-        var bottomRing: [SIMD3<Double>] = []
-        var topRing: [SIMD3<Double>] = []
-        bottomRing.reserveCapacity(segmentCount)
-        topRing.reserveCapacity(segmentCount)
-
-        for segmentIndex in 0..<segmentCount {
-            let angle = Double(segmentIndex) / Double(segmentCount) * 2.0 * Double.pi
-            let x = cos(angle) * radius
-            let y = sin(angle) * radius
-            bottomRing.append(worldPoint(SIMD3(x, y, -halfHeight), using: implantPose))
-            topRing.append(worldPoint(SIMD3(x, y, halfHeight), using: implantPose))
-        }
-
+    private func transformedReferenceTriangles(
+        _ referenceTriangles: [Triangle],
+        using implantPose: ImplantPose
+    ) -> [Triangle] {
         var triangles: [Triangle] = []
-        triangles.reserveCapacity(segmentCount * 4)
+        triangles.reserveCapacity(referenceTriangles.count)
 
-        for segmentIndex in 0..<segmentCount {
-            let nextIndex = (segmentIndex + 1) % segmentCount
-            let bottomA = bottomRing[segmentIndex]
-            let bottomB = bottomRing[nextIndex]
-            let topA = topRing[segmentIndex]
-            let topB = topRing[nextIndex]
-
-            triangles.append(Triangle(bottomA, bottomB, topB))
-            triangles.append(Triangle(bottomA, topB, topA))
-            triangles.append(Triangle(topCenter, topA, topB))
-            triangles.append(Triangle(bottomCenter, bottomB, bottomA))
+        for referenceTriangle in referenceTriangles {
+            triangles.append(Triangle(
+                worldPoint(referenceTriangle.a, using: implantPose),
+                worldPoint(referenceTriangle.b, using: implantPose),
+                worldPoint(referenceTriangle.c, using: implantPose)
+            ))
         }
 
         return triangles
     }
 
     private func worldPoint(_ localPoint: SIMD3<Double>, using implantPose: ImplantPose) -> SIMD3<Double> {
-        let implantAlignedPoint = Self.cylinderToImplantAxisRotation * localPoint
-        return implantPose.rotationMatrix * implantAlignedPoint + implantPose.translationVector
+        let scaledPoint = localPoint * configuration.referenceModelScale
+        let offsetPoint = scaledPoint + configuration.tagCenterToReferenceModelOffsetMillimeters
+        return implantPose.translationVector + implantPose.rotationMatrix * offsetPoint
     }
 
-    private static func matrixFromRows(
-        _ row0: SIMD3<Double>,
-        _ row1: SIMD3<Double>,
-        _ row2: SIMD3<Double>
-    ) -> simd_double3x3 {
-        simd_double3x3(columns: (
-            SIMD3(row0.x, row1.x, row2.x),
-            SIMD3(row0.y, row1.y, row2.y),
-            SIMD3(row0.z, row1.z, row2.z)
-        ))
+    private func loadReferenceModelTriangles() throws -> [Triangle] {
+        let url = try referenceModelURL()
+        let data = try Data(contentsOf: url)
+
+        if let binaryTriangles = try parseBinarySTL(data) {
+            return binaryTriangles
+        }
+
+        guard let contents = String(data: data, encoding: .utf8) else {
+            throw ExportError.invalidReferenceModel
+        }
+
+        return try parseASCIISTL(contents)
+    }
+
+    private func referenceModelURL() throws -> URL {
+        if let url = Bundle.main.url(forResource: "marker_reference", withExtension: "stl") {
+            return url
+        }
+
+        if let url = Bundle.main.url(
+            forResource: "marker_reference",
+            withExtension: "stl",
+            subdirectory: "Models"
+        ) {
+            return url
+        }
+
+        throw ExportError.missingReferenceModel
+    }
+
+    private func parseBinarySTL(_ data: Data) throws -> [Triangle]? {
+        guard data.count >= 84 else {
+            return nil
+        }
+
+        let triangleCount = Int(readUInt32LittleEndian(data, at: 80))
+        guard triangleCount > 0,
+              triangleCount <= (Int.max - 84) / 50,
+              84 + triangleCount * 50 == data.count
+        else {
+            return nil
+        }
+
+        var triangles: [Triangle] = []
+        triangles.reserveCapacity(triangleCount)
+
+        var offset = 84
+        for _ in 0..<triangleCount {
+            offset += 12
+            let a = readVector(data, at: offset)
+            offset += 12
+            let b = readVector(data, at: offset)
+            offset += 12
+            let c = readVector(data, at: offset)
+            offset += 12
+            offset += 2
+
+            triangles.append(Triangle(a, b, c))
+        }
+
+        guard !triangles.isEmpty else {
+            throw ExportError.emptyReferenceModel
+        }
+
+        return triangles
+    }
+
+    private func parseASCIISTL(_ contents: String) throws -> [Triangle] {
+        var pendingTriangleVertices: [SIMD3<Double>] = []
+        var triangles: [Triangle] = []
+
+        for line in contents.components(separatedBy: .newlines) {
+            let parts = line.split(whereSeparator: \.isWhitespace)
+            guard parts.count >= 4,
+                  parts[0].lowercased() == "vertex",
+                  let x = Double(String(parts[1])),
+                  let y = Double(String(parts[2])),
+                  let z = Double(String(parts[3]))
+            else {
+                continue
+            }
+
+            pendingTriangleVertices.append(SIMD3(x, y, z))
+
+            guard pendingTriangleVertices.count == 3 else {
+                continue
+            }
+
+            triangles.append(Triangle(
+                pendingTriangleVertices[0],
+                pendingTriangleVertices[1],
+                pendingTriangleVertices[2]
+            ))
+            pendingTriangleVertices.removeAll(keepingCapacity: true)
+        }
+
+        guard !triangles.isEmpty else {
+            throw ExportError.emptyReferenceModel
+        }
+
+        return triangles
+    }
+
+    private func readVector(_ data: Data, at offset: Int) -> SIMD3<Double> {
+        SIMD3(
+            Double(readFloat32LittleEndian(data, at: offset)),
+            Double(readFloat32LittleEndian(data, at: offset + 4)),
+            Double(readFloat32LittleEndian(data, at: offset + 8))
+        )
+    }
+
+    private func readFloat32LittleEndian(_ data: Data, at offset: Int) -> Float {
+        Float(bitPattern: readUInt32LittleEndian(data, at: offset))
+    }
+
+    private func readUInt32LittleEndian(_ data: Data, at offset: Int) -> UInt32 {
+        UInt32(data[offset]) |
+            UInt32(data[offset + 1]) << 8 |
+            UInt32(data[offset + 2]) << 16 |
+            UInt32(data[offset + 3]) << 24
+    }
+
+    private func isFinite(_ vector: SIMD3<Double>) -> Bool {
+        vector.x.isFinite && vector.y.isFinite && vector.z.isFinite
     }
 
     private func format(_ value: Double) -> String {
