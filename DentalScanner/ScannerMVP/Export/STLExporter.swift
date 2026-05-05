@@ -49,6 +49,8 @@ struct STLExporter {
     }
 
     private let configuration: Configuration
+    private static let referenceModelCacheLock = NSLock()
+    private static var cachedReferenceModelTriangles: [Triangle]?
 
     init(configuration: Configuration = .markerReference) {
         self.configuration = configuration
@@ -183,7 +185,7 @@ struct STLExporter {
         let scaledPoint = localPoint * configuration.referenceModelScale
         let relative = scaledPoint - configuration.referenceModelTagCenterInModelMillimeters
         var tagLocalPoint = SIMD3<Double>(
-            relative.y,
+            -relative.y,
             -relative.z,
             relative.x
         )
@@ -196,6 +198,32 @@ struct STLExporter {
     }
 
     private func loadReferenceModelTriangles() throws -> [Triangle] {
+        if let cachedTriangles = cachedReferenceModelTriangles() {
+            return cachedTriangles
+        }
+
+        let triangles = try loadReferenceModelTrianglesFromBundle()
+
+        Self.referenceModelCacheLock.lock()
+        if let cachedTriangles = Self.cachedReferenceModelTriangles {
+            Self.referenceModelCacheLock.unlock()
+            return cachedTriangles
+        }
+
+        Self.cachedReferenceModelTriangles = triangles
+        Self.referenceModelCacheLock.unlock()
+
+        return triangles
+    }
+
+    private func cachedReferenceModelTriangles() -> [Triangle]? {
+        Self.referenceModelCacheLock.lock()
+        let triangles = Self.cachedReferenceModelTriangles
+        Self.referenceModelCacheLock.unlock()
+        return triangles
+    }
+
+    private func loadReferenceModelTrianglesFromBundle() throws -> [Triangle] {
         let url = try referenceModelURL()
         let data = try Data(contentsOf: url)
 

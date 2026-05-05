@@ -142,6 +142,7 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var stlExportURL: URL?
     @Published private(set) var stlExportedImplantCount: Int = 0
     @Published private(set) var stlExportErrorMessage: String?
+    @Published private(set) var isGeneratingSTL: Bool = false
     @Published private(set) var isTorchAvailable: Bool = false
     @Published private(set) var isTorchEnabled: Bool = false
     @Published private(set) var errorMessage: String?
@@ -171,6 +172,7 @@ final class ScannerViewModel: ObservableObject {
     private var precisionValidationErrorHistory: [Double] = []
     private var finalPoseObservations: [FinalPoseObservation] = []
     private var didApplyFinalPoseRefinement = false
+    private var stlExportGenerationID = UUID()
 
     var captureSession: AVCaptureSession {
         cameraService.captureSession
@@ -664,6 +666,8 @@ final class ScannerViewModel: ObservableObject {
         stlExportURL = nil
         stlExportedImplantCount = 0
         stlExportErrorMessage = nil
+        isGeneratingSTL = false
+        stlExportGenerationID = UUID()
         scanState = .idle
         scanProgress = 0
         scanQualityScore = 0
@@ -758,7 +762,7 @@ final class ScannerViewModel: ObservableObject {
             saveCurrentScanIfNeeded()
             scanState = .ready
             scanProgress = 100
-            scanQualityStatus = "Pronto para exportar"
+            scanQualityStatus = isGeneratingSTL ? "Gerando modelo..." : "Pronto para exportar"
             return
         }
 
@@ -1450,6 +1454,10 @@ final class ScannerViewModel: ObservableObject {
             return stlExportURL
         }
 
+        guard !isGeneratingSTL else {
+            return nil
+        }
+
         let currentTagPoses = consolidatedPoseResults()
         guard !currentTagPoses.isEmpty else {
             stlExportURL = nil
@@ -1458,24 +1466,61 @@ final class ScannerViewModel: ObservableObject {
             return nil
         }
 
-        do {
-            let stl = try stlExporter.exportReferenceMarkersAsSTL(tagPoses: currentTagPoses)
-            guard let stlData = stl.data(using: .utf8) else {
-                throw ScanStorageManager.StorageError.unableToEncodeSTL
+        let stlExporter = self.stlExporter
+        let scanStorageManager = self.scanStorageManager
+        let scanName = ScanStorageManager.automaticScanFileName()
+        let exportedTagCount = currentTagPoses.count
+        let exportGenerationID = UUID()
+
+        stlExportGenerationID = exportGenerationID
+        isGeneratingSTL = true
+        stlExportErrorMessage = nil
+        scanQualityStatus = "Gerando modelo..."
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result: Result<ScanItem, Error>
+
+            do {
+                let stl = try stlExporter.exportReferenceMarkersAsSTL(tagPoses: currentTagPoses)
+                guard let stlData = stl.data(using: .utf8) else {
+                    throw ScanStorageManager.StorageError.unableToEncodeSTL
+                }
+
+                let scan = try scanStorageManager.saveScan(stlData: stlData, name: scanName)
+                result = .success(scan)
+            } catch {
+                result = .failure(error)
             }
 
-            let scanName = ScanStorageManager.automaticScanFileName()
-            let scan = try scanStorageManager.saveScan(stlData: stlData, name: scanName)
-            stlExportURL = scan.fileURL
-            stlExportedImplantCount = currentTagPoses.count
-            stlExportErrorMessage = nil
-            return scan.fileURL
-        } catch {
-            stlExportURL = nil
-            stlExportedImplantCount = 0
-            stlExportErrorMessage = error.localizedDescription
-            return nil
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      self.stlExportGenerationID == exportGenerationID
+                else {
+                    return
+                }
+
+                self.isGeneratingSTL = false
+
+                switch result {
+                case .success(let scan):
+                    self.stlExportURL = scan.fileURL
+                    self.stlExportedImplantCount = exportedTagCount
+                    self.stlExportErrorMessage = nil
+                    if self.scanState == .ready {
+                        self.scanQualityStatus = "Pronto para exportar"
+                    }
+                case .failure(let error):
+                    self.stlExportURL = nil
+                    self.stlExportedImplantCount = 0
+                    self.stlExportErrorMessage = error.localizedDescription
+                    if self.scanState == .ready {
+                        self.scanQualityStatus = "Erro ao gerar modelo"
+                    }
+                }
+            }
         }
+
+        return nil
     }
 
     private struct FrameMetrics {

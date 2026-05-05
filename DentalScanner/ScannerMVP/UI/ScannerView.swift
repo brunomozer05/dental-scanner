@@ -246,7 +246,9 @@ struct ScannerView: View {
                 }
                 .buttonStyle(.plain)
 
-                if viewModel.canExportSTL {
+                if viewModel.isGeneratingSTL {
+                    stlGenerationIndicator
+                } else if viewModel.canExportSTL {
                     Button {
                         openSTLViewer()
                     } label: {
@@ -275,6 +277,23 @@ struct ScannerView: View {
             viewModel.stopCamera()
             onCancel?()
         }
+    }
+
+    private var stlGenerationIndicator: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .progressViewStyle(.circular)
+                .tint(.white)
+                .scaleEffect(0.75)
+
+            Text("Gerando modelo...")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.78))
+        }
+        .frame(height: 38)
+        .padding(.horizontal, 10)
+        .background(Color.white.opacity(0.08))
+        .clipShape(Capsule())
     }
 
     private func scannerBottomMetric(title: String, value: String) -> some View {
@@ -505,7 +524,9 @@ struct ScannerView: View {
                 scanMetric(title: "Qualidade", value: formattedScanQualityScore)
             }
 
-            if viewModel.canExportSTL {
+            if viewModel.isGeneratingSTL {
+                stlGenerationIndicator
+            } else if viewModel.canExportSTL {
                 Button {
                     openSTLViewer()
                 } label: {
@@ -527,7 +548,9 @@ struct ScannerView: View {
     }
 
     private func openSTLViewer() {
-        guard viewModel.canExportSTL else {
+        guard viewModel.canExportSTL,
+              !viewModel.isGeneratingSTL
+        else {
             return
         }
 
@@ -866,6 +889,14 @@ struct ScannerView: View {
         viewModel.stlExportURL?.lastPathComponent ?? "-"
     }
 
+    private var formattedSTLExportStatus: String {
+        if viewModel.isGeneratingSTL {
+            return "Gerando modelo..."
+        }
+
+        return viewModel.stlExportURL == nil ? "Pendente" : "Pronto"
+    }
+
     private var formattedSTLExportError: String {
         viewModel.stlExportErrorMessage ?? "Nenhum"
     }
@@ -1108,19 +1139,26 @@ struct ScannerView: View {
                 Button {
                     viewModel.exportCurrentImplantsAsSTL()
                 } label: {
-                    Label("Exportar STL", systemImage: "doc.badge.plus")
+                    Label(
+                        viewModel.isGeneratingSTL ? "Gerando modelo..." : "Exportar STL",
+                        systemImage: viewModel.isGeneratingSTL ? "hourglass" : "doc.badge.plus"
+                    )
                         .font(.caption.weight(.semibold))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 8)
-                        .foregroundStyle(viewModel.canExportSTL ? Color.primary : Color.secondary)
+                        .foregroundStyle(
+                            viewModel.canExportSTL && !viewModel.isGeneratingSTL ? Color.primary : Color.secondary
+                        )
                         .background(Color(.secondarySystemBackground))
                         .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .disabled(!viewModel.canExportSTL)
-                .opacity(viewModel.canExportSTL ? 1 : 0.65)
+                .disabled(!viewModel.canExportSTL || viewModel.isGeneratingSTL)
+                .opacity(viewModel.canExportSTL && !viewModel.isGeneratingSTL ? 1 : 0.65)
 
-                if viewModel.canExportSTL, let stlExportURL = viewModel.stlExportURL {
+                if viewModel.canExportSTL,
+                   !viewModel.isGeneratingSTL,
+                   let stlExportURL = viewModel.stlExportURL {
                     ShareLink(item: stlExportURL) {
                         Label("Compartilhar STL", systemImage: "square.and.arrow.up")
                             .font(.caption.weight(.semibold))
@@ -1134,7 +1172,8 @@ struct ScannerView: View {
                 }
             }
 
-            metricRow(title: "Implantes no STL", value: formattedSTLExportedImplantCount)
+            metricRow(title: "Markers no STL", value: formattedSTLExportedImplantCount)
+            metricRow(title: "Status STL", value: formattedSTLExportStatus)
             metricRow(title: "Arquivo STL", value: formattedSTLExportFileName)
             metricRow(title: "Erro STL", value: formattedSTLExportError)
         }
