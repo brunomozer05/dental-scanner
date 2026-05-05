@@ -4,16 +4,13 @@ import simd
 struct STLExporter {
     struct Configuration {
         let referenceModelScale: Double
-        let tagCenterToReferenceModelOffsetMillimeters: SIMD3<Double>
-        let referenceModelRotationCorrection: simd_quatd
+        let referenceModelTagCenterInModelMillimeters: SIMD3<Double>
+        let referenceModelFlipZ: Bool
 
         static let markerReference = Configuration(
             referenceModelScale: 1.0,
-            tagCenterToReferenceModelOffsetMillimeters: SIMD3<Double>(0.0, 0.0, -5.0),
-            referenceModelRotationCorrection: simd_quatd(
-                angle: Double.pi / 2,
-                axis: SIMD3<Double>(1.0, 0.0, 0.0)
-            )
+            referenceModelTagCenterInModelMillimeters: SIMD3<Double>(1.013, -1.45, 17.0),
+            referenceModelFlipZ: false
         )
     }
 
@@ -72,7 +69,7 @@ struct STLExporter {
 
         guard configuration.referenceModelScale.isFinite,
               configuration.referenceModelScale > 0,
-              isFinite(configuration.tagCenterToReferenceModelOffsetMillimeters)
+              isFinite(configuration.referenceModelTagCenterInModelMillimeters)
         else {
             throw ExportError.invalidConfiguration
         }
@@ -127,10 +124,13 @@ struct STLExporter {
 
     private func worldPoint(_ localPoint: SIMD3<Double>, using implantPose: ImplantPose) -> SIMD3<Double> {
         let scaledPoint = localPoint * configuration.referenceModelScale
-        let correction = simd_double3x3(configuration.referenceModelRotationCorrection)
-        let correctedRotation = correction * implantPose.rotationMatrix
-        let rotatedOffset = implantPose.rotationMatrix * configuration.tagCenterToReferenceModelOffsetMillimeters
-        return implantPose.translationVector + rotatedOffset + correctedRotation * scaledPoint
+        var tagLocalPoint = scaledPoint - configuration.referenceModelTagCenterInModelMillimeters
+
+        if configuration.referenceModelFlipZ {
+            tagLocalPoint.z *= -1
+        }
+
+        return implantPose.translationVector + implantPose.rotationMatrix * tagLocalPoint
     }
 
     private func loadReferenceModelTriangles() throws -> [Triangle] {
