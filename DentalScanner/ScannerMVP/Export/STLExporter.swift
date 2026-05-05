@@ -5,10 +5,15 @@ struct STLExporter {
     struct Configuration {
         let referenceModelScale: Double
         let tagCenterToReferenceModelOffsetMillimeters: SIMD3<Double>
+        let referenceModelRotationCorrection: simd_quatd
 
         static let markerReference = Configuration(
             referenceModelScale: 1.0,
-            tagCenterToReferenceModelOffsetMillimeters: SIMD3<Double>(0.0, 0.0, -5.0)
+            tagCenterToReferenceModelOffsetMillimeters: SIMD3<Double>(0.0, 0.0, -5.0),
+            referenceModelRotationCorrection: simd_quatd(
+                angle: Double.pi / 2,
+                axis: SIMD3<Double>(1.0, 0.0, 0.0)
+            )
         )
     }
 
@@ -122,8 +127,10 @@ struct STLExporter {
 
     private func worldPoint(_ localPoint: SIMD3<Double>, using implantPose: ImplantPose) -> SIMD3<Double> {
         let scaledPoint = localPoint * configuration.referenceModelScale
-        let offsetPoint = scaledPoint + configuration.tagCenterToReferenceModelOffsetMillimeters
-        return implantPose.translationVector + implantPose.rotationMatrix * offsetPoint
+        let correction = simd_double3x3(configuration.referenceModelRotationCorrection)
+        let correctedRotation = implantPose.rotationMatrix * correction
+        let rotatedOffset = implantPose.rotationMatrix * configuration.tagCenterToReferenceModelOffsetMillimeters
+        return implantPose.translationVector + rotatedOffset + correctedRotation * scaledPoint
     }
 
     private func loadReferenceModelTriangles() throws -> [Triangle] {
