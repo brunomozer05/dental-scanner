@@ -1,6 +1,7 @@
 import SceneKit
 import SwiftUI
 import UIKit
+import simd
 
 struct STLViewerView: View {
     let stlFileURL: URL
@@ -8,6 +9,11 @@ struct STLViewerView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var scene: SCNScene?
     @State private var pointOfView: SCNNode?
+    @State private var modelNode: SCNNode?
+    @State private var baseModelOrientation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 0, 1))
+    @State private var rotationX: Float = 0
+    @State private var rotationY: Float = 0
+    @State private var rotationZ: Float = 0
     @State private var loadErrorMessage: String?
     @State private var isShareSheetPresented = false
 
@@ -68,13 +74,88 @@ struct STLViewerView: View {
 
                 Spacer()
             }
+
+            if scene != nil {
+                VStack {
+                    Spacer()
+
+                    HStack {
+                        Spacer()
+
+                        rotationDebugOverlay
+                            .frame(width: 320)
+                            .padding(14)
+                    }
+                }
+            }
         }
         .background(Color.black)
         .supportedInterfaceOrientations(.landscape)
         .onAppear(perform: loadScene)
+        .onChange(of: rotationX) { _, _ in
+            applyDebugRotation()
+        }
+        .onChange(of: rotationY) { _, _ in
+            applyDebugRotation()
+        }
+        .onChange(of: rotationZ) { _, _ in
+            applyDebugRotation()
+        }
         .sheet(isPresented: $isShareSheetPresented) {
             ActivityView(activityItems: [stlFileURL])
                 .presentationDetents([.medium, .large])
+        }
+    }
+
+    private var rotationDebugOverlay: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Ajuste Rotacao")
+                    .font(.caption.weight(.semibold))
+
+                Spacer()
+
+                Button {
+                    rotationX = 0
+                    rotationY = 0
+                    rotationZ = 0
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 28, height: 28)
+                        .background(Color.white.opacity(0.12))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Resetar rotacao")
+            }
+
+            rotationSlider(title: "X", value: $rotationX)
+            rotationSlider(title: "Y", value: $rotationY)
+            rotationSlider(title: "Z", value: $rotationZ)
+        }
+        .padding(12)
+        .foregroundStyle(.white)
+        .background(Color.black.opacity(0.7))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func rotationSlider(title: String, value: Binding<Float>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+
+                Spacer()
+
+                Text(String(format: "%.2f rad", value.wrappedValue))
+                    .font(.caption2.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.68))
+            }
+
+            Slider(value: value, in: -Float.pi...Float.pi)
+                .tint(.white)
         }
     }
 
@@ -83,12 +164,35 @@ struct STLViewerView: View {
             let loadedScene = try STLSceneLoader.makeScene(from: stlFileURL)
             scene = loadedScene.scene
             pointOfView = loadedScene.cameraNode
+            modelNode = loadedScene.modelNode
+            let loadedModelOrientation = loadedScene.modelNode.simdOrientation
+            baseModelOrientation = loadedModelOrientation
             loadErrorMessage = nil
+            applyDebugRotation(to: loadedScene.modelNode, baseOrientation: loadedModelOrientation)
         } catch {
             scene = nil
             pointOfView = nil
+            modelNode = nil
+            baseModelOrientation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 0, 1))
             loadErrorMessage = error.localizedDescription
         }
+    }
+
+    private func applyDebugRotation() {
+        guard let modelNode else {
+            return
+        }
+
+        applyDebugRotation(to: modelNode, baseOrientation: baseModelOrientation)
+    }
+
+    private func applyDebugRotation(to node: SCNNode, baseOrientation rotation: simd_quatf) {
+        let correctionX = simd_quatf(angle: rotationX, axis: SIMD3<Float>(1, 0, 0))
+        let correctionY = simd_quatf(angle: rotationY, axis: SIMD3<Float>(0, 1, 0))
+        let correctionZ = simd_quatf(angle: rotationZ, axis: SIMD3<Float>(0, 0, 1))
+        let correction = correctionZ * correctionY * correctionX
+
+        node.simdOrientation = rotation * correction
     }
 }
 
@@ -107,10 +211,14 @@ private enum STLSceneLoader {
     struct LoadedScene {
         let scene: SCNScene
         let cameraNode: SCNNode
+        let modelNode: SCNNode
     }
 
     static func makeScene(from fileURL: URL) throws -> LoadedScene {
         let geometry = try makeGeometry(from: fileURL)
+        let modelRootNode = SCNNode()
+        modelRootNode.name = "STLViewerModelRoot"
+
         let modelNode = SCNNode(geometry: geometry)
         let scene = SCNScene()
 
@@ -127,7 +235,8 @@ private enum STLSceneLoader {
         let cameraDistance = max(extent * 2.8, 45)
 
         modelNode.position = SCNVector3(-center.x, -center.y, -center.z)
-        scene.rootNode.addChildNode(modelNode)
+        modelRootNode.addChildNode(modelNode)
+        scene.rootNode.addChildNode(modelRootNode)
 
         let ambientLight = SCNLight()
         ambientLight.type = .ambient
@@ -161,7 +270,7 @@ private enum STLSceneLoader {
 
         scene.background.contents = UIColor.black
 
-        return LoadedScene(scene: scene, cameraNode: cameraNode)
+        return LoadedScene(scene: scene, cameraNode: cameraNode, modelNode: modelRootNode)
     }
 
     private static func makeGeometry(from fileURL: URL) throws -> SCNGeometry {
