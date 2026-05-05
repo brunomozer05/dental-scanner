@@ -10,7 +10,7 @@ struct STLExporter {
 
         static let markerReference = Configuration(
             referenceModelScale: 1.0,
-            referenceModelTagCenterInModelMillimeters: SIMD3<Double>(1.013, -1.45, 17.0),
+            referenceModelTagCenterInModelMillimeters: SIMD3<Double>(4.0, -1.45, 13.55),
             referenceModelFlipZ: false,
             referenceModelLocalRotation: simd_quatd(
                 angle: 0.0,
@@ -181,7 +181,12 @@ struct STLExporter {
 
     private func tagLocalPoint(from localPoint: SIMD3<Double>) -> SIMD3<Double> {
         let scaledPoint = localPoint * configuration.referenceModelScale
-        var tagLocalPoint = scaledPoint - configuration.referenceModelTagCenterInModelMillimeters
+        let relative = scaledPoint - configuration.referenceModelTagCenterInModelMillimeters
+        var tagLocalPoint = SIMD3<Double>(
+            relative.y,
+            -relative.z,
+            relative.x
+        )
 
         if configuration.referenceModelFlipZ {
             tagLocalPoint.z *= -1
