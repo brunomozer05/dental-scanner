@@ -128,7 +128,7 @@ struct STLExporter {
     private func worldPoint(_ localPoint: SIMD3<Double>, using implantPose: ImplantPose) -> SIMD3<Double> {
         let scaledPoint = localPoint * configuration.referenceModelScale
         let correction = simd_double3x3(configuration.referenceModelRotationCorrection)
-        let correctedRotation = implantPose.rotationMatrix * correction
+        let correctedRotation = correction * implantPose.rotationMatrix
         let rotatedOffset = implantPose.rotationMatrix * configuration.tagCenterToReferenceModelOffsetMillimeters
         return implantPose.translationVector + rotatedOffset + correctedRotation * scaledPoint
     }

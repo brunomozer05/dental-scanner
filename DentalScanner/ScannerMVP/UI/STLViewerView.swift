@@ -192,7 +192,7 @@ struct STLViewerView: View {
         let correctionZ = simd_quatf(angle: rotationZ, axis: SIMD3<Float>(0, 0, 1))
         let correction = correctionZ * correctionY * correctionX
 
-        node.simdOrientation = rotation * correction
+        node.simdOrientation = correction * rotation
     }
 }
 
