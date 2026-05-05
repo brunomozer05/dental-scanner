@@ -186,7 +186,7 @@ struct STLExporter {
         let relative = scaledPoint - configuration.referenceModelTagCenterInModelMillimeters
         var tagLocalPoint = SIMD3<Double>(
             -relative.y,
-            -relative.z,
+            relative.z,
             relative.x
         )
 
