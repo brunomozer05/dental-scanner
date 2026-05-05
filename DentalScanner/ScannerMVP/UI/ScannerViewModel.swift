@@ -1450,16 +1450,16 @@ final class ScannerViewModel: ObservableObject {
             return stlExportURL
         }
 
-        let currentImplantPoses = implantPoseResults
-        guard !currentImplantPoses.isEmpty else {
+        let currentTagPoses = consolidatedPoseResults()
+        guard !currentTagPoses.isEmpty else {
             stlExportURL = nil
             stlExportedImplantCount = 0
-            stlExportErrorMessage = STLExporter.ExportError.emptyImplantList.localizedDescription
+            stlExportErrorMessage = STLExporter.ExportError.emptyTagPoseList.localizedDescription
             return nil
         }
 
         do {
-            let stl = try stlExporter.makeASCIISTL(for: currentImplantPoses)
+            let stl = try stlExporter.exportReferenceMarkersAsSTL(tagPoses: currentTagPoses)
             guard let stlData = stl.data(using: .utf8) else {
                 throw ScanStorageManager.StorageError.unableToEncodeSTL
             }
@@ -1467,7 +1467,7 @@ final class ScannerViewModel: ObservableObject {
             let scanName = ScanStorageManager.automaticScanFileName()
             let scan = try scanStorageManager.saveScan(stlData: stlData, name: scanName)
             stlExportURL = scan.fileURL
-            stlExportedImplantCount = currentImplantPoses.count
+            stlExportedImplantCount = currentTagPoses.count
             stlExportErrorMessage = nil
             return scan.fileURL
         } catch {

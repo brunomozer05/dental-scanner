@@ -6,16 +6,22 @@ struct STLExporter {
         let referenceModelScale: Double
         let referenceModelTagCenterInModelMillimeters: SIMD3<Double>
         let referenceModelFlipZ: Bool
+        let referenceModelLocalRotation: simd_quatd
 
         static let markerReference = Configuration(
             referenceModelScale: 1.0,
             referenceModelTagCenterInModelMillimeters: SIMD3<Double>(1.013, -1.45, 17.0),
-            referenceModelFlipZ: false
+            referenceModelFlipZ: false,
+            referenceModelLocalRotation: simd_quatd(
+                angle: 0.0,
+                axis: SIMD3<Double>(0.0, 0.0, 1.0)
+            )
         )
     }
 
     enum ExportError: LocalizedError {
         case emptyImplantList
+        case emptyTagPoseList
         case invalidConfiguration
         case missingReferenceModel
         case emptyReferenceModel
@@ -26,6 +32,8 @@ struct STLExporter {
             switch self {
             case .emptyImplantList:
                 return "Nenhum implante detectado para exportar."
+            case .emptyTagPoseList:
+                return "Nenhuma pose de tag detectada para exportar."
             case .invalidConfiguration:
                 return "Configuracao do modelo STL invalida."
             case .missingReferenceModel:
@@ -67,12 +75,7 @@ struct STLExporter {
             throw ExportError.emptyImplantList
         }
 
-        guard configuration.referenceModelScale.isFinite,
-              configuration.referenceModelScale > 0,
-              isFinite(configuration.referenceModelTagCenterInModelMillimeters)
-        else {
-            throw ExportError.invalidConfiguration
-        }
+        try validateConfiguration()
 
         let referenceTriangles = try loadReferenceModelTriangles()
         var triangles: [Triangle] = []
@@ -85,6 +88,34 @@ struct STLExporter {
             ))
         }
 
+        return makeASCIISTL(from: triangles, solidName: solidName)
+    }
+
+    func exportReferenceMarkersAsSTL(
+        tagPoses: [PoseResult],
+        solidName: String = "dental_reference_markers"
+    ) throws -> String {
+        guard !tagPoses.isEmpty else {
+            throw ExportError.emptyTagPoseList
+        }
+
+        try validateConfiguration()
+
+        let referenceTriangles = try loadReferenceModelTriangles()
+        var triangles: [Triangle] = []
+        triangles.reserveCapacity(referenceTriangles.count * tagPoses.count)
+
+        for tagPose in tagPoses.sorted(by: { $0.markerId < $1.markerId }) {
+            triangles.append(contentsOf: transformedReferenceTriangles(
+                referenceTriangles,
+                using: tagPose
+            ))
+        }
+
+        return makeASCIISTL(from: triangles, solidName: solidName)
+    }
+
+    private func makeASCIISTL(from triangles: [Triangle], solidName: String) -> String {
         var lines: [String] = []
         lines.reserveCapacity(triangles.count * 7 + 2)
         lines.append("solid \(solidName)")
@@ -122,7 +153,33 @@ struct STLExporter {
         return triangles
     }
 
+    private func transformedReferenceTriangles(
+        _ referenceTriangles: [Triangle],
+        using tagPose: PoseResult
+    ) -> [Triangle] {
+        var triangles: [Triangle] = []
+        triangles.reserveCapacity(referenceTriangles.count)
+
+        for referenceTriangle in referenceTriangles {
+            triangles.append(Triangle(
+                worldPoint(referenceTriangle.a, using: tagPose),
+                worldPoint(referenceTriangle.b, using: tagPose),
+                worldPoint(referenceTriangle.c, using: tagPose)
+            ))
+        }
+
+        return triangles
+    }
+
+    private func worldPoint(_ localPoint: SIMD3<Double>, using tagPose: PoseResult) -> SIMD3<Double> {
+        tagPose.translationVector + tagPose.rotationMatrix * tagLocalPoint(from: localPoint)
+    }
+
     private func worldPoint(_ localPoint: SIMD3<Double>, using implantPose: ImplantPose) -> SIMD3<Double> {
+        implantPose.translationVector + implantPose.rotationMatrix * tagLocalPoint(from: localPoint)
+    }
+
+    private func tagLocalPoint(from localPoint: SIMD3<Double>) -> SIMD3<Double> {
         let scaledPoint = localPoint * configuration.referenceModelScale
         var tagLocalPoint = scaledPoint - configuration.referenceModelTagCenterInModelMillimeters
 
@@ -130,7 +187,7 @@ struct STLExporter {
             tagLocalPoint.z *= -1
         }
 
-        return implantPose.translationVector + implantPose.rotationMatrix * tagLocalPoint
+        return simd_double3x3(configuration.referenceModelLocalRotation) * tagLocalPoint
     }
 
     private func loadReferenceModelTriangles() throws -> [Triangle] {
@@ -162,6 +219,15 @@ struct STLExporter {
         }
 
         throw ExportError.missingReferenceModel
+    }
+
+    private func validateConfiguration() throws {
+        guard configuration.referenceModelScale.isFinite,
+              configuration.referenceModelScale > 0,
+              isFinite(configuration.referenceModelTagCenterInModelMillimeters)
+        else {
+            throw ExportError.invalidConfiguration
+        }
     }
 
     private func parseBinarySTL(_ data: Data) throws -> [Triangle]? {
