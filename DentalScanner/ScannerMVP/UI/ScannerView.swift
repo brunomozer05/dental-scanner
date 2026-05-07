@@ -46,6 +46,19 @@ struct ScannerView: View {
             ScannerCrosshairView(accentColor: scannerAccentColor)
                 .zIndex(2)
 
+            HStack {
+                Spacer()
+
+                ScanDistanceGuideView(
+                    distanceMm: viewModel.poseDistanceMm,
+                    configuration: .default
+                )
+                .padding(.trailing, 16)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .allowsHitTesting(false)
+            .zIndex(2)
+
             VStack {
                 HStack(alignment: .top, spacing: 12) {
                     scannerTagListPanel
