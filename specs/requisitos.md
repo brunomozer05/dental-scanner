@@ -34,4 +34,4 @@
 
 ## 4. Restrições de Design
 * O app não utilizará o sensor LiDAR para garantir maior compatibilidade entre modelos de iPhone.
-* Todo o cálculo de profundidade será derivado da visão computacional estereoscópica ou por estrutura de movimento (SfM)..
+* Todo o cálculo de profundidade será derivado da visão computacional estereoscópica ou por estrutura de movimento (SfM).
