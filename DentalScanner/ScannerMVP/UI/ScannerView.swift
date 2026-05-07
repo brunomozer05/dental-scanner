@@ -691,6 +691,10 @@ struct ScannerView: View {
         formattedCoveragePercent(viewModel.scanGlobalCoveragePercent)
     }
 
+    private var formattedScanNormalizedCoverageProgress: String {
+        formattedCoveragePercent(viewModel.scanNormalizedCoverageProgressPercent)
+    }
+
     private var formattedScanCurrentCoverage: String {
         formattedCoveragePercent(viewModel.scanCurrentAngularCoveragePercent)
     }
@@ -759,8 +763,8 @@ struct ScannerView: View {
                 String(
                     format: "ID %d: atual %d%% / exigida %d%% (%d/%d)",
                     coverage.markerId,
-                    roundedCoveragePercent(coverage.actualCoveragePercent),
-                    roundedCoveragePercent(coverage.requiredCoveragePercent),
+                    roundedCoveragePercent(coverage.rawAngularCoveragePercent),
+                    roundedCoveragePercent(coverage.requiredAngularCoveragePercent),
                     coverage.coveredBinCount,
                     coverage.requiredBinCount
                 )
@@ -966,7 +970,19 @@ struct ScannerView: View {
             return "Gerando modelo..."
         }
 
+        if viewModel.stlExportErrorMessage != nil {
+            return "Erro"
+        }
+
         return viewModel.stlExportURL == nil ? "Pendente" : "Pronto"
+    }
+
+    private var formattedSTLExportFileExists: String {
+        viewModel.hasSTLExportFile ? "Sim" : "Nao"
+    }
+
+    private var formattedSTLExportURLExists: String {
+        viewModel.hasSTLExportURL ? "Sim" : "Nao"
     }
 
     private var formattedSTLExportError: String {
@@ -1084,6 +1100,7 @@ struct ScannerView: View {
             metricRow(title: "Cobertura global", value: formattedScanGlobalCoverage)
             metricRow(title: "Cobertura atual", value: formattedScanCurrentCoverage)
             metricRow(title: "Cobertura exigida", value: formattedScanRequiredCoverage)
+            metricRow(title: "Progresso normalizado", value: formattedScanNormalizedCoverageProgress)
             metricRow(title: "MarkerIds cobertura", value: formattedScanCoverageMarkerIds)
             metricRow(title: "Cobertura tags", value: formattedScanTagCoverageSummary)
             metricRow(title: "Distancia media", value: formattedScanAverageDistance)
@@ -1092,6 +1109,10 @@ struct ScannerView: View {
             metricRow(title: "Jitter rotacao", value: formattedScanRotationJitter)
             metricRow(title: "Tempo estavel", value: formattedScanStableReadinessDuration)
             metricRow(title: "Prontidao", value: viewModel.scanReadinessMessage)
+            metricRow(title: "Gerando STL", value: viewModel.isGeneratingSTL ? "Sim" : "Nao")
+            metricRow(title: "STL URL existe", value: formattedSTLExportURLExists)
+            metricRow(title: "STL existe", value: formattedSTLExportFileExists)
+            metricRow(title: "Erro STL", value: formattedSTLExportError)
             metricRow(title: "Status", value: viewModel.scanQualityStatus)
         }
     }
@@ -1254,6 +1275,8 @@ struct ScannerView: View {
 
             metricRow(title: "Markers no STL", value: formattedSTLExportedImplantCount)
             metricRow(title: "Status STL", value: formattedSTLExportStatus)
+            metricRow(title: "URL STL existe", value: formattedSTLExportURLExists)
+            metricRow(title: "Arquivo existe", value: formattedSTLExportFileExists)
             metricRow(title: "Arquivo STL", value: formattedSTLExportFileName)
             metricRow(title: "Erro STL", value: formattedSTLExportError)
         }

@@ -114,12 +114,16 @@ final class ScannerViewModel: ObservableObject {
 
     struct ScanTagCoverage: Equatable {
         let markerId: Int
-        let progress: Double
-        let actualCoveragePercent: Double
-        let requiredCoveragePercent: Double
+        let rawAngularCoveragePercent: Double
+        let requiredAngularCoveragePercent: Double
+        let normalizedCoverageProgress: Double
         let coveredBinCount: Int
         let requiredBinCount: Int
         let observedFrameCount: Int
+
+        var progress: Double {
+            normalizedCoverageProgress
+        }
     }
 
     @Published private(set) var cameraState: CameraState = .idle
@@ -238,7 +242,8 @@ final class ScannerViewModel: ObservableObject {
     }
 
     var canExportSTL: Bool {
-        scanState == .ready && !implantPoseResults.isEmpty
+        scanState == .ready &&
+            (stlExportURL != nil || !consolidatedPoseResults().isEmpty)
     }
 
     var scanTargetValidFrameRange: ClosedRange<Int> {
@@ -269,8 +274,24 @@ final class ScannerViewModel: ObservableObject {
         minimumObservedAngularCoveragePercent()
     }
 
+    var scanNormalizedCoverageProgressPercent: Double {
+        scanGlobalCoveragePercent
+    }
+
     var scanCoverageMarkerIds: [Int] {
         activeTagCoverages.map(\.markerId).sorted()
+    }
+
+    var hasSTLExportFile: Bool {
+        guard let stlExportURL else {
+            return false
+        }
+
+        return FileManager.default.fileExists(atPath: stlExportURL.path)
+    }
+
+    var hasSTLExportURL: Bool {
+        stlExportURL != nil
     }
 
     var scanRequiredStableDurationSeconds: Double {
@@ -498,7 +519,6 @@ final class ScannerViewModel: ObservableObject {
 
         if scanState != .idle {
             updateScanProgressAndState(
-                hasImplants: !implantPoseResults.isEmpty,
                 timestamp: lastFrameTimestamp ?? Date().timeIntervalSinceReferenceDate
             )
         }
@@ -521,7 +541,6 @@ final class ScannerViewModel: ObservableObject {
 
         if scanState != .idle {
             updateScanProgressAndState(
-                hasImplants: !implantPoseResults.isEmpty,
                 timestamp: lastFrameTimestamp ?? Date().timeIntervalSinceReferenceDate
             )
         }
@@ -549,6 +568,32 @@ final class ScannerViewModel: ObservableObject {
 
         applyFinalPoseRefinementIfNeeded()
         return saveCurrentScanIfNeeded()
+    }
+
+    @MainActor
+    @discardableResult
+    private func handleScanBecameReady() -> URL? {
+        guard scanState != .ready else {
+            return stlExportURL
+        }
+
+        applyFinalPoseRefinementIfNeeded()
+        scanState = .ready
+        scanProgress = 100
+
+        let exportURL = saveCurrentScanIfNeeded()
+        if isGeneratingSTL {
+            scanReadinessMessage = "Gerando modelo..."
+            scanQualityStatus = "Gerando modelo..."
+        } else if stlExportErrorMessage != nil {
+            scanReadinessMessage = "Erro ao gerar modelo"
+            scanQualityStatus = "Erro ao gerar modelo"
+        } else {
+            scanReadinessMessage = "Pronto para gerar modelo"
+            scanQualityStatus = "Pronto para exportar"
+        }
+
+        return exportURL
     }
 
     private func bindCameraCallbacks() {
@@ -725,7 +770,6 @@ final class ScannerViewModel: ObservableObject {
                 self.recordScanFrame(
                     rawPoseResults: poseMetrics.rawPoseResults,
                     consolidatedPoseResults: consolidatedPoseResults,
-                    implantPoseResults: implantMetrics.implantPoseResults,
                     finalPoseObservations: frameFinalPoseObservations,
                     timestamp: metrics.lastFrameTimestamp
                 )
@@ -776,7 +820,6 @@ final class ScannerViewModel: ObservableObject {
     private func recordScanFrame(
         rawPoseResults: [PoseResult],
         consolidatedPoseResults: [PoseResult],
-        implantPoseResults: [ImplantPose],
         finalPoseObservations: [FinalPoseObservation],
         timestamp: Double
     ) {
@@ -791,7 +834,6 @@ final class ScannerViewModel: ObservableObject {
         let goodMarkerIds = Set(goodPoseResults.map(\.markerId))
 
         guard !goodPoseResults.isEmpty,
-              !implantPoseResults.isEmpty,
               let goodFrameReprojectionError = averageReprojectionError(in: goodPoseResults)
         else {
             rebuildScanTagCoverages()
@@ -799,11 +841,9 @@ final class ScannerViewModel: ObservableObject {
             scanCurrentFrameReadinessBlocker = scanReadinessBlockerMessage(
                 rawPoseResults: rawPoseResults,
                 averageDistanceMm: scanAverageDistanceMm,
-                averageReprojectionError: frameReprojectionError,
-                hasImplants: !implantPoseResults.isEmpty
+                averageReprojectionError: frameReprojectionError
             )
             updateScanProgressAndState(
-                hasImplants: !implantPoseResults.isEmpty,
                 timestamp: timestamp
             )
             return
@@ -835,14 +875,12 @@ final class ScannerViewModel: ObservableObject {
         scanPoseJitterMm = scanPositionJitterMm
         scanRotationJitterDegrees = rotationJitterDegrees()
         updateScanProgressAndState(
-            hasImplants: !implantPoseResults.isEmpty,
             timestamp: timestamp
         )
     }
 
     @MainActor
     private func updateScanProgressAndState(
-        hasImplants: Bool,
         timestamp: Double
     ) {
         let tagCoverageScore = minimumTagCoverageProgress()
@@ -862,7 +900,7 @@ final class ScannerViewModel: ObservableObject {
             positionStabilityScore * 0.15 +
             rotationStabilityScore * 0.10 +
             distanceScore * 0.05
-        let evaluation = scanReadinessEvaluation(hasImplants: hasImplants)
+        let evaluation = scanReadinessEvaluation()
         let currentTimestamp = timestamp.isFinite ? timestamp : Date().timeIntervalSinceReferenceDate
 
         updateStableReadinessDuration(
@@ -877,12 +915,7 @@ final class ScannerViewModel: ObservableObject {
         scanQualityScore = combinedQualityScore * 100.0
 
         if isReady {
-            applyFinalPoseRefinementIfNeeded()
-            saveCurrentScanIfNeeded()
-            scanState = .ready
-            scanProgress = 100
-            scanReadinessMessage = isGeneratingSTL ? "Gerando modelo..." : "Pronto para gerar modelo"
-            scanQualityStatus = isGeneratingSTL ? "Gerando modelo..." : "Pronto para exportar"
+            handleScanBecameReady()
             return
         }
 
@@ -934,7 +967,8 @@ final class ScannerViewModel: ObservableObject {
     private var hasCompleteTagCoverage: Bool {
         !activeTagCoverages.isEmpty &&
             activeTagCoverages.allSatisfy {
-                normalizedCoverage($0.progress / 100.0) >= 1.0
+                $0.rawAngularCoveragePercent >= $0.requiredAngularCoveragePercent ||
+                    normalizedCoverage($0.normalizedCoverageProgress / 100.0) >= 1.0
             }
     }
 
@@ -956,7 +990,7 @@ final class ScannerViewModel: ObservableObject {
         }
 
         return activeTagCoverages
-            .map { normalizedCoverage($0.actualCoveragePercent / 100.0) * 100.0 }
+            .map { normalizedCoverage($0.rawAngularCoveragePercent / 100.0) * 100.0 }
             .min() ?? 0
     }
 
@@ -982,15 +1016,19 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private func normalizedCoverage(_ value: Double) -> Double {
+        let clamped = clampedCoverage(value)
+        return clamped >= ScanConfiguration.completedCoverageThreshold ? 1.0 : clamped
+    }
+
+    private func clampedCoverage(_ value: Double) -> Double {
         guard value.isFinite else {
             return 0
         }
 
-        let clamped = min(max(value, 0.0), 1.0)
-        return clamped >= ScanConfiguration.completedCoverageThreshold ? 1.0 : clamped
+        return min(max(value, 0.0), 1.0)
     }
 
-    private func scanReadinessEvaluation(hasImplants: Bool) -> ScanReadinessEvaluation {
+    private func scanReadinessEvaluation() -> ScanReadinessEvaluation {
         let hasTags = !activeTagCoverages.isEmpty
         let hasEnoughGoodFrames = scanValidFrameCount >= scanReadinessConfiguration.minimumGoodFrames
         let hasPerTagGoodFrames = hasTags && activeTagCoverages.allSatisfy {
@@ -1006,7 +1044,6 @@ final class ScannerViewModel: ObservableObject {
 
         return ScanReadinessEvaluation(
             hasCurrentGoodFrame: scanCurrentFrameIsGood,
-            hasImplants: hasImplants,
             hasTags: hasTags,
             hasCompleteTagCoverage: hasCompleteTagCoverage,
             hasEnoughGoodFrames: hasEnoughGoodFrames,
@@ -1023,7 +1060,7 @@ final class ScannerViewModel: ObservableObject {
             return scanCurrentFrameReadinessBlocker ?? "Procurando pose"
         }
 
-        if !evaluation.hasImplants || !evaluation.hasTags {
+        if !evaluation.hasTags {
             return "Procurando pose"
         }
 
@@ -1059,8 +1096,7 @@ final class ScannerViewModel: ObservableObject {
     private func scanReadinessBlockerMessage(
         rawPoseResults: [PoseResult],
         averageDistanceMm: Double?,
-        averageReprojectionError: Double?,
-        hasImplants: Bool
+        averageReprojectionError: Double?
     ) -> String {
         guard !rawPoseResults.isEmpty else {
             return "Procurando pose"
@@ -1079,10 +1115,6 @@ final class ScannerViewModel: ObservableObject {
         if let averageReprojectionError,
            averageReprojectionError > scanReadinessConfiguration.maximumAverageReprojectionError {
             return "Melhorando precisao..."
-        }
-
-        if !hasImplants {
-            return "Procurando pose"
         }
 
         return "Capturando"
@@ -1153,15 +1185,15 @@ final class ScannerViewModel: ObservableObject {
         scanTagCoverages = markerIds.reduce(into: [:]) { partialResult, markerId in
             let coveredBinCount = scanCoverageBinsByMarkerId[markerId]?.count ?? 0
             let rawActualCoverage = Double(coveredBinCount) / Double(totalAngularCoverageBinCount)
-            let actualCoveragePercent = normalizedCoverage(rawActualCoverage) * 100.0
+            let rawAngularCoveragePercent = clampedCoverage(rawActualCoverage) * 100.0
             let requiredCoverage = max(scanRequiredAngularCoveragePercent / 100.0, 0.01)
             let progress = normalizedCoverage(rawActualCoverage / requiredCoverage) * 100.0
 
             partialResult[markerId] = ScanTagCoverage(
                 markerId: markerId,
-                progress: progress,
-                actualCoveragePercent: actualCoveragePercent,
-                requiredCoveragePercent: scanRequiredAngularCoveragePercent,
+                rawAngularCoveragePercent: rawAngularCoveragePercent,
+                requiredAngularCoveragePercent: scanRequiredAngularCoveragePercent,
+                normalizedCoverageProgress: progress,
                 coveredBinCount: coveredBinCount,
                 requiredBinCount: requiredBinCount,
                 observedFrameCount: scanFrameCountsByMarkerId[markerId] ?? 0
@@ -1901,6 +1933,10 @@ final class ScannerViewModel: ObservableObject {
             stlExportURL = nil
             stlExportedImplantCount = 0
             stlExportErrorMessage = STLExporter.ExportError.emptyTagPoseList.localizedDescription
+            if scanState == .ready {
+                scanReadinessMessage = "Erro ao gerar modelo"
+                scanQualityStatus = "Erro ao gerar modelo"
+            }
             return nil
         }
 
@@ -1938,7 +1974,9 @@ final class ScannerViewModel: ObservableObject {
                     return
                 }
 
-                self.isGeneratingSTL = false
+                defer {
+                    self.isGeneratingSTL = false
+                }
 
                 switch result {
                 case .success(let scan):
@@ -1966,7 +2004,6 @@ final class ScannerViewModel: ObservableObject {
 
     private struct ScanReadinessEvaluation {
         let hasCurrentGoodFrame: Bool
-        let hasImplants: Bool
         let hasTags: Bool
         let hasCompleteTagCoverage: Bool
         let hasEnoughGoodFrames: Bool
@@ -1978,7 +2015,6 @@ final class ScannerViewModel: ObservableObject {
 
         var isReadyCandidate: Bool {
             hasCurrentGoodFrame &&
-                hasImplants &&
                 hasTags &&
                 hasCompleteTagCoverage &&
                 hasEnoughGoodFrames &&
