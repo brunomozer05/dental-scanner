@@ -52,15 +52,15 @@ final class ScannerViewModel: ObservableObject {
         static let `default` = ScanReadinessConfiguration(
             minimumGoodFrames: 90,
             targetGoodFrames: 120,
-            minimumCoveragePercentPerTag: 0.55,
-            minimumDistanceMm: 80,
-            idealMinimumDistanceMm: 100,
-            idealMaximumDistanceMm: 140,
-            maximumDistanceMm: 170,
+            minimumCoveragePercentPerTag: 0.50,
+            minimumDistanceMm: 50,
+            idealMinimumDistanceMm: 80,
+            idealMaximumDistanceMm: 180,
+            maximumDistanceMm: 250,
             maximumAverageReprojectionError: 2.0,
-            maximumPositionJitterMm: 0.25,
-            maximumRotationJitterDegrees: 1.5,
-            requiredStableDurationSeconds: 0.8
+            maximumPositionJitterMm: 1.0,
+            maximumRotationJitterDegrees: 5.0,
+            requiredStableDurationSeconds: 0.3
         )
     }
 
@@ -183,6 +183,7 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var scanStableReadinessDurationSeconds: Double = 0
     @Published private(set) var scanQualityStatus: String = "Aguardando inicio"
     @Published private(set) var scanReadinessMessage: String = "Aguardando inicio"
+    @Published private(set) var scanReadinessBlockerSummary: String = "Aguardando inicio"
     @Published private(set) var scanCoverageReady: Bool = false
     @Published private(set) var scanGoodFramesReady: Bool = false
     @Published private(set) var scanDistanceReady: Bool = false
@@ -565,6 +566,7 @@ final class ScannerViewModel: ObservableObject {
             stlExportURL = nil
             stlExportedImplantCount = 0
             stlExportErrorMessage = "Escaneamento ainda nao esta pronto."
+            scanReadinessBlockerSummary = "Bloqueio principal: scan nao pronto"
             updateExportDiagnostics()
             return nil
         }
@@ -593,12 +595,15 @@ final class ScannerViewModel: ObservableObject {
         if isGeneratingSTL {
             scanReadinessMessage = "Gerando modelo..."
             scanQualityStatus = "Gerando modelo..."
+            scanReadinessBlockerSummary = "Pronto: gerando STL"
         } else if stlExportErrorMessage != nil {
             scanReadinessMessage = "Erro ao gerar modelo"
             scanQualityStatus = "Erro ao gerar modelo"
+            scanReadinessBlockerSummary = "Erro STL: \(stlExportErrorMessage ?? "desconhecido")"
         } else {
             scanReadinessMessage = "Pronto para gerar modelo"
             scanQualityStatus = "Pronto para exportar"
+            scanReadinessBlockerSummary = hasSTLExportURL ? "Pronto: STL gerado" : "Pronto: aguardando STL"
         }
 
         return exportURL
@@ -832,6 +837,7 @@ final class ScannerViewModel: ObservableObject {
         scanStableReadinessDurationSeconds = 0
         scanQualityStatus = "Aguardando inicio"
         scanReadinessMessage = "Aguardando inicio"
+        scanReadinessBlockerSummary = "Aguardando inicio"
         scanCoverageReady = false
         scanGoodFramesReady = false
         scanDistanceReady = false
@@ -954,9 +960,13 @@ final class ScannerViewModel: ObservableObject {
 
         let hasStableDuration = scanStableReadinessDurationSeconds >=
             scanReadinessConfiguration.requiredStableDurationSeconds
-        let isReady = evaluation.isReadyCandidate
+        let isReady = evaluation.isReadyCandidate && hasStableDuration
         publishReadinessDiagnostics(
             evaluation,
+            hasStableDuration: hasStableDuration
+        )
+        scanReadinessBlockerSummary = readinessBlockerSummary(
+            for: evaluation,
             hasStableDuration: hasStableDuration
         )
 
@@ -974,7 +984,10 @@ final class ScannerViewModel: ObservableObject {
             : .scanning
         setScanState(nextScanState)
         scanProgress = min(min(tagCoverageScore, frameScore) * 100.0, 99)
-        scanReadinessMessage = readinessMessage(for: evaluation)
+        scanReadinessMessage = readinessMessage(
+            for: evaluation,
+            hasStableDuration: hasStableDuration
+        )
         scanQualityStatus = scanReadinessMessage
         updateExportDiagnostics()
     }
@@ -1121,7 +1134,10 @@ final class ScannerViewModel: ObservableObject {
         )
     }
 
-    private func readinessMessage(for evaluation: ScanReadinessEvaluation) -> String {
+    private func readinessMessage(
+        for evaluation: ScanReadinessEvaluation,
+        hasStableDuration: Bool
+    ) -> String {
         if !evaluation.hasTags {
             return "Procurando pose"
         }
@@ -1140,6 +1156,10 @@ final class ScannerViewModel: ObservableObject {
 
         if !evaluation.hasExportableTagPoses {
             return "Preparando poses"
+        }
+
+        if !hasStableDuration {
+            return "Aguardando estabilidade"
         }
 
         if !evaluation.hasCurrentGoodFrame {
@@ -1161,6 +1181,61 @@ final class ScannerViewModel: ObservableObject {
         }
 
         return "Preparando finalizacao"
+    }
+
+    private func readinessBlockerSummary(
+        for evaluation: ScanReadinessEvaluation,
+        hasStableDuration: Bool
+    ) -> String {
+        if scanState == .ready {
+            if isGeneratingSTL {
+                return "Pronto: gerando STL"
+            }
+
+            if let stlExportErrorMessage {
+                return "Erro STL: \(stlExportErrorMessage)"
+            }
+
+            return hasSTLExportURL ? "Pronto: STL gerado" : "Pronto: aguardando STL"
+        }
+
+        if !evaluation.hasTags {
+            return "Bloqueio principal: tags"
+        }
+
+        if !evaluation.hasCompleteTagCoverage {
+            return "Bloqueio principal: cobertura"
+        }
+
+        if !evaluation.hasEnoughGoodFrames || !evaluation.hasPerTagGoodFrames {
+            return "Bloqueio principal: frames bons"
+        }
+
+        if !evaluation.hasAcceptableReprojectionError {
+            return "Bloqueio principal: reprojection"
+        }
+
+        if !evaluation.hasExportableTagPoses {
+            return "Bloqueio principal: poses exportaveis"
+        }
+
+        if !hasStableDuration {
+            return "Bloqueio principal: aguardando estabilidade"
+        }
+
+        if !evaluation.hasAcceptableDistance {
+            return "Aviso: distancia fora ideal"
+        }
+
+        if !evaluation.hasStablePosition || !evaluation.hasStableRotation {
+            return "Aviso: jitter alto"
+        }
+
+        if !evaluation.hasCurrentGoodFrame {
+            return "Aviso: frame atual ruim"
+        }
+
+        return "Pronto: gerando STL"
     }
 
     private func scanReadinessBlockerMessage(
@@ -2066,6 +2141,7 @@ final class ScannerViewModel: ObservableObject {
             if scanState == .ready {
                 scanReadinessMessage = "Erro ao gerar modelo"
                 scanQualityStatus = "Erro ao gerar modelo"
+                scanReadinessBlockerSummary = "Erro STL: sem poses exportaveis"
             }
             updateExportDiagnostics()
             return nil
@@ -2084,6 +2160,7 @@ final class ScannerViewModel: ObservableObject {
         lastSTLExportEventMessage = "Export iniciado"
         scanReadinessMessage = "Gerando modelo..."
         scanQualityStatus = "Gerando modelo..."
+        scanReadinessBlockerSummary = "Pronto: gerando STL"
         updateExportDiagnostics()
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -2122,6 +2199,7 @@ final class ScannerViewModel: ObservableObject {
                     if self.scanState == .ready {
                         self.scanReadinessMessage = "Pronto para gerar modelo"
                         self.scanQualityStatus = "Pronto para exportar"
+                        self.scanReadinessBlockerSummary = "Pronto: STL gerado"
                     }
                 case .failure(let error):
                     self.stlExportURL = nil
@@ -2131,6 +2209,7 @@ final class ScannerViewModel: ObservableObject {
                     if self.scanState == .ready {
                         self.scanReadinessMessage = "Erro ao gerar modelo"
                         self.scanQualityStatus = "Erro ao gerar modelo"
+                        self.scanReadinessBlockerSummary = "Erro STL: \(error.localizedDescription)"
                     }
                 }
             }

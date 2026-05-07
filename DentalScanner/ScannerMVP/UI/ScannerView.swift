@@ -1126,6 +1126,7 @@ struct ScannerView: View {
 
             metricRow(title: "Estado", value: formattedScanState)
             metricRow(title: "Estado anterior", value: formattedPreviousScanState)
+            metricRow(title: "Bloqueio principal", value: viewModel.scanReadinessBlockerSummary)
             metricRow(title: "Ready transitions", value: formattedReadyTransitionCount)
             metricRow(title: "Frames bons", value: formattedScanValidFrames)
             metricRow(title: "rawAngularCoverage min", value: formattedScanCurrentCoverage)
