@@ -670,8 +670,8 @@ struct ScannerView: View {
         "\(viewModel.scanValidFrameCount)/\(viewModel.scanTargetGoodFrameCount)"
     }
 
-    private var formattedScanMinimumCoverage: String {
-        String(format: "%.0f%%", viewModel.scanMinimumTagCoveragePercent)
+    private var formattedScanCurrentCoverage: String {
+        String(format: "%.0f%%", viewModel.scanCurrentAngularCoveragePercent)
     }
 
     private var formattedScanAverageDistance: String {
@@ -727,9 +727,10 @@ struct ScannerView: View {
             .sorted { $0.markerId < $1.markerId }
             .map { coverage in
                 String(
-                    format: "ID %d: %.0f%% (%d/%d)",
+                    format: "ID %d: %.0f%% / %.0f%% (%d/%d)",
                     coverage.markerId,
-                    coverage.progress,
+                    coverage.actualCoveragePercent,
+                    coverage.requiredCoveragePercent,
                     coverage.coveredBinCount,
                     coverage.requiredBinCount
                 )
@@ -1050,7 +1051,8 @@ struct ScannerView: View {
             metricRow(title: "Progresso", value: formattedScanProgress)
             metricRow(title: "Qualidade", value: formattedScanQualityScore)
             metricRow(title: "Frames bons", value: formattedScanValidFrames)
-            metricRow(title: "Cobertura minima", value: formattedScanMinimumCoverage)
+            metricRow(title: "Cobertura atual", value: formattedScanCurrentCoverage)
+            metricRow(title: "Cobertura exigida", value: formattedScanRequiredCoverage)
             metricRow(title: "Cobertura tags", value: formattedScanTagCoverageSummary)
             metricRow(title: "Distancia media", value: formattedScanAverageDistance)
             metricRow(title: "Erro medio", value: formattedScanAverageReprojectionError)

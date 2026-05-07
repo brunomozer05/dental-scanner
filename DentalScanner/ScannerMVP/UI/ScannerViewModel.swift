@@ -52,7 +52,7 @@ final class ScannerViewModel: ObservableObject {
         static let `default` = ScanReadinessConfiguration(
             minimumGoodFrames: 90,
             targetGoodFrames: 120,
-            minimumCoveragePercentPerTag: 0.90,
+            minimumCoveragePercentPerTag: 0.55,
             minimumDistanceMm: 80,
             idealMinimumDistanceMm: 100,
             idealMaximumDistanceMm: 140,
@@ -81,9 +81,8 @@ final class ScannerViewModel: ObservableObject {
         static let elevationBinCount: Int = 2
         static let defaultRequiredAngularCoveragePercent: Double =
             readiness.minimumCoveragePercentPerTag * 100.0
-        static let minimumRequiredAngularCoveragePercent: Double =
-            readiness.minimumCoveragePercentPerTag * 100.0
-        static let maximumRequiredAngularCoveragePercent: Double = 100.0
+        static let minimumRequiredAngularCoveragePercent: Double = 30.0
+        static let maximumRequiredAngularCoveragePercent: Double = 95.0
         static let angularCoverageStepPercent: Double = 5.0
         static let precisionErrorHistoryLimit: Int = 30
     }
@@ -115,6 +114,8 @@ final class ScannerViewModel: ObservableObject {
     struct ScanTagCoverage: Equatable {
         let markerId: Int
         let progress: Double
+        let actualCoveragePercent: Double
+        let requiredCoveragePercent: Double
         let coveredBinCount: Int
         let requiredBinCount: Int
         let observedFrameCount: Int
@@ -260,8 +261,8 @@ final class ScannerViewModel: ObservableObject {
         scanTargetValidFrameCount
     }
 
-    var scanMinimumTagCoveragePercent: Double {
-        minimumTagCoverageProgress() * 100.0
+    var scanCurrentAngularCoveragePercent: Double {
+        minimumObservedAngularCoveragePercent()
     }
 
     var scanRequiredStableDurationSeconds: Double {
@@ -926,7 +927,9 @@ final class ScannerViewModel: ObservableObject {
 
     private var hasCompleteTagCoverage: Bool {
         !scanTagCoverages.isEmpty &&
-            scanTagCoverages.values.allSatisfy { $0.progress >= 100.0 }
+            scanTagCoverages.values.allSatisfy {
+                $0.actualCoveragePercent >= scanRequiredAngularCoveragePercent
+            }
     }
 
     private func minimumTagCoverageProgress() -> Double {
@@ -939,6 +942,16 @@ final class ScannerViewModel: ObservableObject {
             .min() ?? 0
 
         return minimumProgress
+    }
+
+    private func minimumObservedAngularCoveragePercent() -> Double {
+        guard !scanTagCoverages.isEmpty else {
+            return 0
+        }
+
+        return scanTagCoverages.values
+            .map(\.actualCoveragePercent)
+            .min() ?? 0
     }
 
     private func minimumTagGoodFrameProgress() -> Double {
@@ -1119,11 +1132,14 @@ final class ScannerViewModel: ObservableObject {
 
         scanTagCoverages = markerIds.reduce(into: [:]) { partialResult, markerId in
             let coveredBinCount = scanCoverageBinsByMarkerId[markerId]?.count ?? 0
-            let progress = min(Double(coveredBinCount) / Double(requiredBinCount), 1.0) * 100.0
+            let actualCoveragePercent = Double(coveredBinCount) / Double(totalAngularCoverageBinCount) * 100.0
+            let progress = min(actualCoveragePercent / max(scanRequiredAngularCoveragePercent, 1.0), 1.0) * 100.0
 
             partialResult[markerId] = ScanTagCoverage(
                 markerId: markerId,
                 progress: progress,
+                actualCoveragePercent: actualCoveragePercent,
+                requiredCoveragePercent: scanRequiredAngularCoveragePercent,
                 coveredBinCount: coveredBinCount,
                 requiredBinCount: requiredBinCount,
                 observedFrameCount: scanFrameCountsByMarkerId[markerId] ?? 0
