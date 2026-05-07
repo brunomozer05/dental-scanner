@@ -612,6 +612,15 @@ struct ScannerView: View {
         "\(roundedCoveragePercent(percent))%"
     }
 
+    private func formattedPreciseCoveragePercent(_ percent: Double) -> String {
+        guard percent.isFinite else {
+            return "0.0%"
+        }
+
+        let clampedPercent = min(max(percent, 0.0), 100.0)
+        return String(format: "%.1f%%", clampedPercent)
+    }
+
     private func roundedCoveragePercent(_ percent: Double) -> Int {
         Int(round(normalizedCoverage(percent / 100.0) * 100.0))
     }
@@ -641,7 +650,15 @@ struct ScannerView: View {
     }
 
     private var formattedScanState: String {
-        switch viewModel.scanState {
+        formattedScanState(viewModel.scanState)
+    }
+
+    private var formattedPreviousScanState: String {
+        formattedScanState(viewModel.previousScanState)
+    }
+
+    private func formattedScanState(_ scanState: ScannerViewModel.ScanState) -> String {
+        switch scanState {
         case .idle:
             return "Idle"
         case .scanning:
@@ -692,11 +709,11 @@ struct ScannerView: View {
     }
 
     private var formattedScanNormalizedCoverageProgress: String {
-        formattedCoveragePercent(viewModel.scanNormalizedCoverageProgressPercent)
+        formattedPreciseCoveragePercent(viewModel.scanNormalizedCoverageProgressPercent)
     }
 
     private var formattedScanCurrentCoverage: String {
-        formattedCoveragePercent(viewModel.scanCurrentAngularCoveragePercent)
+        formattedPreciseCoveragePercent(viewModel.scanCurrentAngularCoveragePercent)
     }
 
     private var formattedScanAverageDistance: String {
@@ -739,8 +756,24 @@ struct ScannerView: View {
         )
     }
 
+    private var formattedReadyTransitionCount: String {
+        "\(viewModel.readyTransitionCount)"
+    }
+
+    private var formattedLastSTLExportTagPoseCount: String {
+        "\(viewModel.lastSTLExportTagPoseCount)"
+    }
+
+    private var formattedCurrentExportableTagPoseCount: String {
+        "\(viewModel.currentExportableTagPoseCount)"
+    }
+
+    private var formattedCanExportSTL: String {
+        formattedBool(viewModel.canExportSTL)
+    }
+
     private var formattedScanRequiredCoverage: String {
-        formattedCoveragePercent(viewModel.scanRequiredAngularCoveragePercent)
+        formattedPreciseCoveragePercent(viewModel.scanRequiredAngularCoveragePercent)
     }
 
     private var formattedScanCoverageMarkerIds: String {
@@ -989,6 +1022,10 @@ struct ScannerView: View {
         viewModel.stlExportErrorMessage ?? "Nenhum"
     }
 
+    private func formattedBool(_ value: Bool) -> String {
+        value ? "Sim" : "Nao"
+    }
+
     private var formattedScaleValidationAbsoluteError: String {
         formattedMillimeterValue(scaleValidationAbsoluteErrorMm(for: viewModel.selectedImplantDistanceMm))
     }
@@ -1094,13 +1131,15 @@ struct ScannerView: View {
                 .font(.subheadline.weight(.semibold))
 
             metricRow(title: "Estado", value: formattedScanState)
+            metricRow(title: "Estado anterior", value: formattedPreviousScanState)
+            metricRow(title: "Ready transitions", value: formattedReadyTransitionCount)
             metricRow(title: "Progresso", value: formattedScanProgress)
             metricRow(title: "Qualidade", value: formattedScanQualityScore)
             metricRow(title: "Frames bons", value: formattedScanValidFrames)
             metricRow(title: "Cobertura global", value: formattedScanGlobalCoverage)
-            metricRow(title: "Cobertura atual", value: formattedScanCurrentCoverage)
-            metricRow(title: "Cobertura exigida", value: formattedScanRequiredCoverage)
-            metricRow(title: "Progresso normalizado", value: formattedScanNormalizedCoverageProgress)
+            metricRow(title: "rawAngularCoverage min", value: formattedScanCurrentCoverage)
+            metricRow(title: "requiredAngularCoverage", value: formattedScanRequiredCoverage)
+            metricRow(title: "normalizedCoverageProgress", value: formattedScanNormalizedCoverageProgress)
             metricRow(title: "MarkerIds cobertura", value: formattedScanCoverageMarkerIds)
             metricRow(title: "Cobertura tags", value: formattedScanTagCoverageSummary)
             metricRow(title: "Distancia media", value: formattedScanAverageDistance)
@@ -1108,11 +1147,25 @@ struct ScannerView: View {
             metricRow(title: "Jitter posicao", value: formattedScanPoseJitter)
             metricRow(title: "Jitter rotacao", value: formattedScanRotationJitter)
             metricRow(title: "Tempo estavel", value: formattedScanStableReadinessDuration)
+            metricRow(title: "coverageReady", value: formattedBool(viewModel.scanCoverageReady))
+            metricRow(title: "goodFramesReady", value: formattedBool(viewModel.scanGoodFramesReady))
+            metricRow(title: "distanceReady", value: formattedBool(viewModel.scanDistanceReady))
+            metricRow(title: "reprojectionReady", value: formattedBool(viewModel.scanReprojectionReady))
+            metricRow(title: "jitterReady", value: formattedBool(viewModel.scanJitterReady))
+            metricRow(title: "stableReady", value: formattedBool(viewModel.scanStableReady))
+            metricRow(title: "currentFrameGood", value: formattedBool(viewModel.scanCurrentFrameGood))
             metricRow(title: "Prontidao", value: viewModel.scanReadinessMessage)
-            metricRow(title: "Gerando STL", value: viewModel.isGeneratingSTL ? "Sim" : "Nao")
+            metricRow(title: "canExportSTL", value: formattedCanExportSTL)
+            metricRow(title: "handleReady chamado", value: formattedBool(viewModel.didCallHandleScanBecameReady))
+            metricRow(title: "saveScan chamado", value: formattedBool(viewModel.didCallSaveCurrentScanIfNeeded))
+            metricRow(title: "Export iniciado", value: formattedBool(viewModel.didStartSTLExportForCurrentScan))
+            metricRow(title: "Gerando STL", value: formattedBool(viewModel.isGeneratingSTL))
+            metricRow(title: "tagPoses atuais", value: formattedCurrentExportableTagPoseCount)
+            metricRow(title: "tagPoses export", value: formattedLastSTLExportTagPoseCount)
             metricRow(title: "STL URL existe", value: formattedSTLExportURLExists)
             metricRow(title: "STL existe", value: formattedSTLExportFileExists)
             metricRow(title: "Erro STL", value: formattedSTLExportError)
+            metricRow(title: "Evento STL", value: viewModel.lastSTLExportEventMessage)
             metricRow(title: "Status", value: viewModel.scanQualityStatus)
         }
     }
@@ -1274,6 +1327,10 @@ struct ScannerView: View {
             }
 
             metricRow(title: "Markers no STL", value: formattedSTLExportedImplantCount)
+            metricRow(title: "tagPoses atuais", value: formattedCurrentExportableTagPoseCount)
+            metricRow(title: "tagPoses export", value: formattedLastSTLExportTagPoseCount)
+            metricRow(title: "canExportSTL", value: formattedCanExportSTL)
+            metricRow(title: "Export iniciado", value: formattedBool(viewModel.didStartSTLExportForCurrentScan))
             metricRow(title: "Status STL", value: formattedSTLExportStatus)
             metricRow(title: "URL STL existe", value: formattedSTLExportURLExists)
             metricRow(title: "Arquivo existe", value: formattedSTLExportFileExists)

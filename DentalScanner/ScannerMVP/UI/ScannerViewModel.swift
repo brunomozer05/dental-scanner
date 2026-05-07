@@ -171,6 +171,7 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var precisionValidationAverageErrorMm: Double?
     @Published private(set) var precisionValidationSampleCount: Int = 0
     @Published private(set) var scanState: ScanState = .idle
+    @Published private(set) var previousScanState: ScanState = .idle
     @Published private(set) var scanProgress: Double = 0
     @Published private(set) var scanQualityScore: Double = 0
     @Published private(set) var scanValidFrameCount: Int = 0
@@ -182,6 +183,13 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var scanStableReadinessDurationSeconds: Double = 0
     @Published private(set) var scanQualityStatus: String = "Aguardando inicio"
     @Published private(set) var scanReadinessMessage: String = "Aguardando inicio"
+    @Published private(set) var scanCoverageReady: Bool = false
+    @Published private(set) var scanGoodFramesReady: Bool = false
+    @Published private(set) var scanDistanceReady: Bool = false
+    @Published private(set) var scanReprojectionReady: Bool = false
+    @Published private(set) var scanJitterReady: Bool = false
+    @Published private(set) var scanStableReady: Bool = false
+    @Published private(set) var scanCurrentFrameGood: Bool = false
     @Published private(set) var scanTagCoverages: [Int: ScanTagCoverage] = [:]
     @Published private(set) var scanTargetValidFrameCount: Int = ScanConfiguration.defaultTargetValidFrameCount
     @Published private(set) var scanRequiredAngularCoveragePercent: Double =
@@ -190,6 +198,12 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var stlExportedImplantCount: Int = 0
     @Published private(set) var stlExportErrorMessage: String?
     @Published private(set) var isGeneratingSTL: Bool = false
+    @Published private(set) var readyTransitionCount: Int = 0
+    @Published private(set) var didCallHandleScanBecameReady: Bool = false
+    @Published private(set) var didCallSaveCurrentScanIfNeeded: Bool = false
+    @Published private(set) var didStartSTLExportForCurrentScan: Bool = false
+    @Published private(set) var lastSTLExportTagPoseCount: Int = 0
+    @Published private(set) var lastSTLExportEventMessage: String = "Aguardando"
     @Published private(set) var isTorchAvailable: Bool = false
     @Published private(set) var isTorchEnabled: Bool = false
     @Published private(set) var errorMessage: String?
@@ -243,7 +257,7 @@ final class ScannerViewModel: ObservableObject {
 
     var canExportSTL: Bool {
         scanState == .ready &&
-            (stlExportURL != nil || !consolidatedPoseResults().isEmpty)
+            (stlExportURL != nil || !tagPosesForSTLExport().isEmpty)
     }
 
     var scanTargetValidFrameRange: ClosedRange<Int> {
@@ -292,6 +306,10 @@ final class ScannerViewModel: ObservableObject {
 
     var hasSTLExportURL: Bool {
         stlExportURL != nil
+    }
+
+    var currentExportableTagPoseCount: Int {
+        tagPosesForSTLExport().count
     }
 
     var scanRequiredStableDurationSeconds: Double {
@@ -505,7 +523,7 @@ final class ScannerViewModel: ObservableObject {
     @MainActor
     func startScan() {
         resetScanSession()
-        scanState = .scanning
+        setScanState(.scanning)
         scanQualityStatus = "Capturando"
         scanReadinessMessage = "Capturando"
     }
@@ -573,12 +591,10 @@ final class ScannerViewModel: ObservableObject {
     @MainActor
     @discardableResult
     private func handleScanBecameReady() -> URL? {
-        guard scanState != .ready else {
-            return stlExportURL
-        }
-
+        didCallHandleScanBecameReady = true
+        lastSTLExportEventMessage = "handleScanBecameReady called"
         applyFinalPoseRefinementIfNeeded()
-        scanState = .ready
+        setScanState(.ready)
         scanProgress = 100
 
         let exportURL = saveCurrentScanIfNeeded()
@@ -594,6 +610,21 @@ final class ScannerViewModel: ObservableObject {
         }
 
         return exportURL
+    }
+
+    @MainActor
+    private func setScanState(_ newState: ScanState) {
+        guard scanState != newState else {
+            return
+        }
+
+        previousScanState = scanState
+        scanState = newState
+
+        if newState == .ready {
+            readyTransitionCount += 1
+            lastSTLExportEventMessage = "Ready transition detected"
+        }
     }
 
     private func bindCameraCallbacks() {
@@ -791,7 +822,7 @@ final class ScannerViewModel: ObservableObject {
         stlExportErrorMessage = nil
         isGeneratingSTL = false
         stlExportGenerationID = UUID()
-        scanState = .idle
+        setScanState(.idle)
         scanProgress = 0
         scanQualityScore = 0
         scanValidFrameCount = 0
@@ -803,6 +834,13 @@ final class ScannerViewModel: ObservableObject {
         scanStableReadinessDurationSeconds = 0
         scanQualityStatus = "Aguardando inicio"
         scanReadinessMessage = "Aguardando inicio"
+        scanCoverageReady = false
+        scanGoodFramesReady = false
+        scanDistanceReady = false
+        scanReprojectionReady = false
+        scanJitterReady = false
+        scanStableReady = false
+        scanCurrentFrameGood = false
         scanTagCoverages = [:]
         scanReprojectionErrors = []
         scanPoseHistoryByMarkerId = [:]
@@ -814,6 +852,12 @@ final class ScannerViewModel: ObservableObject {
         resetPrecisionValidationHistory()
         finalPoseObservations = []
         didApplyFinalPoseRefinement = false
+        readyTransitionCount = 0
+        didCallHandleScanBecameReady = false
+        didCallSaveCurrentScanIfNeeded = false
+        didStartSTLExportForCurrentScan = false
+        lastSTLExportTagPoseCount = 0
+        lastSTLExportEventMessage = "Aguardando"
     }
 
     @MainActor
@@ -911,6 +955,10 @@ final class ScannerViewModel: ObservableObject {
         let hasStableDuration = scanStableReadinessDurationSeconds >=
             scanReadinessConfiguration.requiredStableDurationSeconds
         let isReady = evaluation.isReadyCandidate && hasStableDuration
+        publishReadinessDiagnostics(
+            evaluation,
+            hasStableDuration: hasStableDuration
+        )
 
         scanQualityScore = combinedQualityScore * 100.0
 
@@ -919,12 +967,26 @@ final class ScannerViewModel: ObservableObject {
             return
         }
 
-        scanState = scanValidFrameCount >= minimumStabilizingFrameCount
+        let nextScanState: ScanState = scanValidFrameCount >= minimumStabilizingFrameCount
             ? .stabilizing
             : .scanning
+        setScanState(nextScanState)
         scanProgress = min(min(tagCoverageScore, frameScore) * 100.0, 99)
         scanReadinessMessage = readinessMessage(for: evaluation)
         scanQualityStatus = scanReadinessMessage
+    }
+
+    private func publishReadinessDiagnostics(
+        _ evaluation: ScanReadinessEvaluation,
+        hasStableDuration: Bool
+    ) {
+        scanCoverageReady = evaluation.hasCompleteTagCoverage
+        scanGoodFramesReady = evaluation.hasEnoughGoodFrames && evaluation.hasPerTagGoodFrames
+        scanDistanceReady = evaluation.hasAcceptableDistance
+        scanReprojectionReady = evaluation.hasAcceptableReprojectionError
+        scanJitterReady = evaluation.hasStablePosition && evaluation.hasStableRotation
+        scanStableReady = hasStableDuration
+        scanCurrentFrameGood = evaluation.hasCurrentGoodFrame
     }
 
     @MainActor
@@ -967,8 +1029,7 @@ final class ScannerViewModel: ObservableObject {
     private var hasCompleteTagCoverage: Bool {
         !activeTagCoverages.isEmpty &&
             activeTagCoverages.allSatisfy {
-                $0.rawAngularCoveragePercent >= $0.requiredAngularCoveragePercent ||
-                    normalizedCoverage($0.normalizedCoverageProgress / 100.0) >= 1.0
+                $0.rawAngularCoveragePercent + 0.0001 >= $0.requiredAngularCoveragePercent
             }
     }
 
@@ -1771,6 +1832,42 @@ final class ScannerViewModel: ObservableObject {
         fusedPoseResults.isEmpty ? rawPoseResults : fusedPoseResults
     }
 
+    private func tagPosesForSTLExport() -> [PoseResult] {
+        let consolidatedPoses = exportablePoseResults(consolidatedPoseResults())
+        if !consolidatedPoses.isEmpty {
+            return consolidatedPoses
+        }
+
+        let fusedPoses = exportablePoseResults(fusedPoseResults)
+        if !fusedPoses.isEmpty {
+            return fusedPoses
+        }
+
+        return exportablePoseResults(rawPoseResults)
+    }
+
+    private func exportablePoseResults(_ poseResults: [PoseResult]) -> [PoseResult] {
+        var posesByMarkerId: [Int: PoseResult] = [:]
+
+        for poseResult in poseResults where isExportablePose(poseResult) {
+            posesByMarkerId[poseResult.markerId] = poseResult
+        }
+
+        return posesByMarkerId.keys
+            .sorted()
+            .compactMap { posesByMarkerId[$0] }
+    }
+
+    private func isExportablePose(_ poseResult: PoseResult) -> Bool {
+        poseResult.markerId >= 0 &&
+            poseResult.distanceMm.isFinite &&
+            poseResult.reprojectionError.isFinite &&
+            poseResult.markerAreaPixels.isFinite &&
+            PoseMath.isFinite(poseResult.rotationVector) &&
+            PoseMath.isFinite(poseResult.rotationMatrix) &&
+            PoseMath.isFinite(poseResult.translationVector)
+    }
+
     private func selectedImplantDistance(in implantPoseResults: [ImplantPose]) -> Double? {
         guard selectedImplantMarkerIds.count == 2 else {
             return nil
@@ -1919,20 +2016,27 @@ final class ScannerViewModel: ObservableObject {
 
     @MainActor
     private func saveCurrentScanIfNeeded() -> URL? {
+        didCallSaveCurrentScanIfNeeded = true
+        lastSTLExportEventMessage = "saveCurrentScanIfNeeded called"
+
         if let stlExportURL,
            FileManager.default.fileExists(atPath: stlExportURL.path) {
+            lastSTLExportEventMessage = "STL ja existe"
             return stlExportURL
         }
 
         guard !isGeneratingSTL else {
+            lastSTLExportEventMessage = "Export ja em andamento"
             return nil
         }
 
-        let currentTagPoses = consolidatedPoseResults()
+        let currentTagPoses = tagPosesForSTLExport()
+        lastSTLExportTagPoseCount = currentTagPoses.count
         guard !currentTagPoses.isEmpty else {
             stlExportURL = nil
             stlExportedImplantCount = 0
             stlExportErrorMessage = STLExporter.ExportError.emptyTagPoseList.localizedDescription
+            lastSTLExportEventMessage = "Export sem poses"
             if scanState == .ready {
                 scanReadinessMessage = "Erro ao gerar modelo"
                 scanQualityStatus = "Erro ao gerar modelo"
@@ -1948,7 +2052,9 @@ final class ScannerViewModel: ObservableObject {
 
         stlExportGenerationID = exportGenerationID
         isGeneratingSTL = true
+        didStartSTLExportForCurrentScan = true
         stlExportErrorMessage = nil
+        lastSTLExportEventMessage = "Export iniciado"
         scanReadinessMessage = "Gerando modelo..."
         scanQualityStatus = "Gerando modelo..."
 
@@ -1983,6 +2089,7 @@ final class ScannerViewModel: ObservableObject {
                     self.stlExportURL = scan.fileURL
                     self.stlExportedImplantCount = exportedTagCount
                     self.stlExportErrorMessage = nil
+                    self.lastSTLExportEventMessage = "Export concluido"
                     if self.scanState == .ready {
                         self.scanReadinessMessage = "Pronto para gerar modelo"
                         self.scanQualityStatus = "Pronto para exportar"
@@ -1991,6 +2098,7 @@ final class ScannerViewModel: ObservableObject {
                     self.stlExportURL = nil
                     self.stlExportedImplantCount = 0
                     self.stlExportErrorMessage = error.localizedDescription
+                    self.lastSTLExportEventMessage = "Export falhou"
                     if self.scanState == .ready {
                         self.scanReadinessMessage = "Erro ao gerar modelo"
                         self.scanQualityStatus = "Erro ao gerar modelo"
