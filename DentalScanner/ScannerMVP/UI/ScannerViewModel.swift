@@ -561,7 +561,7 @@ final class ScannerViewModel: ObservableObject {
     @discardableResult
     func exportCurrentImplantsAsSTL() -> URL? {
         updateExportDiagnostics()
-        guard canExportSTL else {
+        guard scanState == .ready else {
             stlExportURL = nil
             stlExportedImplantCount = 0
             stlExportErrorMessage = "Escaneamento ainda nao esta pronto."
@@ -576,10 +576,17 @@ final class ScannerViewModel: ObservableObject {
     @MainActor
     @discardableResult
     private func handleScanBecameReady() -> URL? {
+        guard !didCallHandleScanBecameReady else {
+            updateExportDiagnostics()
+            return stlExportURL
+        }
+
         didCallHandleScanBecameReady = true
         lastSTLExportEventMessage = "handleScanBecameReady called"
         applyFinalPoseRefinementIfNeeded()
-        setScanState(.ready)
+        if scanState != .ready {
+            setScanState(.ready)
+        }
         scanProgress = 100
 
         let exportURL = saveCurrentScanIfNeeded()
@@ -936,6 +943,7 @@ final class ScannerViewModel: ObservableObject {
             positionStabilityScore * 0.15 +
             rotationStabilityScore * 0.10 +
             distanceScore * 0.05
+        updateExportDiagnostics()
         let evaluation = scanReadinessEvaluation()
         let currentTimestamp = timestamp.isFinite ? timestamp : Date().timeIntervalSinceReferenceDate
 
@@ -946,7 +954,7 @@ final class ScannerViewModel: ObservableObject {
 
         let hasStableDuration = scanStableReadinessDurationSeconds >=
             scanReadinessConfiguration.requiredStableDurationSeconds
-        let isReady = evaluation.isReadyCandidate && hasStableDuration
+        let isReady = evaluation.isReadyCandidate
         publishReadinessDiagnostics(
             evaluation,
             hasStableDuration: hasStableDuration
@@ -955,6 +963,8 @@ final class ScannerViewModel: ObservableObject {
         scanQualityScore = combinedQualityScore * 100.0
 
         if isReady {
+            setScanState(.ready)
+            scanProgress = 100
             handleScanBecameReady()
             return
         }
@@ -1095,6 +1105,7 @@ final class ScannerViewModel: ObservableObject {
             scanReadinessConfiguration.maximumPositionJitterMm
         let hasStableRotation = (scanRotationJitterDegrees ?? .infinity) <=
             scanReadinessConfiguration.maximumRotationJitterDegrees
+        let hasExportableTagPoses = currentExportableTagPoseCount > 0
 
         return ScanReadinessEvaluation(
             hasCurrentGoodFrame: scanCurrentFrameIsGood,
@@ -1105,17 +1116,34 @@ final class ScannerViewModel: ObservableObject {
             hasAcceptableDistance: hasAcceptableDistance,
             hasAcceptableReprojectionError: hasAcceptableReprojectionError,
             hasStablePosition: hasStablePosition,
-            hasStableRotation: hasStableRotation
+            hasStableRotation: hasStableRotation,
+            hasExportableTagPoses: hasExportableTagPoses
         )
     }
 
     private func readinessMessage(for evaluation: ScanReadinessEvaluation) -> String {
-        if !evaluation.hasCurrentGoodFrame {
-            return scanCurrentFrameReadinessBlocker ?? "Procurando pose"
-        }
-
         if !evaluation.hasTags {
             return "Procurando pose"
+        }
+
+        if !evaluation.hasCompleteTagCoverage {
+            return "Colete mais angulos"
+        }
+
+        if !evaluation.hasEnoughGoodFrames || !evaluation.hasPerTagGoodFrames {
+            return "Colete mais frames bons"
+        }
+
+        if !evaluation.hasAcceptableReprojectionError {
+            return "Melhorando precisao..."
+        }
+
+        if !evaluation.hasExportableTagPoses {
+            return "Preparando poses"
+        }
+
+        if !evaluation.hasCurrentGoodFrame {
+            return scanCurrentFrameReadinessBlocker ?? "Aguardando frame bom"
         }
 
         if !evaluation.hasAcceptableDistance {
@@ -1128,23 +1156,11 @@ final class ScannerViewModel: ObservableObject {
                 : "Aproxime um pouco"
         }
 
-        if !evaluation.hasEnoughGoodFrames || !evaluation.hasPerTagGoodFrames {
-            return "Colete mais frames bons"
-        }
-
-        if !evaluation.hasCompleteTagCoverage {
-            return "Colete mais angulos"
-        }
-
-        if !evaluation.hasAcceptableReprojectionError {
-            return "Melhorando precisao..."
-        }
-
         if !evaluation.hasStablePosition || !evaluation.hasStableRotation {
             return "Mantenha estavel"
         }
 
-        return "Melhorando precisao..."
+        return "Preparando finalizacao"
     }
 
     private func scanReadinessBlockerMessage(
@@ -2133,17 +2149,15 @@ final class ScannerViewModel: ObservableObject {
         let hasAcceptableReprojectionError: Bool
         let hasStablePosition: Bool
         let hasStableRotation: Bool
+        let hasExportableTagPoses: Bool
 
         var isReadyCandidate: Bool {
-            hasCurrentGoodFrame &&
-                hasTags &&
+            hasTags &&
                 hasCompleteTagCoverage &&
                 hasEnoughGoodFrames &&
                 hasPerTagGoodFrames &&
-                hasAcceptableDistance &&
                 hasAcceptableReprojectionError &&
-                hasStablePosition &&
-                hasStableRotation
+                hasExportableTagPoses
         }
     }
 
