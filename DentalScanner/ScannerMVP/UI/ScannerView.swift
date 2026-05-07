@@ -667,7 +667,19 @@ struct ScannerView: View {
     }
 
     private var formattedScanValidFrames: String {
-        "\(viewModel.scanValidFrameCount)"
+        "\(viewModel.scanValidFrameCount)/\(viewModel.scanTargetGoodFrameCount)"
+    }
+
+    private var formattedScanMinimumCoverage: String {
+        String(format: "%.0f%%", viewModel.scanMinimumTagCoveragePercent)
+    }
+
+    private var formattedScanAverageDistance: String {
+        guard let scanAverageDistanceMm = viewModel.scanAverageDistanceMm else {
+            return "-"
+        }
+
+        return String(format: "%.1f mm", scanAverageDistanceMm)
     }
 
     private var formattedScanAverageReprojectionError: String {
@@ -679,11 +691,27 @@ struct ScannerView: View {
     }
 
     private var formattedScanPoseJitter: String {
-        guard let scanPoseJitterMm = viewModel.scanPoseJitterMm else {
+        guard let scanPositionJitterMm = viewModel.scanPositionJitterMm else {
             return "-"
         }
 
-        return String(format: "%.2f mm", scanPoseJitterMm)
+        return String(format: "%.2f mm", scanPositionJitterMm)
+    }
+
+    private var formattedScanRotationJitter: String {
+        guard let scanRotationJitterDegrees = viewModel.scanRotationJitterDegrees else {
+            return "-"
+        }
+
+        return String(format: "%.2f deg", scanRotationJitterDegrees)
+    }
+
+    private var formattedScanStableReadinessDuration: String {
+        String(
+            format: "%.1f/%.1f s",
+            viewModel.scanStableReadinessDurationSeconds,
+            viewModel.scanRequiredStableDurationSeconds
+        )
     }
 
     private var formattedScanRequiredCoverage: String {
@@ -1021,10 +1049,15 @@ struct ScannerView: View {
             metricRow(title: "Estado", value: formattedScanState)
             metricRow(title: "Progresso", value: formattedScanProgress)
             metricRow(title: "Qualidade", value: formattedScanQualityScore)
-            metricRow(title: "Frames validos", value: formattedScanValidFrames)
+            metricRow(title: "Frames bons", value: formattedScanValidFrames)
+            metricRow(title: "Cobertura minima", value: formattedScanMinimumCoverage)
             metricRow(title: "Cobertura tags", value: formattedScanTagCoverageSummary)
+            metricRow(title: "Distancia media", value: formattedScanAverageDistance)
             metricRow(title: "Erro medio", value: formattedScanAverageReprojectionError)
-            metricRow(title: "Jitter pose", value: formattedScanPoseJitter)
+            metricRow(title: "Jitter posicao", value: formattedScanPoseJitter)
+            metricRow(title: "Jitter rotacao", value: formattedScanRotationJitter)
+            metricRow(title: "Tempo estavel", value: formattedScanStableReadinessDuration)
+            metricRow(title: "Prontidao", value: viewModel.scanReadinessMessage)
             metricRow(title: "Status", value: viewModel.scanQualityStatus)
         }
     }
