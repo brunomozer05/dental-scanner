@@ -198,6 +198,10 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var stlExportedImplantCount: Int = 0
     @Published private(set) var stlExportErrorMessage: String?
     @Published private(set) var isGeneratingSTL: Bool = false
+    @Published private(set) var canExportSTL: Bool = false
+    @Published private(set) var hasSTLExportFile: Bool = false
+    @Published private(set) var hasSTLExportURL: Bool = false
+    @Published private(set) var currentExportableTagPoseCount: Int = 0
     @Published private(set) var readyTransitionCount: Int = 0
     @Published private(set) var didCallHandleScanBecameReady: Bool = false
     @Published private(set) var didCallSaveCurrentScanIfNeeded: Bool = false
@@ -255,11 +259,6 @@ final class ScannerViewModel: ObservableObject {
         PoseConfiguration.isMarkerSizeDebugEditingEnabled
     }
 
-    var canExportSTL: Bool {
-        scanState == .ready &&
-            (stlExportURL != nil || !tagPosesForSTLExport().isEmpty)
-    }
-
     var scanTargetValidFrameRange: ClosedRange<Int> {
         ScanConfiguration.minimumTargetValidFrameCount...ScanConfiguration.maximumTargetValidFrameCount
     }
@@ -294,22 +293,6 @@ final class ScannerViewModel: ObservableObject {
 
     var scanCoverageMarkerIds: [Int] {
         activeTagCoverages.map(\.markerId).sorted()
-    }
-
-    var hasSTLExportFile: Bool {
-        guard let stlExportURL else {
-            return false
-        }
-
-        return FileManager.default.fileExists(atPath: stlExportURL.path)
-    }
-
-    var hasSTLExportURL: Bool {
-        stlExportURL != nil
-    }
-
-    var currentExportableTagPoseCount: Int {
-        tagPosesForSTLExport().count
     }
 
     var scanRequiredStableDurationSeconds: Double {
@@ -577,10 +560,12 @@ final class ScannerViewModel: ObservableObject {
     @MainActor
     @discardableResult
     func exportCurrentImplantsAsSTL() -> URL? {
+        updateExportDiagnostics()
         guard canExportSTL else {
             stlExportURL = nil
             stlExportedImplantCount = 0
             stlExportErrorMessage = "Escaneamento ainda nao esta pronto."
+            updateExportDiagnostics()
             return nil
         }
 
@@ -625,6 +610,8 @@ final class ScannerViewModel: ObservableObject {
             readyTransitionCount += 1
             lastSTLExportEventMessage = "Ready transition detected"
         }
+
+        updateExportDiagnostics()
     }
 
     private func bindCameraCallbacks() {
@@ -821,6 +808,10 @@ final class ScannerViewModel: ObservableObject {
         stlExportedImplantCount = 0
         stlExportErrorMessage = nil
         isGeneratingSTL = false
+        canExportSTL = false
+        hasSTLExportFile = false
+        hasSTLExportURL = false
+        currentExportableTagPoseCount = 0
         stlExportGenerationID = UUID()
         setScanState(.idle)
         scanProgress = 0
@@ -921,6 +912,7 @@ final class ScannerViewModel: ObservableObject {
         updateScanProgressAndState(
             timestamp: timestamp
         )
+        updateExportDiagnostics()
     }
 
     @MainActor
@@ -974,6 +966,7 @@ final class ScannerViewModel: ObservableObject {
         scanProgress = min(min(tagCoverageScore, frameScore) * 100.0, 99)
         scanReadinessMessage = readinessMessage(for: evaluation)
         scanQualityStatus = scanReadinessMessage
+        updateExportDiagnostics()
     }
 
     private func publishReadinessDiagnostics(
@@ -1832,6 +1825,21 @@ final class ScannerViewModel: ObservableObject {
         fusedPoseResults.isEmpty ? rawPoseResults : fusedPoseResults
     }
 
+    private func updateExportDiagnostics() {
+        let exportablePoseCount = tagPosesForSTLExport().count
+        currentExportableTagPoseCount = exportablePoseCount
+        hasSTLExportURL = stlExportURL != nil
+
+        if let stlExportURL {
+            hasSTLExportFile = FileManager.default.fileExists(atPath: stlExportURL.path)
+        } else {
+            hasSTLExportFile = false
+        }
+
+        canExportSTL = scanState == .ready &&
+            (hasSTLExportURL || exportablePoseCount > 0)
+    }
+
     private func tagPosesForSTLExport() -> [PoseResult] {
         let consolidatedPoses = exportablePoseResults(consolidatedPoseResults())
         if !consolidatedPoses.isEmpty {
@@ -2022,11 +2030,13 @@ final class ScannerViewModel: ObservableObject {
         if let stlExportURL,
            FileManager.default.fileExists(atPath: stlExportURL.path) {
             lastSTLExportEventMessage = "STL ja existe"
+            updateExportDiagnostics()
             return stlExportURL
         }
 
         guard !isGeneratingSTL else {
             lastSTLExportEventMessage = "Export ja em andamento"
+            updateExportDiagnostics()
             return nil
         }
 
@@ -2041,6 +2051,7 @@ final class ScannerViewModel: ObservableObject {
                 scanReadinessMessage = "Erro ao gerar modelo"
                 scanQualityStatus = "Erro ao gerar modelo"
             }
+            updateExportDiagnostics()
             return nil
         }
 
@@ -2057,6 +2068,7 @@ final class ScannerViewModel: ObservableObject {
         lastSTLExportEventMessage = "Export iniciado"
         scanReadinessMessage = "Gerando modelo..."
         scanQualityStatus = "Gerando modelo..."
+        updateExportDiagnostics()
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result: Result<ScanItem, Error>
@@ -2082,6 +2094,7 @@ final class ScannerViewModel: ObservableObject {
 
                 defer {
                     self.isGeneratingSTL = false
+                    self.updateExportDiagnostics()
                 }
 
                 switch result {

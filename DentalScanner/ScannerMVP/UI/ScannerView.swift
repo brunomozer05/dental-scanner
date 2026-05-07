@@ -410,14 +410,8 @@ struct ScannerView: View {
 
             ScrollView(showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 10) {
-                    debugSummarySection
-                    markerSizeDebugControl
-                    poseDebugSection
-                    implantComparisonControls
                     scanQualitySection
                     scanDebugControl
-                    scaleValidationSection
-                    stlExportSection
                     errorDebugSection
                 }
                 .padding(.trailing, 2)
@@ -1133,20 +1127,10 @@ struct ScannerView: View {
             metricRow(title: "Estado", value: formattedScanState)
             metricRow(title: "Estado anterior", value: formattedPreviousScanState)
             metricRow(title: "Ready transitions", value: formattedReadyTransitionCount)
-            metricRow(title: "Progresso", value: formattedScanProgress)
-            metricRow(title: "Qualidade", value: formattedScanQualityScore)
             metricRow(title: "Frames bons", value: formattedScanValidFrames)
-            metricRow(title: "Cobertura global", value: formattedScanGlobalCoverage)
             metricRow(title: "rawAngularCoverage min", value: formattedScanCurrentCoverage)
             metricRow(title: "requiredAngularCoverage", value: formattedScanRequiredCoverage)
             metricRow(title: "normalizedCoverageProgress", value: formattedScanNormalizedCoverageProgress)
-            metricRow(title: "MarkerIds cobertura", value: formattedScanCoverageMarkerIds)
-            metricRow(title: "Cobertura tags", value: formattedScanTagCoverageSummary)
-            metricRow(title: "Distancia media", value: formattedScanAverageDistance)
-            metricRow(title: "Erro medio", value: formattedScanAverageReprojectionError)
-            metricRow(title: "Jitter posicao", value: formattedScanPoseJitter)
-            metricRow(title: "Jitter rotacao", value: formattedScanRotationJitter)
-            metricRow(title: "Tempo estavel", value: formattedScanStableReadinessDuration)
             metricRow(title: "coverageReady", value: formattedBool(viewModel.scanCoverageReady))
             metricRow(title: "goodFramesReady", value: formattedBool(viewModel.scanGoodFramesReady))
             metricRow(title: "distanceReady", value: formattedBool(viewModel.scanDistanceReady))
@@ -1154,19 +1138,17 @@ struct ScannerView: View {
             metricRow(title: "jitterReady", value: formattedBool(viewModel.scanJitterReady))
             metricRow(title: "stableReady", value: formattedBool(viewModel.scanStableReady))
             metricRow(title: "currentFrameGood", value: formattedBool(viewModel.scanCurrentFrameGood))
-            metricRow(title: "Prontidao", value: viewModel.scanReadinessMessage)
-            metricRow(title: "canExportSTL", value: formattedCanExportSTL)
-            metricRow(title: "handleReady chamado", value: formattedBool(viewModel.didCallHandleScanBecameReady))
-            metricRow(title: "saveScan chamado", value: formattedBool(viewModel.didCallSaveCurrentScanIfNeeded))
-            metricRow(title: "Export iniciado", value: formattedBool(viewModel.didStartSTLExportForCurrentScan))
             metricRow(title: "Gerando STL", value: formattedBool(viewModel.isGeneratingSTL))
+            metricRow(title: "Export iniciado", value: formattedBool(viewModel.didStartSTLExportForCurrentScan))
             metricRow(title: "tagPoses atuais", value: formattedCurrentExportableTagPoseCount)
             metricRow(title: "tagPoses export", value: formattedLastSTLExportTagPoseCount)
+            metricRow(title: "handleReady chamado", value: formattedBool(viewModel.didCallHandleScanBecameReady))
+            metricRow(title: "saveScan chamado", value: formattedBool(viewModel.didCallSaveCurrentScanIfNeeded))
+            metricRow(title: "canExportSTL", value: formattedCanExportSTL)
             metricRow(title: "STL URL existe", value: formattedSTLExportURLExists)
             metricRow(title: "STL existe", value: formattedSTLExportFileExists)
             metricRow(title: "Erro STL", value: formattedSTLExportError)
             metricRow(title: "Evento STL", value: viewModel.lastSTLExportEventMessage)
-            metricRow(title: "Status", value: viewModel.scanQualityStatus)
         }
     }
 
