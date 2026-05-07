@@ -238,7 +238,7 @@ struct ScannerView: View {
     private var scannerBottomBar: some View {
         ScannerGlassPanel(cornerRadius: 20) {
             HStack(spacing: 18) {
-                scannerBottomMetric(title: "Cobertura total", value: formattedScanProgress)
+                scannerBottomMetric(title: "Cobertura total", value: formattedScanGlobalCoverage)
 
                 ScannerDivider()
 
@@ -608,6 +608,23 @@ struct ScannerView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
+    private func formattedCoveragePercent(_ percent: Double) -> String {
+        "\(roundedCoveragePercent(percent))%"
+    }
+
+    private func roundedCoveragePercent(_ percent: Double) -> Int {
+        Int(round(normalizedCoverage(percent / 100.0) * 100.0))
+    }
+
+    private func normalizedCoverage(_ value: Double) -> Double {
+        guard value.isFinite else {
+            return 0
+        }
+
+        let clamped = min(max(value, 0.0), 1.0)
+        return clamped >= 0.995 ? 1.0 : clamped
+    }
+
     private var formattedCameraState: String {
         switch viewModel.cameraState {
         case .idle:
@@ -659,19 +676,23 @@ struct ScannerView: View {
     }
 
     private var formattedScanProgress: String {
-        String(format: "%.0f%%", viewModel.scanProgress)
+        formattedCoveragePercent(viewModel.scanProgress)
     }
 
     private var formattedScanQualityScore: String {
-        String(format: "%.0f%%", viewModel.scanQualityScore)
+        formattedCoveragePercent(viewModel.scanQualityScore)
     }
 
     private var formattedScanValidFrames: String {
         "\(viewModel.scanValidFrameCount)/\(viewModel.scanTargetGoodFrameCount)"
     }
 
+    private var formattedScanGlobalCoverage: String {
+        formattedCoveragePercent(viewModel.scanGlobalCoveragePercent)
+    }
+
     private var formattedScanCurrentCoverage: String {
-        String(format: "%.0f%%", viewModel.scanCurrentAngularCoveragePercent)
+        formattedCoveragePercent(viewModel.scanCurrentAngularCoveragePercent)
     }
 
     private var formattedScanAverageDistance: String {
@@ -715,7 +736,16 @@ struct ScannerView: View {
     }
 
     private var formattedScanRequiredCoverage: String {
-        String(format: "%.0f%%", viewModel.scanRequiredAngularCoveragePercent)
+        formattedCoveragePercent(viewModel.scanRequiredAngularCoveragePercent)
+    }
+
+    private var formattedScanCoverageMarkerIds: String {
+        let markerIds = viewModel.scanCoverageMarkerIds
+        guard !markerIds.isEmpty else {
+            return "-"
+        }
+
+        return markerIds.map(String.init).joined(separator: ", ")
     }
 
     private var formattedScanTagCoverageSummary: String {
@@ -727,10 +757,10 @@ struct ScannerView: View {
             .sorted { $0.markerId < $1.markerId }
             .map { coverage in
                 String(
-                    format: "ID %d: %.0f%% / %.0f%% (%d/%d)",
+                    format: "ID %d: atual %d%% / exigida %d%% (%d/%d)",
                     coverage.markerId,
-                    coverage.actualCoveragePercent,
-                    coverage.requiredCoveragePercent,
+                    roundedCoveragePercent(coverage.actualCoveragePercent),
+                    roundedCoveragePercent(coverage.requiredCoveragePercent),
                     coverage.coveredBinCount,
                     coverage.requiredBinCount
                 )
@@ -1051,8 +1081,10 @@ struct ScannerView: View {
             metricRow(title: "Progresso", value: formattedScanProgress)
             metricRow(title: "Qualidade", value: formattedScanQualityScore)
             metricRow(title: "Frames bons", value: formattedScanValidFrames)
+            metricRow(title: "Cobertura global", value: formattedScanGlobalCoverage)
             metricRow(title: "Cobertura atual", value: formattedScanCurrentCoverage)
             metricRow(title: "Cobertura exigida", value: formattedScanRequiredCoverage)
+            metricRow(title: "MarkerIds cobertura", value: formattedScanCoverageMarkerIds)
             metricRow(title: "Cobertura tags", value: formattedScanTagCoverageSummary)
             metricRow(title: "Distancia media", value: formattedScanAverageDistance)
             metricRow(title: "Erro medio", value: formattedScanAverageReprojectionError)
@@ -1405,7 +1437,7 @@ private struct ScannerTagCoverageRow: View {
     var body: some View {
         HStack(spacing: 9) {
             RingProgressView(
-                progress: progress / 100.0,
+                progress: normalizedProgress,
                 accentColor: accentColor,
                 lineWidth: 2.4
             )
@@ -1417,7 +1449,7 @@ private struct ScannerTagCoverageRow: View {
 
             Spacer(minLength: 8)
 
-            Text(String(format: "%.0f%%", min(max(progress, 0), 100)))
+            Text("\(Int(round(normalizedProgress * 100.0)))%")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.62))
                 .monospacedDigit()
@@ -1426,6 +1458,15 @@ private struct ScannerTagCoverageRow: View {
         .padding(.vertical, 7)
         .background(Color.white.opacity(0.055))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var normalizedProgress: Double {
+        guard progress.isFinite else {
+            return 0
+        }
+
+        let clamped = min(max(progress / 100.0, 0.0), 1.0)
+        return clamped >= 0.995 ? 1.0 : clamped
     }
 }
 

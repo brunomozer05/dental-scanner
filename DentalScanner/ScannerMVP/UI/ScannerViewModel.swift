@@ -66,6 +66,7 @@ final class ScannerViewModel: ObservableObject {
 
     private enum ScanConfiguration {
         static let readiness = ScanReadinessConfiguration.default
+        static let completedCoverageThreshold: Double = 0.995
         static let defaultTargetValidFrameCount: Int = readiness.targetGoodFrames
         static let minimumTargetValidFrameCount: Int = readiness.minimumGoodFrames
         static let maximumTargetValidFrameCount: Int = readiness.targetGoodFrames * 2
@@ -210,7 +211,6 @@ final class ScannerViewModel: ObservableObject {
     private var desiredTorchEnabled = false
     private var scanReprojectionErrors: [Double] = []
     private var scanPoseHistoryByMarkerId: [Int: [ScanPoseSample]] = [:]
-    private var scanObservedMarkerIds: Set<Int> = []
     private var scanCoverageBinsByMarkerId: [Int: Set<Int>] = [:]
     private var scanFrameCountsByMarkerId: [Int: Int] = [:]
     private var scanReadinessStableStartTimestamp: Double?
@@ -261,8 +261,16 @@ final class ScannerViewModel: ObservableObject {
         scanTargetValidFrameCount
     }
 
+    var scanGlobalCoveragePercent: Double {
+        minimumTagCoverageProgress() * 100.0
+    }
+
     var scanCurrentAngularCoveragePercent: Double {
         minimumObservedAngularCoveragePercent()
+    }
+
+    var scanCoverageMarkerIds: [Int] {
+        activeTagCoverages.map(\.markerId).sorted()
     }
 
     var scanRequiredStableDurationSeconds: Double {
@@ -754,7 +762,6 @@ final class ScannerViewModel: ObservableObject {
         scanTagCoverages = [:]
         scanReprojectionErrors = []
         scanPoseHistoryByMarkerId = [:]
-        scanObservedMarkerIds = []
         scanCoverageBinsByMarkerId = [:]
         scanFrameCountsByMarkerId = [:]
         scanReadinessStableStartTimestamp = nil
@@ -778,7 +785,6 @@ final class ScannerViewModel: ObservableObject {
         }
 
         scanAverageDistanceMm = averageDistance(in: rawPoseResults)
-        scanObservedMarkerIds.formUnion(rawPoseResults.map(\.markerId).filter { $0 >= 0 })
 
         let frameReprojectionError = averageReprojectionError(in: rawPoseResults)
         let goodPoseResults = rawPoseResults.filter(isGoodFrame)
@@ -926,54 +932,68 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private var hasCompleteTagCoverage: Bool {
-        !scanTagCoverages.isEmpty &&
-            scanTagCoverages.values.allSatisfy {
-                $0.actualCoveragePercent >= scanRequiredAngularCoveragePercent
+        !activeTagCoverages.isEmpty &&
+            activeTagCoverages.allSatisfy {
+                normalizedCoverage($0.progress / 100.0) >= 1.0
             }
     }
 
     private func minimumTagCoverageProgress() -> Double {
-        guard !scanTagCoverages.isEmpty else {
+        guard !activeTagCoverages.isEmpty else {
             return 0
         }
 
-        let minimumProgress = scanTagCoverages.values
-            .map { min(max($0.progress / 100.0, 0.0), 1.0) }
+        let minimumProgress = activeTagCoverages
+            .map { normalizedCoverage($0.progress / 100.0) }
             .min() ?? 0
 
         return minimumProgress
     }
 
     private func minimumObservedAngularCoveragePercent() -> Double {
-        guard !scanTagCoverages.isEmpty else {
+        guard !activeTagCoverages.isEmpty else {
             return 0
         }
 
-        return scanTagCoverages.values
-            .map(\.actualCoveragePercent)
+        return activeTagCoverages
+            .map { normalizedCoverage($0.actualCoveragePercent / 100.0) * 100.0 }
             .min() ?? 0
     }
 
     private func minimumTagGoodFrameProgress() -> Double {
-        guard !scanTagCoverages.isEmpty else {
+        guard !activeTagCoverages.isEmpty else {
             return 0
         }
 
-        return scanTagCoverages.values
+        return activeTagCoverages
             .map {
-                min(
+                normalizedCoverage(
                     Double($0.observedFrameCount) /
-                        Double(scanReadinessConfiguration.minimumGoodFrames),
-                    1.0
+                        Double(scanReadinessConfiguration.minimumGoodFrames)
                 )
             }
             .min() ?? 0
     }
 
+    private var activeTagCoverages: [ScanTagCoverage] {
+        scanTagCoverages.values
+            .filter { $0.coveredBinCount > 0 || $0.observedFrameCount > 0 }
+            .sorted { $0.markerId < $1.markerId }
+    }
+
+    private func normalizedCoverage(_ value: Double) -> Double {
+        guard value.isFinite else {
+            return 0
+        }
+
+        let clamped = min(max(value, 0.0), 1.0)
+        return clamped >= ScanConfiguration.completedCoverageThreshold ? 1.0 : clamped
+    }
+
     private func scanReadinessEvaluation(hasImplants: Bool) -> ScanReadinessEvaluation {
-        let hasTags = !scanTagCoverages.isEmpty
+        let hasTags = !activeTagCoverages.isEmpty
         let hasEnoughGoodFrames = scanValidFrameCount >= scanReadinessConfiguration.minimumGoodFrames
-        let hasPerTagGoodFrames = hasTags && scanTagCoverages.values.allSatisfy {
+        let hasPerTagGoodFrames = hasTags && activeTagCoverages.allSatisfy {
             $0.observedFrameCount >= scanReadinessConfiguration.minimumGoodFrames
         }
         let hasAcceptableDistance = isAcceptableScanDistance(scanAverageDistanceMm)
@@ -1128,12 +1148,14 @@ final class ScannerViewModel: ObservableObject {
     @MainActor
     private func rebuildScanTagCoverages() {
         let requiredBinCount = scanRequiredAngularCoverageBinCount()
-        let markerIds = scanObservedMarkerIds.union(scanCoverageBinsByMarkerId.keys)
+        let markerIds = Set(scanCoverageBinsByMarkerId.keys).union(scanFrameCountsByMarkerId.keys)
 
         scanTagCoverages = markerIds.reduce(into: [:]) { partialResult, markerId in
             let coveredBinCount = scanCoverageBinsByMarkerId[markerId]?.count ?? 0
-            let actualCoveragePercent = Double(coveredBinCount) / Double(totalAngularCoverageBinCount) * 100.0
-            let progress = min(actualCoveragePercent / max(scanRequiredAngularCoveragePercent, 1.0), 1.0) * 100.0
+            let rawActualCoverage = Double(coveredBinCount) / Double(totalAngularCoverageBinCount)
+            let actualCoveragePercent = normalizedCoverage(rawActualCoverage) * 100.0
+            let requiredCoverage = max(scanRequiredAngularCoveragePercent / 100.0, 0.01)
+            let progress = normalizedCoverage(rawActualCoverage / requiredCoverage) * 100.0
 
             partialResult[markerId] = ScanTagCoverage(
                 markerId: markerId,
