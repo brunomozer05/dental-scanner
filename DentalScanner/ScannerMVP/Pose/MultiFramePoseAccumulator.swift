@@ -208,15 +208,21 @@ final class MultiFramePoseAccumulator {
         else {
             return nil
         }
+        let metadataPose = metadataPose(from: filteredSamples.isEmpty ? samples : filteredSamples)
 
         return PoseResult(
             markerId: markerId,
+            markerProfile: metadataPose.markerProfile,
+            poseSource: metadataPose.poseSource,
             rotationVector: rotationVector,
             rotationMatrix: rotationMatrix,
             translationVector: translationVector,
             distanceMm: simd_length(translationVector),
             reprojectionError: reprojectionError,
-            markerAreaPixels: markerAreaPixels
+            markerAreaPixels: markerAreaPixels,
+            usedPointCount: metadataPose.usedPointCount,
+            detectedTopTagId: metadataPose.detectedTopTagId,
+            detectedBottomTagId: metadataPose.detectedBottomTagId
         )
     }
 
@@ -225,7 +231,9 @@ final class MultiFramePoseAccumulator {
             pose.reprojectionError,
             configuration.minimumWeightedReprojectionError
         )
-        let rawWeight = reprojectionWeight * normalizedMarkerArea(for: pose)
+        let rawWeight = reprojectionWeight *
+            normalizedMarkerArea(for: pose) *
+            pose.poseSource.qualityWeight
         let weight = min(
             max(rawWeight, configuration.minimumFrameWeight),
             configuration.maximumFrameWeight
@@ -304,6 +312,16 @@ final class MultiFramePoseAccumulator {
         return filteredSamples
     }
 
+    private func metadataPose(from samples: [PoseResult]) -> PoseResult {
+        samples.last(where: { pose in
+            if case .dualTag = pose.poseSource {
+                return true
+            }
+
+            return false
+        }) ?? samples.last!
+    }
+
     private func median(_ values: [Double]) -> Double {
         let sortedValues = values.sorted()
         let middleIndex = sortedValues.count / 2
@@ -333,12 +351,17 @@ final class MultiFramePoseAccumulator {
 
         return PoseResult(
             markerId: pose.markerId,
+            markerProfile: pose.markerProfile,
+            poseSource: pose.poseSource,
             rotationVector: relativeRotationVector,
             rotationMatrix: relativeRotationMatrix,
             translationVector: relativeTranslation,
             distanceMm: simd_length(relativeTranslation),
             reprojectionError: pose.reprojectionError,
-            markerAreaPixels: pose.markerAreaPixels
+            markerAreaPixels: pose.markerAreaPixels,
+            usedPointCount: pose.usedPointCount,
+            detectedTopTagId: pose.detectedTopTagId,
+            detectedBottomTagId: pose.detectedBottomTagId
         )
     }
 

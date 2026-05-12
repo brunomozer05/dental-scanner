@@ -157,7 +157,9 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var poseDistanceMm: Double?
     @Published private(set) var poseReprojectionError: Double?
     @Published private(set) var poseErrorMessage: String?
+    @Published private(set) var markerProfile: MarkerProfile = MarkerConfiguration.defaultProfile
     @Published private(set) var poseMarkerSizeMillimeters: Double = PoseConfiguration.defaultMarkerSizeMillimeters
+    @Published private(set) var dualMarkerDebugStates: [DualArucoMarkerDebugState] = []
     @Published private(set) var implantPoseResults: [ImplantPose] = []
     @Published private(set) var implantPoseResult: ImplantPose?
     @Published private(set) var implantOffsetDescription: String = ScannerViewModel.formatImplantOffset(
@@ -257,7 +259,12 @@ final class ScannerViewModel: ObservableObject {
     }
 
     var isMarkerSizeDebugEditingEnabled: Bool {
-        PoseConfiguration.isMarkerSizeDebugEditingEnabled
+        markerProfile == .singleArucoV1 &&
+            PoseConfiguration.isMarkerSizeDebugEditingEnabled
+    }
+
+    var markerProfiles: [MarkerProfile] {
+        MarkerProfile.allCases
     }
 
     var scanTargetValidFrameRange: ClosedRange<Int> {
@@ -505,6 +512,18 @@ final class ScannerViewModel: ObservableObject {
     }
 
     @MainActor
+    func setMarkerProfile(_ markerProfile: MarkerProfile) {
+        guard self.markerProfile != markerProfile else {
+            return
+        }
+
+        self.markerProfile = markerProfile
+        dualMarkerDebugStates = []
+        resetPoseFilter()
+        resetScanSession()
+    }
+
+    @MainActor
     func startScan() {
         resetScanSession()
         setScanState(.scanning)
@@ -731,10 +750,20 @@ final class ScannerViewModel: ObservableObject {
             timestamp: metrics.lastFrameTimestamp
         )
         let markerSizeMillimeters = poseMarkerSizeMillimeters
+        let activeMarkerProfile = markerProfile
+        let dualMarkerDefinitions = MarkerConfiguration.dualMarkers
         let poseMetrics = estimatePose(
             from: arucoMetrics.detections,
             in: frame,
-            markerSizeMillimeters: markerSizeMillimeters
+            markerSizeMillimeters: markerSizeMillimeters,
+            markerProfile: activeMarkerProfile,
+            dualMarkerDefinitions: dualMarkerDefinitions
+        )
+        let dualMarkerDebugStates = makeDualMarkerDebugStates(
+            detections: arucoMetrics.detections,
+            poseResults: poseMetrics.rawPoseResults,
+            markerProfile: activeMarkerProfile,
+            dualMarkerDefinitions: dualMarkerDefinitions
         )
         let scanStateForFrame = scanState
         let shouldCollectScanFrame = scanStateForFrame.isCollectingFrames
@@ -752,7 +781,9 @@ final class ScannerViewModel: ObservableObject {
                 from: arucoMetrics.detections,
                 poseResults: poseMetrics.rawPoseResults,
                 in: frame,
-                markerSizeMillimeters: markerSizeMillimeters
+                markerSizeMillimeters: markerSizeMillimeters,
+                markerProfile: activeMarkerProfile,
+                dualMarkerDefinitions: dualMarkerDefinitions
             )
             : []
 
@@ -787,6 +818,7 @@ final class ScannerViewModel: ObservableObject {
             self.poseDistanceMm = poseMetrics.stablePoseResult?.distanceMm
             self.poseReprojectionError = poseMetrics.rawPoseResult?.reprojectionError
             self.poseErrorMessage = poseMetrics.errorMessage
+            self.dualMarkerDebugStates = dualMarkerDebugStates
 
             if shouldCollectScanFrame && self.scanState.isCollectingFrames {
                 self.fusedPoseResults = fusedPoseResults
@@ -814,6 +846,7 @@ final class ScannerViewModel: ObservableObject {
         fusedPoseResults = []
         implantPoseResults = []
         implantPoseResult = nil
+        dualMarkerDebugStates = []
         selectedTagDistanceMm = nil
         selectedImplantDistanceMm = nil
         stlExportURL = nil
@@ -1724,10 +1757,43 @@ final class ScannerViewModel: ObservableObject {
         )
     }
 
+    private func makeDualMarkerDebugStates(
+        detections: [ArUcoDetectionResult],
+        poseResults: [PoseResult],
+        markerProfile: MarkerProfile,
+        dualMarkerDefinitions: [DualArucoMarkerDefinition]
+    ) -> [DualArucoMarkerDebugState] {
+        guard markerProfile == .dualArucoV2 else {
+            return []
+        }
+
+        let detectedTagIds = Set(detections.map(\.markerId))
+        let posesByPhysicalMarkerId = Dictionary(uniqueKeysWithValues: poseResults.map {
+            ($0.markerId, $0)
+        })
+
+        return dualMarkerDefinitions.map { definition in
+            let poseResult = posesByPhysicalMarkerId[definition.physicalMarkerId]
+
+            return DualArucoMarkerDebugState(
+                physicalMarkerId: definition.physicalMarkerId,
+                topTagId: definition.topTagId,
+                bottomTagId: definition.bottomTagId,
+                topTagDetected: detectedTagIds.contains(definition.topTagId),
+                bottomTagDetected: detectedTagIds.contains(definition.bottomTagId),
+                poseSource: poseResult?.poseSource,
+                reprojectionError: poseResult?.reprojectionError,
+                usedPointCount: poseResult?.usedPointCount
+            )
+        }
+    }
+
     private func estimatePose(
         from detections: [ArUcoDetectionResult],
         in frame: CameraFrame,
-        markerSizeMillimeters: Double
+        markerSizeMillimeters: Double,
+        markerProfile: MarkerProfile,
+        dualMarkerDefinitions: [DualArucoMarkerDefinition]
     ) -> PoseMetrics {
         guard !detections.isEmpty else {
             resetPoseFilter()
@@ -1744,7 +1810,9 @@ final class ScannerViewModel: ObservableObject {
             let poses = try poseEstimator.estimatePoses(
                 for: detections,
                 in: frame,
-                markerSizeMillimeters: markerSizeMillimeters
+                markerSizeMillimeters: markerSizeMillimeters,
+                markerProfile: markerProfile,
+                dualMarkers: dualMarkerDefinitions
             )
             let sortedPoses = arUcoConsistencyFilter
                 .filterPoses(poses)
@@ -1796,40 +1864,111 @@ final class ScannerViewModel: ObservableObject {
         from detections: [ArUcoDetectionResult],
         poseResults: [PoseResult],
         in frame: CameraFrame,
-        markerSizeMillimeters: Double
+        markerSizeMillimeters: Double,
+        markerProfile: MarkerProfile,
+        dualMarkerDefinitions: [DualArucoMarkerDefinition]
     ) -> [FinalPoseObservation] {
-        guard markerSizeMillimeters.isFinite,
-              markerSizeMillimeters > 0,
-              let cameraMatrix = frame.metadata.intrinsicMatrix
-        else {
+        guard let cameraMatrix = frame.metadata.intrinsicMatrix else {
             return []
         }
 
-        let objectPoints = FinalPoseObservation.markerObjectPoints(
-            markerSizeMillimeters: markerSizeMillimeters
-        )
         var detectionsByMarkerId: [Int: ArUcoDetectionResult] = [:]
         for detection in detections {
             detectionsByMarkerId[detection.markerId] = detection
         }
 
-        return poseResults.compactMap { poseResult in
-            guard poseResult.reprojectionError.isFinite,
-                  poseResult.reprojectionError <= ScanConfiguration.maximumAverageReprojectionError,
-                  let detection = detectionsByMarkerId[poseResult.markerId],
-                  detection.corners.count == objectPoints.count
+        switch markerProfile {
+        case .singleArucoV1:
+            guard markerSizeMillimeters.isFinite,
+                  markerSizeMillimeters > 0
+            else {
+                return []
+            }
+
+            let objectPoints = FinalPoseObservation.markerObjectPoints(
+                markerSizeMillimeters: markerSizeMillimeters
+            )
+
+            return poseResults.compactMap { poseResult in
+                guard poseResult.reprojectionError.isFinite,
+                      poseResult.reprojectionError <= ScanConfiguration.maximumAverageReprojectionError,
+                      let detection = detectionsByMarkerId[poseResult.markerId],
+                      detection.corners.count == objectPoints.count
+                else {
+                    return nil
+                }
+
+                return FinalPoseObservation(
+                    markerId: poseResult.markerId,
+                    objectPoints: objectPoints,
+                    imagePoints: detection.corners,
+                    cameraMatrix: cameraMatrix,
+                    reprojectionError: poseResult.reprojectionError,
+                    markerAreaPixels: poseResult.markerAreaPixels
+                )
+            }
+        case .dualArucoV2:
+            let definitionsByPhysicalMarkerId = Dictionary(
+                uniqueKeysWithValues: dualMarkerDefinitions.map {
+                    ($0.physicalMarkerId, $0)
+                }
+            )
+
+            return poseResults.compactMap { poseResult in
+                guard poseResult.reprojectionError.isFinite,
+                      poseResult.reprojectionError <= ScanConfiguration.maximumAverageReprojectionError,
+                      let definition = definitionsByPhysicalMarkerId[poseResult.markerId],
+                      let observationPoints = dualMarkerObservationPoints(
+                        for: poseResult,
+                        definition: definition,
+                        detectionsByTagId: detectionsByMarkerId
+                      ),
+                      observationPoints.imagePoints.count == observationPoints.objectPoints.count
+                else {
+                    return nil
+                }
+
+                return FinalPoseObservation(
+                    markerId: poseResult.markerId,
+                    objectPoints: observationPoints.objectPoints,
+                    imagePoints: observationPoints.imagePoints,
+                    cameraMatrix: cameraMatrix,
+                    reprojectionError: poseResult.reprojectionError,
+                    markerAreaPixels: poseResult.markerAreaPixels
+                )
+            }
+        }
+    }
+
+    private func dualMarkerObservationPoints(
+        for poseResult: PoseResult,
+        definition: DualArucoMarkerDefinition,
+        detectionsByTagId: [Int: ArUcoDetectionResult]
+    ) -> (objectPoints: [SIMD3<Double>], imagePoints: [CGPoint])? {
+        switch poseResult.poseSource {
+        case .dualTag:
+            guard let topDetection = detectionsByTagId[definition.topTagId],
+                  let bottomDetection = detectionsByTagId[definition.bottomTagId]
             else {
                 return nil
             }
 
-            return FinalPoseObservation(
-                markerId: poseResult.markerId,
-                objectPoints: objectPoints,
-                imagePoints: detection.corners,
-                cameraMatrix: cameraMatrix,
-                reprojectionError: poseResult.reprojectionError,
-                markerAreaPixels: poseResult.markerAreaPixels
+            return (
+                objectPoints: definition.dualObjectPoints,
+                imagePoints: topDetection.corners + bottomDetection.corners
             )
+        case let .singleFallback(_, role):
+            let tagId = definition.tagId(for: role)
+            guard let detection = detectionsByTagId[tagId] else {
+                return nil
+            }
+
+            return (
+                objectPoints: definition.objectPoints(for: role),
+                imagePoints: detection.corners
+            )
+        case .singleArucoV1:
+            return nil
         }
     }
 

@@ -410,8 +410,11 @@ struct ScannerView: View {
 
             ScrollView(showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 10) {
-                    scanQualitySection
+                    debugSummarySection
+                    poseDebugSection
                     scanDebugControl
+                    dualMarkerDebugSection
+                    scanQualitySection
                     errorDebugSection
                 }
                 .padding(.trailing, 2)
@@ -431,6 +434,7 @@ struct ScannerView: View {
             metricRow(title: "Resolucao", value: formattedResolution)
             metricRow(title: "Intrinseca", value: viewModel.isIntrinsicMatrixAvailable ? "Disponivel" : "Indisponivel")
             metricRow(title: "IDs", value: formattedDetectedMarkerIds)
+            metricRow(title: "Perfil marker", value: viewModel.markerProfile.debugTitle)
             metricRow(title: "Marker size", value: String(format: "%.1f mm", viewModel.poseMarkerSizeMillimeters))
         }
     }
@@ -444,9 +448,33 @@ struct ScannerView: View {
             metricRow(title: "Distancia bruta", value: formattedRawPoseDistance)
             metricRow(title: "Distancia estavel", value: formattedStablePoseDistance)
             metricRow(title: "Erro reproj.", value: formattedPoseReprojectionError)
+            metricRow(title: "Modo pose", value: formattedPoseMode)
+            metricRow(title: "Pontos pose", value: formattedPosePointCount)
             metricRow(title: "Status", value: viewModel.poseStabilityStatus)
             metricRow(title: "Implante", value: formattedImplantDistance)
             metricRow(title: "Implantes x/y/z", value: formattedImplantPositions)
+        }
+    }
+
+    @ViewBuilder
+    private var dualMarkerDebugSection: some View {
+        if viewModel.markerProfile == .dualArucoV2 {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Markers v2")
+                    .font(.subheadline.weight(.semibold))
+
+                ForEach(viewModel.dualMarkerDebugStates) { state in
+                    VStack(alignment: .leading, spacing: 4) {
+                        metricRow(title: "Marker fisico", value: "ID \(state.physicalMarkerId)")
+                        metricRow(title: "Top \(state.topTagId)", value: formattedBool(state.topTagDetected))
+                        metricRow(title: "Bottom \(state.bottomTagId)", value: formattedBool(state.bottomTagDetected))
+                        metricRow(title: "Modo", value: formattedDualMarkerPoseMode(state))
+                        metricRow(title: "Erro reproj.", value: formattedDualMarkerReprojectionError(state))
+                        metricRow(title: "Pontos", value: formattedDualMarkerPointCount(state))
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
         }
     }
 
@@ -862,6 +890,13 @@ struct ScannerView: View {
         )
     }
 
+    private var markerProfileBinding: Binding<MarkerProfile> {
+        Binding(
+            get: { viewModel.markerProfile },
+            set: { viewModel.setMarkerProfile($0) }
+        )
+    }
+
     private var scanTargetFrameBinding: Binding<Int> {
         Binding(
             get: { viewModel.scanTargetValidFrameCount },
@@ -898,6 +933,40 @@ struct ScannerView: View {
         }
 
         return String(format: "%.2f px", poseReprojectionError)
+    }
+
+    private var formattedPoseMode: String {
+        viewModel.rawPoseResult?.poseSource.debugTitle ?? "-"
+    }
+
+    private var formattedPosePointCount: String {
+        guard let usedPointCount = viewModel.rawPoseResult?.usedPointCount else {
+            return "-"
+        }
+
+        return "\(usedPointCount)"
+    }
+
+    private func formattedDualMarkerPoseMode(_ state: DualArucoMarkerDebugState) -> String {
+        state.poseSource?.debugTitle ?? "sem pose"
+    }
+
+    private func formattedDualMarkerReprojectionError(_ state: DualArucoMarkerDebugState) -> String {
+        guard let reprojectionError = state.reprojectionError,
+              reprojectionError.isFinite
+        else {
+            return "-"
+        }
+
+        return String(format: "%.2f px", reprojectionError)
+    }
+
+    private func formattedDualMarkerPointCount(_ state: DualArucoMarkerDebugState) -> String {
+        guard let usedPointCount = state.usedPointCount else {
+            return "-"
+        }
+
+        return "\(usedPointCount)"
     }
 
     private var formattedImplantPositions: String {
@@ -1157,6 +1226,16 @@ struct ScannerView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Config scan")
                 .font(.subheadline.weight(.semibold))
+
+            Picker("Perfil marker", selection: markerProfileBinding) {
+                ForEach(viewModel.markerProfiles) { profile in
+                    Text(profile.debugTitle)
+                        .tag(profile)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            markerSizeDebugControl
 
             Stepper(
                 value: scanTargetFrameBinding,

@@ -32,7 +32,9 @@ final class PoseEstimator {
     func estimatePoses(
         for detections: [ArUcoDetectionResult],
         in frame: CameraFrame,
-        markerSizeMillimeters: Double
+        markerSizeMillimeters: Double,
+        markerProfile: MarkerProfile = .singleArucoV1,
+        dualMarkers: [DualArucoMarkerDefinition] = MarkerConfiguration.dualMarkers
     ) throws -> [PoseResult] {
         guard !detections.isEmpty else {
             return []
@@ -49,29 +51,42 @@ final class PoseEstimator {
         return try estimatePoses(
             for: detections,
             intrinsics: intrinsics,
-            markerSizeMillimeters: markerSizeMillimeters
+            markerSizeMillimeters: markerSizeMillimeters,
+            markerProfile: markerProfile,
+            dualMarkers: dualMarkers
         )
     }
 
     func estimatePoses(
         for detections: [ArUcoDetectionResult],
         intrinsics: CameraIntrinsics,
-        markerSizeMillimeters: Double
+        markerSizeMillimeters: Double,
+        markerProfile: MarkerProfile = .singleArucoV1,
+        dualMarkers: [DualArucoMarkerDefinition] = MarkerConfiguration.dualMarkers
     ) throws -> [PoseResult] {
-        guard markerSizeMillimeters.isFinite, markerSizeMillimeters > 0 else {
-            throw EstimatorError.invalidMarkerSize
-        }
+        switch markerProfile {
+        case .singleArucoV1:
+            guard markerSizeMillimeters.isFinite, markerSizeMillimeters > 0 else {
+                throw EstimatorError.invalidMarkerSize
+            }
 
-        return try detections.map { detection in
-            try estimatePose(
-                for: detection,
+            return try detections.map { detection in
+                try estimateSingleArucoV1Pose(
+                    for: detection,
+                    intrinsics: intrinsics,
+                    markerSizeMillimeters: markerSizeMillimeters
+                )
+            }
+        case .dualArucoV2:
+            return try estimateDualArucoV2Poses(
+                for: detections,
                 intrinsics: intrinsics,
-                markerSizeMillimeters: markerSizeMillimeters
+                dualMarkers: dualMarkers
             )
         }
     }
 
-    private func estimatePose(
+    private func estimateSingleArucoV1Pose(
         for detection: ArUcoDetectionResult,
         intrinsics: CameraIntrinsics,
         markerSizeMillimeters: Double
@@ -88,12 +103,143 @@ final class PoseEstimator {
 
         return PoseResult(
             markerId: detection.markerId,
+            markerProfile: .singleArucoV1,
+            poseSource: .singleArucoV1,
             rotationVector: try vector3(from: bridgeResult.rotationVector, name: "rotationVector"),
             rotationMatrix: try matrix3x3(from: bridgeResult.rotationMatrix, name: "rotationMatrix"),
             translationVector: try vector3(from: bridgeResult.translationVector, name: "translationVector"),
             distanceMm: bridgeResult.distanceMm,
             reprojectionError: bridgeResult.reprojectionError,
-            markerAreaPixels: Self.markerAreaPixels(for: detection.corners)
+            markerAreaPixels: Self.markerAreaPixels(for: detection.corners),
+            usedPointCount: 4
+        )
+    }
+
+    private func estimateDualArucoV2Poses(
+        for detections: [ArUcoDetectionResult],
+        intrinsics: CameraIntrinsics,
+        dualMarkers: [DualArucoMarkerDefinition]
+    ) throws -> [PoseResult] {
+        var detectionsByTagId: [Int: ArUcoDetectionResult] = [:]
+        for detection in detections {
+            detectionsByTagId[detection.markerId] = detection
+        }
+
+        var poseResults: [PoseResult] = []
+        poseResults.reserveCapacity(dualMarkers.count)
+
+        for definition in dualMarkers {
+            let topDetection = detectionsByTagId[definition.topTagId]
+            let bottomDetection = detectionsByTagId[definition.bottomTagId]
+
+            if let topDetection,
+               let bottomDetection {
+                poseResults.append(try estimateDualTagPose(
+                    for: definition,
+                    topDetection: topDetection,
+                    bottomDetection: bottomDetection,
+                    intrinsics: intrinsics
+                ))
+                continue
+            }
+
+            if let topDetection {
+                poseResults.append(try estimateSingleTagFallbackPose(
+                    for: definition,
+                    detection: topDetection,
+                    role: .top,
+                    intrinsics: intrinsics
+                ))
+                continue
+            }
+
+            if let bottomDetection {
+                poseResults.append(try estimateSingleTagFallbackPose(
+                    for: definition,
+                    detection: bottomDetection,
+                    role: .bottom,
+                    intrinsics: intrinsics
+                ))
+            }
+        }
+
+        return poseResults
+    }
+
+    private func estimateDualTagPose(
+        for definition: DualArucoMarkerDefinition,
+        topDetection: ArUcoDetectionResult,
+        bottomDetection: ArUcoDetectionResult,
+        intrinsics: CameraIntrinsics
+    ) throws -> PoseResult {
+        let objectPointValues = definition.dualObjectPoints.flatMap {
+            [NSNumber(value: $0.x), NSNumber(value: $0.y), NSNumber(value: $0.z)]
+        }
+        let imagePoints = (topDetection.corners + bottomDetection.corners).map {
+            OpenCVArucoImagePoint(x: Double($0.x), y: Double($0.y))
+        }
+
+        let bridgeResult = try bridge.refinePose(
+            objectPoints: objectPointValues,
+            imagePoints: imagePoints,
+            cameraMatrix: intrinsics.openCVCameraMatrixValues
+        )
+
+        return PoseResult(
+            markerId: definition.physicalMarkerId,
+            markerProfile: .dualArucoV2,
+            poseSource: .dualTag,
+            rotationVector: try vector3(from: bridgeResult.rotationVector, name: "rotationVector"),
+            rotationMatrix: try matrix3x3(from: bridgeResult.rotationMatrix, name: "rotationMatrix"),
+            translationVector: try vector3(from: bridgeResult.translationVector, name: "translationVector"),
+            distanceMm: bridgeResult.distanceMm,
+            reprojectionError: bridgeResult.reprojectionError,
+            markerAreaPixels: Self.markerAreaPixels(for: topDetection.corners) +
+                Self.markerAreaPixels(for: bottomDetection.corners),
+            usedPointCount: imagePoints.count,
+            detectedTopTagId: definition.topTagId,
+            detectedBottomTagId: definition.bottomTagId
+        )
+    }
+
+    private func estimateSingleTagFallbackPose(
+        for definition: DualArucoMarkerDefinition,
+        detection: ArUcoDetectionResult,
+        role: DualArucoTagRole,
+        intrinsics: CameraIntrinsics
+    ) throws -> PoseResult {
+        let corners = detection.corners.map { corner in
+            OpenCVArucoImagePoint(x: Double(corner.x), y: Double(corner.y))
+        }
+
+        let bridgeResult = try bridge.estimatePose(
+            corners: corners,
+            markerSizeMillimeters: definition.tagSizeMillimeters(for: role),
+            cameraMatrix: intrinsics.openCVCameraMatrixValues
+        )
+        let rotationVector = try vector3(from: bridgeResult.rotationVector, name: "rotationVector")
+        let rotationMatrix = try matrix3x3(from: bridgeResult.rotationMatrix, name: "rotationMatrix")
+        let tagTranslationVector = try vector3(
+            from: bridgeResult.translationVector,
+            name: "translationVector"
+        )
+        let tagCenterInMarkerCoordinates = definition.tagCenterInMarkerCoordinates(for: role)
+        let markerTranslationVector = tagTranslationVector -
+            rotationMatrix * tagCenterInMarkerCoordinates
+
+        return PoseResult(
+            markerId: definition.physicalMarkerId,
+            markerProfile: .dualArucoV2,
+            poseSource: .singleFallback(tagId: detection.markerId, role: role),
+            rotationVector: rotationVector,
+            rotationMatrix: rotationMatrix,
+            translationVector: markerTranslationVector,
+            distanceMm: simd_length(markerTranslationVector),
+            reprojectionError: bridgeResult.reprojectionError,
+            markerAreaPixels: Self.markerAreaPixels(for: detection.corners),
+            usedPointCount: corners.count,
+            detectedTopTagId: role == .top ? definition.topTagId : nil,
+            detectedBottomTagId: role == .bottom ? definition.bottomTagId : nil
         )
     }
 

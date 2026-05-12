@@ -68,12 +68,17 @@ final class PoseSmoother {
 
         return PoseResult(
             markerId: current.markerId,
+            markerProfile: current.markerProfile,
+            poseSource: current.poseSource,
             rotationVector: smoothedRotationVector,
             rotationMatrix: smoothedRotationMatrix,
             translationVector: smoothedPosition,
             distanceMm: simd_length(smoothedPosition),
             reprojectionError: previous.reprojectionError * retained + current.reprojectionError * clampedAlpha,
-            markerAreaPixels: previous.markerAreaPixels * retained + current.markerAreaPixels * clampedAlpha
+            markerAreaPixels: previous.markerAreaPixels * retained + current.markerAreaPixels * clampedAlpha,
+            usedPointCount: current.usedPointCount,
+            detectedTopTagId: current.detectedTopTagId,
+            detectedBottomTagId: current.detectedBottomTagId
         )
     }
 }

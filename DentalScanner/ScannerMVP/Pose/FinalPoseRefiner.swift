@@ -170,12 +170,17 @@ final class FinalPoseRefiner {
 
         return PoseResult(
             markerId: markerId,
+            markerProfile: currentPose.markerProfile,
+            poseSource: currentPose.poseSource,
             rotationVector: rotationVector,
             rotationMatrix: rotationMatrix,
             translationVector: translationVector,
             distanceMm: bridgeResult.distanceMm,
             reprojectionError: bridgeResult.reprojectionError,
-            markerAreaPixels: averageMarkerAreaPixels(in: compatibleObservations)
+            markerAreaPixels: averageMarkerAreaPixels(in: compatibleObservations),
+            usedPointCount: currentPose.usedPointCount,
+            detectedTopTagId: currentPose.detectedTopTagId,
+            detectedBottomTagId: currentPose.detectedBottomTagId
         )
     }
 
@@ -209,12 +214,17 @@ final class FinalPoseRefiner {
 
         return PoseResult(
             markerId: pose.markerId,
+            markerProfile: fallbackMetadata.markerProfile,
+            poseSource: fallbackMetadata.poseSource,
             rotationVector: relativeRotationVector,
             rotationMatrix: relativeRotationMatrix,
             translationVector: relativeTranslation,
             distanceMm: simd_length(relativeTranslation),
             reprojectionError: pose.reprojectionError,
-            markerAreaPixels: fallbackMetadata.markerAreaPixels
+            markerAreaPixels: fallbackMetadata.markerAreaPixels,
+            usedPointCount: fallbackMetadata.usedPointCount,
+            detectedTopTagId: fallbackMetadata.detectedTopTagId,
+            detectedBottomTagId: fallbackMetadata.detectedBottomTagId
         )
     }
 
