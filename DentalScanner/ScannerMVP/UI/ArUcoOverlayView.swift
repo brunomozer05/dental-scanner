@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 struct ArUcoOverlayView: View {
-    let detections: [ArUcoDetectionResult]
+    let detections: [MarkerOverlayResult]
     let frameResolution: ScannerViewModel.FrameResolution?
     let orientation: CameraPreviewOrientation
     let tagCoverages: [Int: ScannerViewModel.ScanTagCoverage]
@@ -28,7 +28,8 @@ struct ArUcoOverlayView: View {
                     let progress = tagCoverages[trackedMarker.markerId]?.progress ?? trackedMarker.progress
 
                     TagAROverlayView(
-                        markerId: trackedMarker.markerId,
+                        title: marker.displayTitle,
+                        modeTitle: marker.modeTitle,
                         corners: marker.corners,
                         progress: progress,
                         displayScale: trackedMarker.displayScale
@@ -60,6 +61,8 @@ struct ArUcoOverlayView: View {
 
             return ProjectedMarker(
                 markerId: detection.markerId,
+                displayTitle: detection.displayTitle,
+                modeTitle: detection.modeTitle,
                 corners: detection.corners.map(project)
             )
         }
@@ -167,6 +170,8 @@ struct ArUcoOverlayView: View {
 
                 nextMarkers[marker.markerId] = TrackedMarker(
                     markerId: marker.markerId,
+                    displayTitle: marker.displayTitle,
+                    modeTitle: marker.modeTitle,
                     corners: smoothedCorners(
                         previous: previousMarker.corners,
                         current: marker.corners,
@@ -183,6 +188,8 @@ struct ArUcoOverlayView: View {
             } else {
                 nextMarkers[marker.markerId] = TrackedMarker(
                     markerId: marker.markerId,
+                    displayTitle: marker.displayTitle,
+                    modeTitle: marker.modeTitle,
                     corners: marker.corners,
                     lastSeen: timestamp,
                     previousCenter: markerCenter(for: marker.corners),
@@ -306,11 +313,15 @@ struct ArUcoOverlayView: View {
 
     private struct ProjectedMarker: Equatable {
         let markerId: Int
+        let displayTitle: String
+        let modeTitle: String?
         let corners: [CGPoint]
     }
 
     private struct TrackedMarker: Equatable, Identifiable {
         let markerId: Int
+        let displayTitle: String
+        let modeTitle: String?
         let corners: [CGPoint]
         let lastSeen: Date
         let previousCenter: CGPoint?
@@ -322,13 +333,19 @@ struct ArUcoOverlayView: View {
         }
 
         var projectedMarker: ProjectedMarker {
-            ProjectedMarker(markerId: markerId, corners: corners)
+            ProjectedMarker(
+                markerId: markerId,
+                displayTitle: displayTitle,
+                modeTitle: modeTitle,
+                corners: corners
+            )
         }
     }
 }
 
 private struct TagAROverlayView: View {
-    let markerId: Int
+    let title: String
+    let modeTitle: String?
     let corners: [CGPoint]
     let progress: Double
     let displayScale: CGFloat
@@ -364,7 +381,8 @@ private struct TagAROverlayView: View {
             }
 
             TagProgressCard(
-                id: markerId,
+                title: title,
+                modeTitle: modeTitle,
                 progress: progressRatio,
                 accentColor: accentColor
             )
@@ -412,7 +430,7 @@ private struct TagAROverlayView: View {
     }
 
     private var cardVerticalOffset: CGFloat {
-        112 * clampedDisplayScale
+        72 * clampedDisplayScale
     }
 
     private var markerCenter: CGPoint {
@@ -435,7 +453,8 @@ private struct TagAROverlayView: View {
 }
 
 private struct TagProgressCard: View {
-    let id: Int
+    let title: String
+    let modeTitle: String?
     let progress: Double
     let accentColor: Color
 
@@ -444,42 +463,40 @@ private struct TagProgressCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(accentColor)
-                    .frame(width: 6, height: 6)
-
-                Text("ID \(id)")
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(1)
+
+                if let modeTitle {
+                    Text(modeTitle)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.56))
+                        .lineLimit(1)
+                }
             }
 
-            ZStack {
-                Circle()
-                    .stroke(Color.white.opacity(0.10), lineWidth: 6)
+            Spacer(minLength: 4)
 
+            HStack(spacing: 5) {
                 Circle()
-                    .trim(from: 0, to: clampedProgress)
-                    .stroke(
-                        accentColor,
-                        style: StrokeStyle(lineWidth: 6, lineCap: .round)
-                    )
-                    .rotationEffect(.degrees(-90))
-                    .shadow(color: accentColor.opacity(0.35), radius: 4, x: 0, y: 0)
+                    .fill(accentColor)
+                    .frame(width: 5, height: 5)
 
-                Text("\(Int(clampedProgress * 100))%")
-                    .font(.system(size: 14, weight: .bold))
+                Text("\(Int(round(clampedProgress * 100)))%")
+                    .font(.caption.weight(.bold))
                     .foregroundStyle(.white)
                     .monospacedDigit()
             }
-            .frame(width: 60, height: 60)
         }
-        .padding(12)
+        .frame(width: 118, height: 38)
+        .padding(.horizontal, 10)
         .background(Color.black.opacity(0.75))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(Color.white.opacity(0.10), lineWidth: 1)
         }
         .shadow(color: Color.black.opacity(0.30), radius: 8, x: 0, y: 4)

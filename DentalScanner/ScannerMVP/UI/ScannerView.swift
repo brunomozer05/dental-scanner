@@ -46,18 +46,20 @@ struct ScannerView: View {
             ScannerCrosshairView(accentColor: scannerAccentColor)
                 .zIndex(2)
 
-            HStack {
-                Spacer()
+            if viewModel.showDistanceGuide {
+                HStack {
+                    Spacer()
 
-                ScanDistanceGuideView(
-                    distanceMm: viewModel.poseDistanceMm,
-                    configuration: .default
-                )
-                .padding(.trailing, 16)
+                    ScanDistanceGuideView(
+                        distanceMm: viewModel.poseDistanceMm,
+                        configuration: .default
+                    )
+                    .padding(.trailing, 16)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .allowsHitTesting(false)
+                .zIndex(2)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .allowsHitTesting(false)
-            .zIndex(2)
 
             VStack {
                 HStack(alignment: .top, spacing: 12) {
@@ -194,19 +196,22 @@ struct ScannerView: View {
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(.white.opacity(0.46))
                 } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(scannerTagCoverageItems) { item in
-                            ScannerTagCoverageRow(
-                                markerId: item.markerId,
-                                progress: item.progress,
-                                accentColor: scannerAccentColor
-                            )
+                    ScrollView(.vertical, showsIndicators: false) {
+                        LazyVGrid(columns: scannerTagGridColumns, spacing: 6) {
+                            ForEach(scannerTagCoverageItems) { item in
+                                ScannerTagCoverageRow(
+                                    label: item.label,
+                                    progress: item.progress,
+                                    accentColor: scannerAccentColor
+                                )
+                            }
                         }
                     }
+                    .frame(maxHeight: 74)
                 }
             }
         }
-        .frame(width: 190, alignment: .leading)
+        .frame(width: 186, alignment: .leading)
     }
 
     private var scannerUtilityControls: some View {
@@ -346,17 +351,34 @@ struct ScannerView: View {
     private var scannerTagCoverageItems: [ScannerTagCoverageItem] {
         var progressByMarkerId: [Int: Double] = [:]
 
-        for markerId in viewModel.detectedMarkerIds {
-            progressByMarkerId[markerId] = 0
+        for marker in viewModel.overlayMarkers {
+            progressByMarkerId[marker.markerId] = 0
         }
 
         for coverage in viewModel.scanTagCoverages.values {
             progressByMarkerId[coverage.markerId] = coverage.progress
         }
 
-        return progressByMarkerId
-            .map { ScannerTagCoverageItem(markerId: $0.key, progress: $0.value) }
+        let items = progressByMarkerId
+            .map {
+                ScannerTagCoverageItem(
+                    markerId: $0.key,
+                    label: viewModel.markerProfile == .dualArucoV2 ? "M\($0.key)" : "ID \($0.key)",
+                    progress: $0.value
+                )
+            }
             .sorted { $0.markerId < $1.markerId }
+
+        return viewModel.markerProfile == .dualArucoV2
+            ? Array(items.prefix(4))
+            : items
+    }
+
+    private var scannerTagGridColumns: [GridItem] {
+        [
+            GridItem(.flexible(), spacing: 6),
+            GridItem(.flexible(), spacing: 6)
+        ]
     }
 
     private var topControlBar: some View {
@@ -466,8 +488,12 @@ struct ScannerView: View {
                 ForEach(viewModel.dualMarkerDebugStates) { state in
                     VStack(alignment: .leading, spacing: 4) {
                         metricRow(title: "Marker fisico", value: "ID \(state.physicalMarkerId)")
-                        metricRow(title: "Top \(state.topTagId)", value: formattedBool(state.topTagDetected))
-                        metricRow(title: "Bottom \(state.bottomTagId)", value: formattedBool(state.bottomTagDetected))
+                        metricRow(title: "Top \(state.topTagId)", value: formattedDualTagDetection(state, role: .top))
+                        metricRow(title: "Bottom \(state.bottomTagId)", value: formattedDualTagDetection(state, role: .bottom))
+                        metricRow(title: "Top area", value: formattedDualTagArea(state, role: .top))
+                        metricRow(title: "Bottom area", value: formattedDualTagArea(state, role: .bottom))
+                        metricRow(title: "Top frames", value: formattedDualTagCounts(state, role: .top))
+                        metricRow(title: "Bottom frames", value: formattedDualTagCounts(state, role: .bottom))
                         metricRow(title: "Modo", value: formattedDualMarkerPoseMode(state))
                         metricRow(title: "Erro reproj.", value: formattedDualMarkerReprojectionError(state))
                         metricRow(title: "Pontos", value: formattedDualMarkerPointCount(state))
@@ -911,6 +937,13 @@ struct ScannerView: View {
         )
     }
 
+    private var showDistanceGuideBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.showDistanceGuide },
+            set: { viewModel.setShowDistanceGuide($0) }
+        )
+    }
+
     private var formattedRawPoseDistance: String {
         guard let distanceMm = viewModel.rawPoseResult?.distanceMm else {
             return "-"
@@ -949,6 +982,71 @@ struct ScannerView: View {
 
     private func formattedDualMarkerPoseMode(_ state: DualArucoMarkerDebugState) -> String {
         state.poseSource?.debugTitle ?? "sem pose"
+    }
+
+    private func formattedDualTagDetection(
+        _ state: DualArucoMarkerDebugState,
+        role: DualArucoTagRole
+    ) -> String {
+        let rawDetected: Bool
+        let acceptedDetected: Bool
+        let areaBelowMinimum: Bool
+
+        switch role {
+        case .top:
+            rawDetected = state.topTagRawDetected
+            acceptedDetected = state.topTagDetected
+            areaBelowMinimum = state.topAreaBelowMinimum
+        case .bottom:
+            rawDetected = state.bottomTagRawDetected
+            acceptedDetected = state.bottomTagDetected
+            areaBelowMinimum = state.bottomAreaBelowMinimum
+        }
+
+        if acceptedDetected {
+            return "aceita"
+        }
+
+        if rawDetected && areaBelowMinimum {
+            return "area baixa"
+        }
+
+        if rawDetected {
+            return "rejeitada"
+        }
+
+        return "nao"
+    }
+
+    private func formattedDualTagArea(
+        _ state: DualArucoMarkerDebugState,
+        role: DualArucoTagRole
+    ) -> String {
+        let area: Double?
+        switch role {
+        case .top:
+            area = state.topAreaPixels
+        case .bottom:
+            area = state.bottomAreaPixels
+        }
+
+        guard let area, area.isFinite else {
+            return "-"
+        }
+
+        return String(format: "%.0f px2", area)
+    }
+
+    private func formattedDualTagCounts(
+        _ state: DualArucoMarkerDebugState,
+        role: DualArucoTagRole
+    ) -> String {
+        switch role {
+        case .top:
+            return "\(state.topAcceptedDetectionCount)/\(state.topDetectionCount)"
+        case .bottom:
+            return "\(state.bottomAcceptedDetectionCount)/\(state.bottomDetectionCount)"
+        }
     }
 
     private func formattedDualMarkerReprojectionError(_ state: DualArucoMarkerDebugState) -> String {
@@ -1237,6 +1335,8 @@ struct ScannerView: View {
 
             markerSizeDebugControl
 
+            Toggle("Barra distancia", isOn: showDistanceGuideBinding)
+
             Stepper(
                 value: scanTargetFrameBinding,
                 in: viewModel.scanTargetValidFrameRange,
@@ -1472,6 +1572,7 @@ struct ScannerView: View {
 
 private struct ScannerTagCoverageItem: Identifiable {
     let markerId: Int
+    let label: String
     let progress: Double
 
     var id: Int {
@@ -1572,34 +1673,28 @@ private struct ScannerCircleButton: View {
 }
 
 private struct ScannerTagCoverageRow: View {
-    let markerId: Int
+    let label: String
     let progress: Double
     let accentColor: Color
 
     var body: some View {
-        HStack(spacing: 9) {
-            RingProgressView(
-                progress: normalizedProgress,
-                accentColor: accentColor,
-                lineWidth: 2.4
-            )
-            .frame(width: 24, height: 24)
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white.opacity(0.9))
+                .lineLimit(1)
 
-            Text("ID \(markerId)")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.88))
-
-            Spacer(minLength: 8)
+            Spacer(minLength: 2)
 
             Text("\(Int(round(normalizedProgress * 100.0)))%")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.62))
                 .monospacedDigit()
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 7)
+        .frame(height: 26)
+        .padding(.horizontal, 7)
         .background(Color.white.opacity(0.055))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private var normalizedProgress: Double {

@@ -1,5 +1,6 @@
 import AVFoundation
 import Combine
+import CoreGraphics
 import CoreVideo
 import Foundation
 import simd
@@ -7,6 +8,10 @@ import simd
 final class ScannerViewModel: ObservableObject {
     private enum OverlayStabilization {
         static let timeout: Double = 0.2
+    }
+
+    private enum DualMarkerDebugConfiguration {
+        static let minimumMarkerAreaPixels: Double = 80.0
     }
 
     private enum PoseConfiguration {
@@ -136,7 +141,7 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var detectedMarkerCount: Int = 0
     @Published private(set) var detectedMarkerIds: [Int] = []
     @Published private(set) var detectedMarkers: [ArUcoDetectionResult] = []
-    @Published private(set) var overlayMarkers: [ArUcoDetectionResult] = []
+    @Published private(set) var overlayMarkers: [MarkerOverlayResult] = []
     @Published private(set) var arucoErrorMessage: String?
     @Published private(set) var hasFrameReachedArucoDetector: Bool = false
     @Published private(set) var arucoDetectionCallCount: Int = 0
@@ -160,6 +165,7 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var markerProfile: MarkerProfile = MarkerConfiguration.defaultProfile
     @Published private(set) var poseMarkerSizeMillimeters: Double = PoseConfiguration.defaultMarkerSizeMillimeters
     @Published private(set) var dualMarkerDebugStates: [DualArucoMarkerDebugState] = []
+    @Published private(set) var showDistanceGuide: Bool = true
     @Published private(set) var implantPoseResults: [ImplantPose] = []
     @Published private(set) var implantPoseResult: ImplantPose?
     @Published private(set) var implantOffsetDescription: String = ScannerViewModel.formatImplantOffset(
@@ -228,7 +234,7 @@ final class ScannerViewModel: ObservableObject {
     private var shouldRunCamera = false
     private var totalFramesCounter: Int = 0
     private var recentFrameTimestamps: [Double] = []
-    private var lastValidOverlayDetections: [ArUcoDetectionResult] = []
+    private var lastValidOverlayMarkers: [MarkerOverlayResult] = []
     private var lastValidOverlayTimestamp: Double?
     private var filteredPoseResult: PoseResult?
     private var acceptedPoseFrameCount = 0
@@ -245,6 +251,8 @@ final class ScannerViewModel: ObservableObject {
     private var finalPoseObservations: [FinalPoseObservation] = []
     private var didApplyFinalPoseRefinement = false
     private var stlExportGenerationID = UUID()
+    private var dualRawDetectionCountsByTagId: [Int: Int] = [:]
+    private var dualAcceptedDetectionCountsByTagId: [Int: Int] = [:]
 
     var captureSession: AVCaptureSession {
         cameraService.captureSession
@@ -519,8 +527,16 @@ final class ScannerViewModel: ObservableObject {
 
         self.markerProfile = markerProfile
         dualMarkerDebugStates = []
+        overlayMarkers = []
+        lastValidOverlayMarkers = []
+        lastValidOverlayTimestamp = nil
         resetPoseFilter()
         resetScanSession()
+    }
+
+    @MainActor
+    func setShowDistanceGuide(_ showDistanceGuide: Bool) {
+        self.showDistanceGuide = showDistanceGuide
     }
 
     @MainActor
@@ -745,10 +761,6 @@ final class ScannerViewModel: ObservableObject {
             rawArucoMetrics,
             replacingDetectionsWith: validatedDetections
         )
-        let overlayMarkers = stabilizedOverlayDetections(
-            from: arucoMetrics.detections,
-            timestamp: metrics.lastFrameTimestamp
-        )
         let markerSizeMillimeters = poseMarkerSizeMillimeters
         let activeMarkerProfile = markerProfile
         let dualMarkerDefinitions = MarkerConfiguration.dualMarkers
@@ -759,11 +771,26 @@ final class ScannerViewModel: ObservableObject {
             markerProfile: activeMarkerProfile,
             dualMarkerDefinitions: dualMarkerDefinitions
         )
+        recordDualMarkerDetectionDiagnostics(
+            rawDetections: rawArucoMetrics.detections,
+            acceptedDetections: arucoMetrics.detections,
+            markerProfile: activeMarkerProfile
+        )
         let dualMarkerDebugStates = makeDualMarkerDebugStates(
-            detections: arucoMetrics.detections,
+            rawDetections: rawArucoMetrics.detections,
+            acceptedDetections: arucoMetrics.detections,
             poseResults: poseMetrics.rawPoseResults,
             markerProfile: activeMarkerProfile,
             dualMarkerDefinitions: dualMarkerDefinitions
+        )
+        let overlayMarkers = stabilizedOverlayMarkers(
+            from: makeOverlayMarkers(
+                detections: arucoMetrics.detections,
+                poseResults: poseMetrics.rawPoseResults,
+                markerProfile: activeMarkerProfile,
+                dualMarkerDefinitions: dualMarkerDefinitions
+            ),
+            timestamp: metrics.lastFrameTimestamp
         )
         let scanStateForFrame = scanState
         let shouldCollectScanFrame = scanStateForFrame.isCollectingFrames
@@ -888,6 +915,8 @@ final class ScannerViewModel: ObservableObject {
         scanCurrentFrameReadinessBlocker = nil
         resetPrecisionValidationHistory()
         finalPoseObservations = []
+        dualRawDetectionCountsByTagId = [:]
+        dualAcceptedDetectionCountsByTagId = [:]
         didApplyFinalPoseRefinement = false
         readyTransitionCount = 0
         didCallHandleScanBecameReady = false
@@ -1120,6 +1149,17 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private var activeTagCoverages: [ScanTagCoverage] {
+        if markerProfile == .dualArucoV2 {
+            return MarkerConfiguration.dualMarkers
+                .map(\.physicalMarkerId)
+                .sorted()
+                .map { coverage(forPhysicalMarkerId: $0) }
+        }
+
+        return observedTagCoverages
+    }
+
+    private var observedTagCoverages: [ScanTagCoverage] {
         scanTagCoverages.values
             .filter { $0.coveredBinCount > 0 || $0.observedFrameCount > 0 }
             .sorted { $0.markerId < $1.markerId }
@@ -1139,7 +1179,7 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private func scanReadinessEvaluation() -> ScanReadinessEvaluation {
-        let hasTags = !activeTagCoverages.isEmpty
+        let hasTags = !observedTagCoverages.isEmpty
         let hasEnoughGoodFrames = scanValidFrameCount >= scanReadinessConfiguration.minimumGoodFrames
         let hasPerTagGoodFrames = hasTags && activeTagCoverages.allSatisfy {
             $0.observedFrameCount >= scanReadinessConfiguration.minimumGoodFrames
@@ -1358,7 +1398,10 @@ final class ScannerViewModel: ObservableObject {
     @MainActor
     private func rebuildScanTagCoverages() {
         let requiredBinCount = scanRequiredAngularCoverageBinCount()
-        let markerIds = Set(scanCoverageBinsByMarkerId.keys).union(scanFrameCountsByMarkerId.keys)
+        var markerIds = Set(scanCoverageBinsByMarkerId.keys).union(scanFrameCountsByMarkerId.keys)
+        if markerProfile == .dualArucoV2 {
+            markerIds.formUnion(MarkerConfiguration.dualMarkers.map(\.physicalMarkerId))
+        }
 
         scanTagCoverages = markerIds.reduce(into: [:]) { partialResult, markerId in
             let coveredBinCount = scanCoverageBinsByMarkerId[markerId]?.count ?? 0
@@ -1377,6 +1420,22 @@ final class ScannerViewModel: ObservableObject {
                 observedFrameCount: scanFrameCountsByMarkerId[markerId] ?? 0
             )
         }
+    }
+
+    private func coverage(forPhysicalMarkerId markerId: Int) -> ScanTagCoverage {
+        if let coverage = scanTagCoverages[markerId] {
+            return coverage
+        }
+
+        return ScanTagCoverage(
+            markerId: markerId,
+            rawAngularCoveragePercent: 0,
+            requiredAngularCoveragePercent: scanRequiredAngularCoveragePercent,
+            normalizedCoverageProgress: 0,
+            coveredBinCount: 0,
+            requiredBinCount: scanRequiredAngularCoverageBinCount(),
+            observedFrameCount: 0
+        )
     }
 
     private func scanRequiredAngularCoverageBinCount() -> Int {
@@ -1660,30 +1719,30 @@ final class ScannerViewModel: ObservableObject {
         )
     }
 
-    private func stabilizedOverlayDetections(
-        from detections: [ArUcoDetectionResult],
+    private func stabilizedOverlayMarkers(
+        from markers: [MarkerOverlayResult],
         timestamp: Double
-    ) -> [ArUcoDetectionResult] {
+    ) -> [MarkerOverlayResult] {
         guard timestamp.isFinite else {
-            return detections
+            return markers
         }
 
-        if !detections.isEmpty {
-            lastValidOverlayDetections = detections
+        if !markers.isEmpty {
+            lastValidOverlayMarkers = markers
             lastValidOverlayTimestamp = timestamp
-            return detections
+            return markers
         }
 
         guard let lastValidOverlayTimestamp else {
-            lastValidOverlayDetections = []
+            lastValidOverlayMarkers = []
             return []
         }
 
         if timestamp - lastValidOverlayTimestamp <= OverlayStabilization.timeout {
-            return lastValidOverlayDetections
+            return lastValidOverlayMarkers
         }
 
-        lastValidOverlayDetections = []
+        lastValidOverlayMarkers = []
         self.lastValidOverlayTimestamp = nil
         return []
     }
@@ -1757,8 +1816,95 @@ final class ScannerViewModel: ObservableObject {
         )
     }
 
-    private func makeDualMarkerDebugStates(
+    private func makeOverlayMarkers(
         detections: [ArUcoDetectionResult],
+        poseResults: [PoseResult],
+        markerProfile: MarkerProfile,
+        dualMarkerDefinitions: [DualArucoMarkerDefinition]
+    ) -> [MarkerOverlayResult] {
+        switch markerProfile {
+        case .singleArucoV1:
+            return detections.compactMap { detection in
+                guard detection.corners.count == 4 else {
+                    return nil
+                }
+
+                return MarkerOverlayResult(
+                    markerId: detection.markerId,
+                    corners: detection.corners,
+                    markerProfile: .singleArucoV1,
+                    poseSource: .singleArucoV1
+                )
+            }
+        case .dualArucoV2:
+            let detectionsByTagId = bestDetectionsByMarkerId(detections)
+            var poseSourcesByPhysicalMarkerId: [Int: MarkerPoseSource] = [:]
+            for poseResult in poseResults {
+                poseSourcesByPhysicalMarkerId[poseResult.markerId] = poseResult.poseSource
+            }
+
+            return dualMarkerDefinitions.compactMap { definition in
+                let topDetection = detectionsByTagId[definition.topTagId]
+                let bottomDetection = detectionsByTagId[definition.bottomTagId]
+
+                guard topDetection != nil || bottomDetection != nil else {
+                    return nil
+                }
+
+                let corners: [CGPoint]
+                let fallbackPoseSource: MarkerPoseSource
+                if let topDetection,
+                   let bottomDetection {
+                    corners = Self.boundingBoxCorners(for: topDetection.corners + bottomDetection.corners)
+                    fallbackPoseSource = .dualTag
+                } else if let topDetection {
+                    corners = topDetection.corners
+                    fallbackPoseSource = .singleFallback(tagId: definition.topTagId, role: .top)
+                } else if let bottomDetection {
+                    corners = bottomDetection.corners
+                    fallbackPoseSource = .singleFallback(tagId: definition.bottomTagId, role: .bottom)
+                } else {
+                    return nil
+                }
+
+                guard corners.count == 4 else {
+                    return nil
+                }
+
+                return MarkerOverlayResult(
+                    markerId: definition.physicalMarkerId,
+                    corners: corners,
+                    markerProfile: .dualArucoV2,
+                    poseSource: poseSourcesByPhysicalMarkerId[definition.physicalMarkerId] ??
+                        fallbackPoseSource
+                )
+            }
+        }
+    }
+
+    private func recordDualMarkerDetectionDiagnostics(
+        rawDetections: [ArUcoDetectionResult],
+        acceptedDetections: [ArUcoDetectionResult],
+        markerProfile: MarkerProfile
+    ) {
+        guard markerProfile == .dualArucoV2 else {
+            return
+        }
+
+        let dualTagIds = Set(MarkerConfiguration.dualMarkers.flatMap {
+            [$0.topTagId, $0.bottomTagId]
+        })
+        for tagId in Set(rawDetections.map(\.markerId)) where dualTagIds.contains(tagId) {
+            dualRawDetectionCountsByTagId[tagId, default: 0] += 1
+        }
+        for tagId in Set(acceptedDetections.map(\.markerId)) where dualTagIds.contains(tagId) {
+            dualAcceptedDetectionCountsByTagId[tagId, default: 0] += 1
+        }
+    }
+
+    private func makeDualMarkerDebugStates(
+        rawDetections: [ArUcoDetectionResult],
+        acceptedDetections: [ArUcoDetectionResult],
         poseResults: [PoseResult],
         markerProfile: MarkerProfile,
         dualMarkerDefinitions: [DualArucoMarkerDefinition]
@@ -1767,25 +1913,85 @@ final class ScannerViewModel: ObservableObject {
             return []
         }
 
-        let detectedTagIds = Set(detections.map(\.markerId))
-        let posesByPhysicalMarkerId = Dictionary(uniqueKeysWithValues: poseResults.map {
-            ($0.markerId, $0)
-        })
+        let rawDetectionsByTagId = bestDetectionsByMarkerId(rawDetections)
+        let acceptedDetectionsByTagId = bestDetectionsByMarkerId(acceptedDetections)
+        let rawDetectedTagIds = Set(rawDetectionsByTagId.keys)
+        let acceptedDetectedTagIds = Set(acceptedDetectionsByTagId.keys)
+        var posesByPhysicalMarkerId: [Int: PoseResult] = [:]
+        for poseResult in poseResults {
+            posesByPhysicalMarkerId[poseResult.markerId] = poseResult
+        }
 
         return dualMarkerDefinitions.map { definition in
             let poseResult = posesByPhysicalMarkerId[definition.physicalMarkerId]
+            let topArea = rawDetectionsByTagId[definition.topTagId]?.markerAreaPixels
+            let bottomArea = rawDetectionsByTagId[definition.bottomTagId]?.markerAreaPixels
 
             return DualArucoMarkerDebugState(
                 physicalMarkerId: definition.physicalMarkerId,
                 topTagId: definition.topTagId,
                 bottomTagId: definition.bottomTagId,
-                topTagDetected: detectedTagIds.contains(definition.topTagId),
-                bottomTagDetected: detectedTagIds.contains(definition.bottomTagId),
+                topTagRawDetected: rawDetectedTagIds.contains(definition.topTagId),
+                bottomTagRawDetected: rawDetectedTagIds.contains(definition.bottomTagId),
+                topTagDetected: acceptedDetectedTagIds.contains(definition.topTagId),
+                bottomTagDetected: acceptedDetectedTagIds.contains(definition.bottomTagId),
+                topDetectionCount: dualRawDetectionCountsByTagId[definition.topTagId] ?? 0,
+                bottomDetectionCount: dualRawDetectionCountsByTagId[definition.bottomTagId] ?? 0,
+                topAcceptedDetectionCount: dualAcceptedDetectionCountsByTagId[definition.topTagId] ?? 0,
+                bottomAcceptedDetectionCount: dualAcceptedDetectionCountsByTagId[definition.bottomTagId] ?? 0,
+                topAreaPixels: topArea,
+                bottomAreaPixels: bottomArea,
+                topAreaBelowMinimum: (topArea ?? .infinity) <
+                    DualMarkerDebugConfiguration.minimumMarkerAreaPixels,
+                bottomAreaBelowMinimum: (bottomArea ?? .infinity) <
+                    DualMarkerDebugConfiguration.minimumMarkerAreaPixels,
                 poseSource: poseResult?.poseSource,
                 reprojectionError: poseResult?.reprojectionError,
                 usedPointCount: poseResult?.usedPointCount
             )
         }
+    }
+
+    private func bestDetectionsByMarkerId(
+        _ detections: [ArUcoDetectionResult]
+    ) -> [Int: ArUcoDetectionResult] {
+        var bestDetectionsByMarkerId: [Int: ArUcoDetectionResult] = [:]
+        var bestAreaByMarkerId: [Int: Double] = [:]
+
+        for detection in detections {
+            let area = detection.markerAreaPixels
+            if area > (bestAreaByMarkerId[detection.markerId] ?? -Double.infinity) {
+                bestAreaByMarkerId[detection.markerId] = area
+                bestDetectionsByMarkerId[detection.markerId] = detection
+            }
+        }
+
+        return bestDetectionsByMarkerId
+    }
+
+    private static func boundingBoxCorners(for points: [CGPoint]) -> [CGPoint] {
+        guard let firstPoint = points.first else {
+            return []
+        }
+
+        var minX = firstPoint.x
+        var minY = firstPoint.y
+        var maxX = firstPoint.x
+        var maxY = firstPoint.y
+
+        for point in points.dropFirst() {
+            minX = min(minX, point.x)
+            minY = min(minY, point.y)
+            maxX = max(maxX, point.x)
+            maxY = max(maxY, point.y)
+        }
+
+        return [
+            CGPoint(x: minX, y: minY),
+            CGPoint(x: maxX, y: minY),
+            CGPoint(x: maxX, y: maxY),
+            CGPoint(x: minX, y: maxY)
+        ]
     }
 
     private func estimatePose(

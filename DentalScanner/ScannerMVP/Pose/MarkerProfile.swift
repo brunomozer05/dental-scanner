@@ -44,8 +44,19 @@ enum MarkerPoseSource: Equatable {
             return "single-tag"
         case .dualTag:
             return "dual-tag"
-        case .singleFallback:
-            return "single-tag fallback"
+        case let .singleFallback(_, role):
+            return "\(role.debugTitle) fallback"
+        }
+    }
+
+    var overlayTitle: String {
+        switch self {
+        case .singleArucoV1:
+            return "single"
+        case .dualTag:
+            return "dual"
+        case let .singleFallback(_, role):
+            return "\(role.debugTitle) fallback"
         }
     }
 
@@ -207,8 +218,18 @@ struct DualArucoMarkerDebugState: Equatable, Identifiable {
     let physicalMarkerId: Int
     let topTagId: Int
     let bottomTagId: Int
+    let topTagRawDetected: Bool
+    let bottomTagRawDetected: Bool
     let topTagDetected: Bool
     let bottomTagDetected: Bool
+    let topDetectionCount: Int
+    let bottomDetectionCount: Int
+    let topAcceptedDetectionCount: Int
+    let bottomAcceptedDetectionCount: Int
+    let topAreaPixels: Double?
+    let bottomAreaPixels: Double?
+    let topAreaBelowMinimum: Bool
+    let bottomAreaBelowMinimum: Bool
     let poseSource: MarkerPoseSource?
     let reprojectionError: Double?
     let usedPointCount: Int?
