@@ -222,14 +222,21 @@ struct DualArucoMarkerDebugState: Equatable, Identifiable {
     let bottomTagRawDetected: Bool
     let topTagDetected: Bool
     let bottomTagDetected: Bool
+    let topTagRecentlySeen: Bool
+    let bottomTagRecentlySeen: Bool
     let topDetectionCount: Int
     let bottomDetectionCount: Int
     let topAcceptedDetectionCount: Int
     let bottomAcceptedDetectionCount: Int
+    let topRecentDetectionCount: Int
+    let bottomRecentDetectionCount: Int
+    let topRecentAcceptedDetectionCount: Int
+    let bottomRecentAcceptedDetectionCount: Int
     let topAreaPixels: Double?
     let bottomAreaPixels: Double?
     let topAreaBelowMinimum: Bool
     let bottomAreaBelowMinimum: Bool
+    let detectionWarning: String?
     let poseSource: MarkerPoseSource?
     let reprojectionError: Double?
     let usedPointCount: Int?

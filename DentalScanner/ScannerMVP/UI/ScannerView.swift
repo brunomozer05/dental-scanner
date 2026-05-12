@@ -494,9 +494,12 @@ struct ScannerView: View {
                         metricRow(title: "Bottom area", value: formattedDualTagArea(state, role: .bottom))
                         metricRow(title: "Top frames", value: formattedDualTagCounts(state, role: .top))
                         metricRow(title: "Bottom frames", value: formattedDualTagCounts(state, role: .bottom))
+                        metricRow(title: "Top ultimos", value: formattedDualTagRecentCounts(state, role: .top))
+                        metricRow(title: "Bottom ultimos", value: formattedDualTagRecentCounts(state, role: .bottom))
                         metricRow(title: "Modo", value: formattedDualMarkerPoseMode(state))
                         metricRow(title: "Erro reproj.", value: formattedDualMarkerReprojectionError(state))
                         metricRow(title: "Pontos", value: formattedDualMarkerPointCount(state))
+                        metricRow(title: "Aviso", value: formattedDualMarkerDetectionWarning(state))
                     }
                     .padding(.vertical, 4)
                 }
@@ -999,7 +1002,7 @@ struct ScannerView: View {
     }
 
     private func formattedDualMarkerPoseMode(_ state: DualArucoMarkerDebugState) -> String {
-        state.poseSource?.debugTitle ?? "sem pose"
+        state.poseSource?.debugTitle ?? "missing"
     }
 
     private func formattedDualTagDetection(
@@ -1009,20 +1012,23 @@ struct ScannerView: View {
         let rawDetected: Bool
         let acceptedDetected: Bool
         let areaBelowMinimum: Bool
+        let recentlySeen: Bool
 
         switch role {
         case .top:
             rawDetected = state.topTagRawDetected
             acceptedDetected = state.topTagDetected
             areaBelowMinimum = state.topAreaBelowMinimum
+            recentlySeen = state.topTagRecentlySeen
         case .bottom:
             rawDetected = state.bottomTagRawDetected
             acceptedDetected = state.bottomTagDetected
             areaBelowMinimum = state.bottomAreaBelowMinimum
+            recentlySeen = state.bottomTagRecentlySeen
         }
 
         if acceptedDetected {
-            return "aceita"
+            return "sim"
         }
 
         if rawDetected && areaBelowMinimum {
@@ -1031,6 +1037,10 @@ struct ScannerView: View {
 
         if rawDetected {
             return "rejeitada"
+        }
+
+        if recentlySeen {
+            return "recente"
         }
 
         return "nao"
@@ -1067,6 +1077,30 @@ struct ScannerView: View {
         }
     }
 
+    private func formattedDualTagRecentCounts(
+        _ state: DualArucoMarkerDebugState,
+        role: DualArucoTagRole
+    ) -> String {
+        let acceptedCount: Int
+        let rawCount: Int
+
+        switch role {
+        case .top:
+            acceptedCount = state.topRecentAcceptedDetectionCount
+            rawCount = state.topRecentDetectionCount
+        case .bottom:
+            acceptedCount = state.bottomRecentAcceptedDetectionCount
+            rawCount = state.bottomRecentDetectionCount
+        }
+
+        return String(
+            format: "%d/%d em %d frames",
+            acceptedCount,
+            rawCount,
+            viewModel.dualMarkerRecentDetectionWindowFrameCount
+        )
+    }
+
     private func formattedDualMarkerReprojectionError(_ state: DualArucoMarkerDebugState) -> String {
         guard let reprojectionError = state.reprojectionError,
               reprojectionError.isFinite
@@ -1083,6 +1117,10 @@ struct ScannerView: View {
         }
 
         return "\(usedPointCount)"
+    }
+
+    private func formattedDualMarkerDetectionWarning(_ state: DualArucoMarkerDebugState) -> String {
+        state.detectionWarning ?? "-"
     }
 
     private var formattedImplantPositions: String {
