@@ -488,8 +488,11 @@ struct ScannerView: View {
                 ForEach(viewModel.dualMarkerDebugStates) { state in
                     VStack(alignment: .leading, spacing: 4) {
                         metricRow(title: "Marker fisico", value: "ID \(state.physicalMarkerId)")
-                        metricRow(title: "Top \(state.topTagId)", value: formattedDualTagDetection(state, role: .top))
-                        metricRow(title: "Bottom \(state.bottomTagId)", value: formattedDualTagDetection(state, role: .bottom))
+                        metricRow(title: "Top agora \(state.topTagId)", value: formattedBool(state.topTagRawDetected))
+                        metricRow(title: "Bottom agora \(state.bottomTagId)", value: formattedBool(state.bottomTagRawDetected))
+                        metricRow(title: "Bottom recente", value: formattedBool(state.bottomTagRecentlySeen))
+                        metricRow(title: "Top status", value: formattedDualTagDetection(state, role: .top))
+                        metricRow(title: "Bottom status", value: formattedDualTagDetection(state, role: .bottom))
                         metricRow(title: "Top area", value: formattedDualTagArea(state, role: .top))
                         metricRow(title: "Bottom area", value: formattedDualTagArea(state, role: .bottom))
                         metricRow(title: "Top frames", value: formattedDualTagCounts(state, role: .top))

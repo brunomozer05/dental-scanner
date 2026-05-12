@@ -7,13 +7,13 @@ import simd
 
 final class ScannerViewModel: ObservableObject {
     private enum OverlayStabilization {
-        static let timeout: Double = 0.2
+        static let timeout: Double = 0.25
     }
 
     private enum DualMarkerDebugConfiguration {
         static let minimumMarkerAreaPixels: Double = 80.0
         static let recentDetectionWindowFrameCount: Int = 6
-        static let recentDetectionTimeoutSeconds: Double = 0.2
+        static let recentDetectionTimeoutSeconds: Double = 0.25
     }
 
     private enum PoseConfiguration {
@@ -153,6 +153,11 @@ final class ScannerViewModel: ObservableObject {
         let latestAreaPixels: Double?
     }
 
+    private struct DualMarkerPoseObservation {
+        let frameIndex: Int
+        let timestamp: Double
+    }
+
     @Published private(set) var cameraState: CameraState = .idle
     @Published private(set) var totalFramesReceived: Int = 0
     @Published private(set) var estimatedFPS: Double = 0
@@ -282,6 +287,7 @@ final class ScannerViewModel: ObservableObject {
     private var dualRawDetectionCountsByTagId: [Int: Int] = [:]
     private var dualAcceptedDetectionCountsByTagId: [Int: Int] = [:]
     private var dualRecentDetectionHistoryByTagId: [Int: [DualTagDetectionObservation]] = [:]
+    private var dualRecentDualTagPoseHistoryByMarkerId: [Int: [DualMarkerPoseObservation]] = [:]
 
     var captureSession: AVCaptureSession {
         cameraService.captureSession
@@ -812,6 +818,13 @@ final class ScannerViewModel: ObservableObject {
             timestamp: metrics.lastFrameTimestamp,
             frameIndex: metrics.totalFramesReceived
         )
+        recordDualMarkerPoseDiagnostics(
+            poseResults: poseMetrics.rawPoseResults,
+            markerProfile: activeMarkerProfile,
+            dualMarkerDefinitions: dualMarkerDefinitions,
+            timestamp: metrics.lastFrameTimestamp,
+            frameIndex: metrics.totalFramesReceived
+        )
         let dualMarkerDebugStates = makeDualMarkerDebugStates(
             rawDetections: rawArucoMetrics.detections,
             acceptedDetections: arucoMetrics.detections,
@@ -826,7 +839,9 @@ final class ScannerViewModel: ObservableObject {
                 detections: arucoMetrics.detections,
                 poseResults: poseMetrics.rawPoseResults,
                 markerProfile: activeMarkerProfile,
-                dualMarkerDefinitions: dualMarkerDefinitions
+                dualMarkerDefinitions: dualMarkerDefinitions,
+                timestamp: metrics.lastFrameTimestamp,
+                frameIndex: metrics.totalFramesReceived
             ),
             timestamp: metrics.lastFrameTimestamp,
             markerProfile: activeMarkerProfile
@@ -899,7 +914,8 @@ final class ScannerViewModel: ObservableObject {
                     rawPoseResults: poseMetrics.rawPoseResults,
                     consolidatedPoseResults: consolidatedPoseResults,
                     finalPoseObservations: frameFinalPoseObservations,
-                    timestamp: metrics.lastFrameTimestamp
+                    timestamp: metrics.lastFrameTimestamp,
+                    frameIndex: metrics.totalFramesReceived
                 )
             }
         }
@@ -957,6 +973,7 @@ final class ScannerViewModel: ObservableObject {
         dualRawDetectionCountsByTagId = [:]
         dualAcceptedDetectionCountsByTagId = [:]
         dualRecentDetectionHistoryByTagId = [:]
+        dualRecentDualTagPoseHistoryByMarkerId = [:]
         lastValidOverlayMarkers = []
         lastValidOverlayMarkersByMarkerId = [:]
         lastValidOverlayTimestamp = nil
@@ -979,7 +996,8 @@ final class ScannerViewModel: ObservableObject {
         rawPoseResults: [PoseResult],
         consolidatedPoseResults: [PoseResult],
         finalPoseObservations: [FinalPoseObservation],
-        timestamp: Double
+        timestamp: Double,
+        frameIndex: Int
     ) {
         guard scanState.isCollectingFrames else {
             return
@@ -988,7 +1006,9 @@ final class ScannerViewModel: ObservableObject {
         scanAverageDistanceMm = averageDistance(in: rawPoseResults)
 
         let frameReprojectionError = averageReprojectionError(in: rawPoseResults)
-        let goodPoseResults = rawPoseResults.filter(isGoodFrame)
+        let goodPoseResults = rawPoseResults.filter {
+            isGoodFrame($0, timestamp: timestamp, frameIndex: frameIndex)
+        }
         let goodMarkerIds = Set(goodPoseResults.map(\.markerId))
 
         guard !goodPoseResults.isEmpty,
@@ -1405,10 +1425,14 @@ final class ScannerViewModel: ObservableObject {
         scanStableReadinessDurationSeconds = max(timestamp - scanReadinessStableStartTimestamp, 0)
     }
 
-    private func isGoodFrame(_ pose: PoseResult) -> Bool {
+    private func isGoodFrame(
+        _ pose: PoseResult,
+        timestamp: Double,
+        frameIndex: Int
+    ) -> Bool {
         let distanceMm = simd_length(pose.translationVector)
 
-        return pose.markerId >= 0 &&
+        let hasValidGeometry = pose.markerId >= 0 &&
             pose.reprojectionError.isFinite &&
             pose.reprojectionError <= scanReadinessConfiguration.maximumAverageReprojectionError &&
             distanceMm.isFinite &&
@@ -1418,6 +1442,32 @@ final class ScannerViewModel: ObservableObject {
             PoseMath.isFinite(pose.rotationVector) &&
             PoseMath.isFinite(pose.rotationMatrix) &&
             PoseMath.isFinite(pose.translationVector)
+
+        guard hasValidGeometry else {
+            return false
+        }
+
+        guard markerProfile == .dualArucoV2 else {
+            return true
+        }
+
+        switch pose.poseSource {
+        case .dualTag:
+            return true
+        case let .singleFallback(_, role):
+            switch role {
+            case .top:
+                return true
+            case .bottom:
+                return hasRecentDualTagPose(
+                    forPhysicalMarkerId: pose.markerId,
+                    currentTimestamp: timestamp,
+                    currentFrameIndex: frameIndex
+                )
+            }
+        case .singleArucoV1:
+            return false
+        }
     }
 
     private func isAcceptableScanDistance(_ distanceMm: Double?) -> Bool {
@@ -1902,7 +1952,9 @@ final class ScannerViewModel: ObservableObject {
         detections: [ArUcoDetectionResult],
         poseResults: [PoseResult],
         markerProfile: MarkerProfile,
-        dualMarkerDefinitions: [DualArucoMarkerDefinition]
+        dualMarkerDefinitions: [DualArucoMarkerDefinition],
+        timestamp: Double,
+        frameIndex: Int
     ) -> [MarkerOverlayResult] {
         switch markerProfile {
         case .singleArucoV1:
@@ -1928,6 +1980,16 @@ final class ScannerViewModel: ObservableObject {
             return dualMarkerDefinitions.compactMap { definition in
                 let topDetection = detectionsByTagId[definition.topTagId]
                 let bottomDetection = detectionsByTagId[definition.bottomTagId]
+                let topRecentSummary = recentDetectionSummary(
+                    for: definition.topTagId,
+                    currentTimestamp: timestamp,
+                    currentFrameIndex: frameIndex
+                )
+                let bottomRecentSummary = recentDetectionSummary(
+                    for: definition.bottomTagId,
+                    currentTimestamp: timestamp,
+                    currentFrameIndex: frameIndex
+                )
 
                 guard topDetection != nil || bottomDetection != nil else {
                     return nil
@@ -1958,7 +2020,9 @@ final class ScannerViewModel: ObservableObject {
                     corners: corners,
                     markerProfile: .dualArucoV2,
                     poseSource: poseSourcesByPhysicalMarkerId[definition.physicalMarkerId] ??
-                        fallbackPoseSource
+                        fallbackPoseSource,
+                    topTagRecentlySeen: topRecentSummary.recentlySeen,
+                    bottomTagRecentlySeen: bottomRecentSummary.recentlySeen
                 )
             }
         }
@@ -2028,6 +2092,95 @@ final class ScannerViewModel: ObservableObject {
         }
     }
 
+    private func recordDualMarkerPoseDiagnostics(
+        poseResults: [PoseResult],
+        markerProfile: MarkerProfile,
+        dualMarkerDefinitions: [DualArucoMarkerDefinition],
+        timestamp: Double,
+        frameIndex: Int
+    ) {
+        guard markerProfile == .dualArucoV2 else {
+            return
+        }
+
+        let dualTagPoseMarkerIds = Set(
+            poseResults.compactMap { poseResult -> Int? in
+                guard case .dualTag = poseResult.poseSource else {
+                    return nil
+                }
+
+                return poseResult.markerId
+            }
+        )
+
+        for definition in dualMarkerDefinitions {
+            var history = dualRecentDualTagPoseHistoryByMarkerId[
+                definition.physicalMarkerId,
+                default: []
+            ]
+
+            if dualTagPoseMarkerIds.contains(definition.physicalMarkerId) {
+                history.append(DualMarkerPoseObservation(
+                    frameIndex: frameIndex,
+                    timestamp: timestamp
+                ))
+            }
+
+            pruneDualMarkerPoseHistory(
+                &history,
+                currentTimestamp: timestamp,
+                currentFrameIndex: frameIndex
+            )
+
+            if history.isEmpty {
+                dualRecentDualTagPoseHistoryByMarkerId.removeValue(
+                    forKey: definition.physicalMarkerId
+                )
+            } else {
+                dualRecentDualTagPoseHistoryByMarkerId[definition.physicalMarkerId] = history
+            }
+        }
+    }
+
+    private func pruneDualMarkerPoseHistory(
+        _ history: inout [DualMarkerPoseObservation],
+        currentTimestamp: Double,
+        currentFrameIndex: Int
+    ) {
+        history.removeAll { observation in
+            let frameExpired = currentFrameIndex - observation.frameIndex >=
+                DualMarkerDebugConfiguration.recentDetectionWindowFrameCount
+            let timeExpired: Bool
+            if currentTimestamp.isFinite, observation.timestamp.isFinite {
+                timeExpired = currentTimestamp - observation.timestamp >
+                    DualMarkerDebugConfiguration.recentDetectionTimeoutSeconds
+            } else {
+                timeExpired = true
+            }
+
+            return frameExpired && timeExpired
+        }
+    }
+
+    private func hasRecentDualTagPose(
+        forPhysicalMarkerId markerId: Int,
+        currentTimestamp: Double,
+        currentFrameIndex: Int
+    ) -> Bool {
+        let history = dualRecentDualTagPoseHistoryByMarkerId[markerId] ?? []
+
+        return history.contains { observation in
+            let frameRecent = currentFrameIndex - observation.frameIndex <
+                DualMarkerDebugConfiguration.recentDetectionWindowFrameCount
+            let timeRecent = currentTimestamp.isFinite &&
+                observation.timestamp.isFinite &&
+                currentTimestamp - observation.timestamp <=
+                    DualMarkerDebugConfiguration.recentDetectionTimeoutSeconds
+
+            return frameRecent || timeRecent
+        }
+    }
+
     private func recentDetectionSummary(
         for tagId: Int,
         currentTimestamp: Double,
@@ -2069,12 +2222,12 @@ final class ScannerViewModel: ObservableObject {
         let bottomAreaBelowMinimum = (bottomArea ?? .infinity) <
             DualMarkerDebugConfiguration.minimumMarkerAreaPixels
 
-        if topAreaBelowMinimum && bottomAreaBelowMinimum {
-            return "Aproxime a camera"
+        if bottomAreaBelowMinimum {
+            return "Bottom tag instável: aproxime ou melhore iluminação"
         }
 
-        if bottomAreaBelowMinimum {
-            return "Tag inferior pequena/distante"
+        if topAreaBelowMinimum {
+            return "Aproxime a camera"
         }
 
         return nil

@@ -62,8 +62,13 @@ enum MarkerPoseSource: Equatable {
 
     var qualityWeight: Double {
         switch self {
-        case .singleFallback:
-            return 0.55
+        case let .singleFallback(_, role):
+            switch role {
+            case .top:
+                return 0.65
+            case .bottom:
+                return 0.35
+            }
         case .singleArucoV1, .dualTag:
             return 1.0
         }

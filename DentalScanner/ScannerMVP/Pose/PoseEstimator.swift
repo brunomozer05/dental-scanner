@@ -3,6 +3,10 @@ import Foundation
 import simd
 
 final class PoseEstimator {
+    private enum DualArucoV2PoseSelection {
+        static let maximumPreferredDualTagReprojectionError = 2.0
+    }
+
     enum EstimatorError: LocalizedError {
         case missingCameraIntrinsics
         case invalidCameraIntrinsics
@@ -132,38 +136,67 @@ final class PoseEstimator {
             let topDetection = detectionsByTagId[definition.topTagId]
             let bottomDetection = detectionsByTagId[definition.bottomTagId]
 
-            if let topDetection,
-               let bottomDetection {
-                poseResults.append(try estimateDualTagPose(
-                    for: definition,
-                    topDetection: topDetection,
-                    bottomDetection: bottomDetection,
-                    intrinsics: intrinsics
-                ))
+            guard let poseResult = estimateBestDualArucoV2Pose(
+                for: definition,
+                topDetection: topDetection,
+                bottomDetection: bottomDetection,
+                intrinsics: intrinsics
+            ) else {
                 continue
             }
 
-            if let topDetection {
-                poseResults.append(try estimateSingleTagFallbackPose(
-                    for: definition,
-                    detection: topDetection,
-                    role: .top,
-                    intrinsics: intrinsics
-                ))
-                continue
-            }
-
-            if let bottomDetection {
-                poseResults.append(try estimateSingleTagFallbackPose(
-                    for: definition,
-                    detection: bottomDetection,
-                    role: .bottom,
-                    intrinsics: intrinsics
-                ))
-            }
+            poseResults.append(poseResult)
         }
 
         return poseResults
+    }
+
+    private func estimateBestDualArucoV2Pose(
+        for definition: DualArucoMarkerDefinition,
+        topDetection: ArUcoDetectionResult?,
+        bottomDetection: ArUcoDetectionResult?,
+        intrinsics: CameraIntrinsics
+    ) -> PoseResult? {
+        var dualTagPoseCandidate: PoseResult?
+
+        if let topDetection,
+           let bottomDetection,
+           let dualTagPose = try? estimateDualTagPose(
+                for: definition,
+                topDetection: topDetection,
+                bottomDetection: bottomDetection,
+                intrinsics: intrinsics
+           ) {
+            if dualTagPose.reprojectionError.isFinite &&
+                dualTagPose.reprojectionError <=
+                DualArucoV2PoseSelection.maximumPreferredDualTagReprojectionError {
+                return dualTagPose
+            }
+
+            dualTagPoseCandidate = dualTagPose
+        }
+
+        if let topDetection,
+           let topFallbackPose = try? estimateSingleTagFallbackPose(
+                for: definition,
+                detection: topDetection,
+                role: .top,
+                intrinsics: intrinsics
+           ) {
+            return topFallbackPose
+        }
+
+        if let bottomDetection,
+           let bottomFallbackPose = try? estimateSingleTagFallbackPose(
+                for: definition,
+                detection: bottomDetection,
+                role: .bottom,
+                intrinsics: intrinsics
+           ) {
+            return bottomFallbackPose
+        }
+
+        return dualTagPoseCandidate
     }
 
     private func estimateDualTagPose(
