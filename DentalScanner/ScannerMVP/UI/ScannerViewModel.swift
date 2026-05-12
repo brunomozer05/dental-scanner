@@ -217,6 +217,11 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var didStartSTLExportForCurrentScan: Bool = false
     @Published private(set) var lastSTLExportTagPoseCount: Int = 0
     @Published private(set) var lastSTLExportEventMessage: String = "Aguardando"
+    @Published private(set) var lastSTLReferenceModelFileName: String = "-"
+    @Published private(set) var lastSTLExportMarkerIds: [Int] = []
+    @Published private(set) var lastSTLExportMarkerProfile: MarkerProfile = MarkerConfiguration.defaultProfile
+    @Published private(set) var lastSTLExportBottomTagSizeMillimeters: Double?
+    @Published private(set) var lastSTLExportBottomCenterYMillimeters: Double?
     @Published private(set) var isTorchAvailable: Bool = false
     @Published private(set) var isTorchEnabled: Bool = false
     @Published private(set) var errorMessage: String?
@@ -924,6 +929,11 @@ final class ScannerViewModel: ObservableObject {
         didStartSTLExportForCurrentScan = false
         lastSTLExportTagPoseCount = 0
         lastSTLExportEventMessage = "Aguardando"
+        lastSTLReferenceModelFileName = "-"
+        lastSTLExportMarkerIds = []
+        lastSTLExportMarkerProfile = markerProfile
+        lastSTLExportBottomTagSizeMillimeters = nil
+        lastSTLExportBottomCenterYMillimeters = nil
     }
 
     @MainActor
@@ -2303,7 +2313,18 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private func isExportablePose(_ poseResult: PoseResult) -> Bool {
-        poseResult.markerId >= 0 &&
+        guard poseResult.markerProfile == markerProfile else {
+            return false
+        }
+
+        if markerProfile == .dualArucoV2 {
+            let physicalMarkerIds = Set(MarkerConfiguration.dualMarkers.map(\.physicalMarkerId))
+            guard physicalMarkerIds.contains(poseResult.markerId) else {
+                return false
+            }
+        }
+
+        return poseResult.markerId >= 0 &&
             poseResult.distanceMm.isFinite &&
             poseResult.reprojectionError.isFinite &&
             poseResult.markerAreaPixels.isFinite &&
@@ -2477,7 +2498,19 @@ final class ScannerViewModel: ObservableObject {
         }
 
         let currentTagPoses = tagPosesForSTLExport()
+        let currentMarkerProfile = markerProfile
+        let exportConfiguration = STLExporter.Configuration.referenceMarker(for: currentMarkerProfile)
+        let exportSTLExporter = stlExporter.reconfigured(with: exportConfiguration)
+        let exportReferenceModelFileName = exportSTLExporter.referenceModelFileName
+        let exportMarkerIds = currentTagPoses.map(\.markerId).sorted()
+
         lastSTLExportTagPoseCount = currentTagPoses.count
+        lastSTLReferenceModelFileName = exportReferenceModelFileName
+        lastSTLExportMarkerIds = exportMarkerIds
+        lastSTLExportMarkerProfile = currentMarkerProfile
+        lastSTLExportBottomTagSizeMillimeters = exportSTLExporter.bottomTagSizeMillimeters
+        lastSTLExportBottomCenterYMillimeters = exportSTLExporter.bottomTagCenterYMillimeters
+
         guard !currentTagPoses.isEmpty else {
             stlExportURL = nil
             stlExportedImplantCount = 0
@@ -2492,7 +2525,6 @@ final class ScannerViewModel: ObservableObject {
             return nil
         }
 
-        let stlExporter = self.stlExporter
         let scanStorageManager = self.scanStorageManager
         let scanName = ScanStorageManager.automaticScanFileName()
         let exportedTagCount = currentTagPoses.count
@@ -2502,7 +2534,12 @@ final class ScannerViewModel: ObservableObject {
         isGeneratingSTL = true
         didStartSTLExportForCurrentScan = true
         stlExportErrorMessage = nil
-        lastSTLExportEventMessage = "Export iniciado"
+        lastSTLExportEventMessage = makeSTLExportEventMessage(
+            event: "Export iniciado",
+            markerProfile: currentMarkerProfile,
+            referenceModelFileName: exportReferenceModelFileName,
+            markerIds: exportMarkerIds
+        )
         scanReadinessMessage = "Gerando modelo..."
         scanQualityStatus = "Gerando modelo..."
         scanReadinessBlockerSummary = "Pronto: gerando STL"
@@ -2512,7 +2549,7 @@ final class ScannerViewModel: ObservableObject {
             let result: Result<ScanItem, Error>
 
             do {
-                let stl = try stlExporter.exportReferenceMarkersAsSTL(tagPoses: currentTagPoses)
+                let stl = try exportSTLExporter.exportReferenceMarkersAsSTL(tagPoses: currentTagPoses)
                 guard let stlData = stl.data(using: .utf8) else {
                     throw ScanStorageManager.StorageError.unableToEncodeSTL
                 }
@@ -2540,7 +2577,12 @@ final class ScannerViewModel: ObservableObject {
                     self.stlExportURL = scan.fileURL
                     self.stlExportedImplantCount = exportedTagCount
                     self.stlExportErrorMessage = nil
-                    self.lastSTLExportEventMessage = "Export concluido"
+                    self.lastSTLExportEventMessage = self.makeSTLExportEventMessage(
+                        event: "Export concluido",
+                        markerProfile: currentMarkerProfile,
+                        referenceModelFileName: exportReferenceModelFileName,
+                        markerIds: exportMarkerIds
+                    )
                     if self.scanState == .ready {
                         self.scanReadinessMessage = "Pronto para gerar modelo"
                         self.scanQualityStatus = "Pronto para exportar"
@@ -2550,7 +2592,12 @@ final class ScannerViewModel: ObservableObject {
                     self.stlExportURL = nil
                     self.stlExportedImplantCount = 0
                     self.stlExportErrorMessage = error.localizedDescription
-                    self.lastSTLExportEventMessage = "Export falhou"
+                    self.lastSTLExportEventMessage = self.makeSTLExportEventMessage(
+                        event: "Export falhou",
+                        markerProfile: currentMarkerProfile,
+                        referenceModelFileName: exportReferenceModelFileName,
+                        markerIds: exportMarkerIds
+                    )
                     if self.scanState == .ready {
                         self.scanReadinessMessage = "Erro ao gerar modelo"
                         self.scanQualityStatus = "Erro ao gerar modelo"
@@ -2561,6 +2608,19 @@ final class ScannerViewModel: ObservableObject {
         }
 
         return nil
+    }
+
+    private func makeSTLExportEventMessage(
+        event: String,
+        markerProfile: MarkerProfile,
+        referenceModelFileName: String,
+        markerIds: [Int]
+    ) -> String {
+        let markerIdSummary = markerIds.isEmpty
+            ? "-"
+            : markerIds.map(String.init).joined(separator: ",")
+
+        return "\(event): \(markerProfile.rawValue), \(referenceModelFileName), IDs \(markerIdSummary)"
     }
 
     private struct ScanReadinessEvaluation {

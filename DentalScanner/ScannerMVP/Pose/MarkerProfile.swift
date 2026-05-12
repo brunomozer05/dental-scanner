@@ -184,7 +184,7 @@ enum MarkerConfiguration {
             topTagId: 0,
             bottomTagId: 1,
             topTagSizeMm: 8.0,
-            bottomTagSizeMm: 6.0,
+            bottomTagSizeMm: 6.5,
             verticalGapMm: 0.5
         ),
         DualArucoMarkerDefinition(
@@ -192,7 +192,7 @@ enum MarkerConfiguration {
             topTagId: 2,
             bottomTagId: 3,
             topTagSizeMm: 8.0,
-            bottomTagSizeMm: 6.0,
+            bottomTagSizeMm: 6.5,
             verticalGapMm: 0.5
         ),
         DualArucoMarkerDefinition(
@@ -200,7 +200,7 @@ enum MarkerConfiguration {
             topTagId: 4,
             bottomTagId: 5,
             topTagSizeMm: 8.0,
-            bottomTagSizeMm: 6.0,
+            bottomTagSizeMm: 6.5,
             verticalGapMm: 0.5
         ),
         DualArucoMarkerDefinition(
@@ -208,7 +208,7 @@ enum MarkerConfiguration {
             topTagId: 6,
             bottomTagId: 7,
             topTagSizeMm: 8.0,
-            bottomTagSizeMm: 6.0,
+            bottomTagSizeMm: 6.5,
             verticalGapMm: 0.5
         )
     ]

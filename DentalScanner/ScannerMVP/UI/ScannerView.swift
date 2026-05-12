@@ -812,6 +812,24 @@ struct ScannerView: View {
         "\(viewModel.lastSTLExportTagPoseCount)"
     }
 
+    private var formattedLastSTLExportMarkerIds: String {
+        guard !viewModel.lastSTLExportMarkerIds.isEmpty else {
+            return "-"
+        }
+
+        return viewModel.lastSTLExportMarkerIds.map(String.init).joined(separator: ", ")
+    }
+
+    private var formattedLastSTLExportBottomGeometry: String {
+        guard let bottomTagSize = viewModel.lastSTLExportBottomTagSizeMillimeters,
+              let bottomCenterY = viewModel.lastSTLExportBottomCenterYMillimeters
+        else {
+            return "-"
+        }
+
+        return String(format: "%.1f mm / y %.2f mm", bottomTagSize, bottomCenterY)
+    }
+
     private var formattedCurrentExportableTagPoseCount: String {
         "\(viewModel.currentExportableTagPoseCount)"
     }
@@ -1310,6 +1328,10 @@ struct ScannerView: View {
             metricRow(title: "Export iniciado", value: formattedBool(viewModel.didStartSTLExportForCurrentScan))
             metricRow(title: "tagPoses atuais", value: formattedCurrentExportableTagPoseCount)
             metricRow(title: "tagPoses export", value: formattedLastSTLExportTagPoseCount)
+            metricRow(title: "Perfil export", value: viewModel.lastSTLExportMarkerProfile.debugTitle)
+            metricRow(title: "STL ref", value: viewModel.lastSTLReferenceModelFileName)
+            metricRow(title: "IDs export", value: formattedLastSTLExportMarkerIds)
+            metricRow(title: "Bottom v2", value: formattedLastSTLExportBottomGeometry)
             metricRow(title: "handleReady chamado", value: formattedBool(viewModel.didCallHandleScanBecameReady))
             metricRow(title: "saveScan chamado", value: formattedBool(viewModel.didCallSaveCurrentScanIfNeeded))
             metricRow(title: "canExportSTL", value: formattedCanExportSTL)

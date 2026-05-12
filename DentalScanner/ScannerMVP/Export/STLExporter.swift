@@ -2,28 +2,82 @@ import Foundation
 import simd
 
 struct STLExporter {
+    enum ReferenceMarkerModel {
+        case markerV1
+        case markerV2
+
+        var fileName: String {
+            switch self {
+            case .markerV1:
+                return "marker_reference"
+            case .markerV2:
+                return "marker_reference_2"
+            }
+        }
+    }
+
     struct Configuration {
+        let referenceModel: ReferenceMarkerModel
         let referenceModelScale: Double
-        let referenceModelTagCenterInModelMillimeters: SIMD3<Double>
+        let referenceModelTopTagCenterInModelMillimeters: SIMD3<Double>
+        let referenceModelBottomTagCenterInModelMillimeters: SIMD3<Double>?
+        let bottomTagSizeMillimeters: Double?
+        let bottomTagCenterInMarkerMillimeters: SIMD3<Double>?
         let referenceModelFlipZ: Bool
         let referenceModelLocalRotation: simd_quatd
 
-        static let markerReference = Configuration(
+        var referenceModelFileName: String {
+            referenceModel.fileName
+        }
+
+        static func referenceMarker(for markerProfile: MarkerProfile) -> Configuration {
+            switch markerProfile {
+            case .singleArucoV1:
+                return .markerReferenceV1
+            case .dualArucoV2:
+                return .markerReferenceV2
+            }
+        }
+
+        static let markerReferenceV1 = Configuration(
+            referenceModel: .markerV1,
             referenceModelScale: 1.0,
-            referenceModelTagCenterInModelMillimeters: SIMD3<Double>(4.0, -1.45, 13.55),
+            referenceModelTopTagCenterInModelMillimeters: SIMD3<Double>(4.0, -1.45, 13.55),
+            referenceModelBottomTagCenterInModelMillimeters: nil,
+            bottomTagSizeMillimeters: nil,
+            bottomTagCenterInMarkerMillimeters: nil,
             referenceModelFlipZ: false,
             referenceModelLocalRotation: simd_quatd(
                 angle: 0.0,
                 axis: SIMD3<Double>(0.0, 0.0, 1.0)
             )
         )
+
+        // marker_reference_2.stl places the tag boxes on the X = -17 plane.
+        // Y is horizontal, Z is vertical, so these centers map to (0, 0, 0)
+        // for the top 8 mm tag and (0, -7.75, 0) for the bottom 6.5 mm tag.
+        static let markerReferenceV2 = Configuration(
+            referenceModel: .markerV2,
+            referenceModelScale: 1.0,
+            referenceModelTopTagCenterInModelMillimeters: SIMD3<Double>(-17.0, 17.0, 15.0),
+            referenceModelBottomTagCenterInModelMillimeters: SIMD3<Double>(-17.0, 17.0, 7.25),
+            bottomTagSizeMillimeters: 6.5,
+            bottomTagCenterInMarkerMillimeters: SIMD3<Double>(0.0, -7.75, 0.0),
+            referenceModelFlipZ: false,
+            referenceModelLocalRotation: simd_quatd(
+                angle: 0.0,
+                axis: SIMD3<Double>(0.0, 0.0, 1.0)
+            )
+        )
+
+        static let markerReference = markerReferenceV1
     }
 
     enum ExportError: LocalizedError {
         case emptyImplantList
         case emptyTagPoseList
         case invalidConfiguration
-        case missingReferenceModel
+        case missingReferenceModel(fileName: String)
         case emptyReferenceModel
         case invalidReferenceModel
         case unableToEncodeSTL
@@ -36,8 +90,8 @@ struct STLExporter {
                 return "Nenhuma pose de tag detectada para exportar."
             case .invalidConfiguration:
                 return "Configuracao do modelo STL invalida."
-            case .missingReferenceModel:
-                return "Nao foi possivel encontrar marker_reference.stl no bundle."
+            case let .missingReferenceModel(fileName):
+                return "Nao foi possivel encontrar \(fileName).stl no bundle."
             case .emptyReferenceModel:
                 return "O STL de referencia nao contem triangulos."
             case .invalidReferenceModel:
@@ -50,10 +104,26 @@ struct STLExporter {
 
     private let configuration: Configuration
     private static let referenceModelCacheLock = NSLock()
-    private static var cachedReferenceModelTriangles: [Triangle]?
+    private static var cachedReferenceModelTrianglesByFileName: [String: [Triangle]] = [:]
 
     init(configuration: Configuration = .markerReference) {
         self.configuration = configuration
+    }
+
+    func reconfigured(with configuration: Configuration) -> STLExporter {
+        STLExporter(configuration: configuration)
+    }
+
+    var referenceModelFileName: String {
+        "\(configuration.referenceModelFileName).stl"
+    }
+
+    var bottomTagSizeMillimeters: Double? {
+        configuration.bottomTagSizeMillimeters
+    }
+
+    var bottomTagCenterYMillimeters: Double? {
+        configuration.bottomTagCenterInMarkerMillimeters?.y
     }
 
     func writeASCIISTL(
@@ -183,7 +253,8 @@ struct STLExporter {
 
     private func tagLocalPoint(from localPoint: SIMD3<Double>) -> SIMD3<Double> {
         let scaledPoint = localPoint * configuration.referenceModelScale
-        let relative = scaledPoint - configuration.referenceModelTagCenterInModelMillimeters
+        let relative = scaledPoint - configuration.referenceModelTopTagCenterInModelMillimeters
+        // Existing STL model axes: model Y -> marker -X, model Z -> marker Y, model X -> marker Z.
         var tagLocalPoint = SIMD3<Double>(
             -relative.y,
             relative.z,
@@ -205,12 +276,12 @@ struct STLExporter {
         let triangles = try loadReferenceModelTrianglesFromBundle()
 
         Self.referenceModelCacheLock.lock()
-        if let cachedTriangles = Self.cachedReferenceModelTriangles {
+        if let cachedTriangles = Self.cachedReferenceModelTrianglesByFileName[configuration.referenceModelFileName] {
             Self.referenceModelCacheLock.unlock()
             return cachedTriangles
         }
 
-        Self.cachedReferenceModelTriangles = triangles
+        Self.cachedReferenceModelTrianglesByFileName[configuration.referenceModelFileName] = triangles
         Self.referenceModelCacheLock.unlock()
 
         return triangles
@@ -218,7 +289,7 @@ struct STLExporter {
 
     private func cachedReferenceModelTriangles() -> [Triangle]? {
         Self.referenceModelCacheLock.lock()
-        let triangles = Self.cachedReferenceModelTriangles
+        let triangles = Self.cachedReferenceModelTrianglesByFileName[configuration.referenceModelFileName]
         Self.referenceModelCacheLock.unlock()
         return triangles
     }
@@ -239,25 +310,30 @@ struct STLExporter {
     }
 
     private func referenceModelURL() throws -> URL {
-        if let url = Bundle.main.url(forResource: "marker_reference", withExtension: "stl") {
+        let fileName = configuration.referenceModelFileName
+
+        if let url = Bundle.main.url(forResource: fileName, withExtension: "stl") {
             return url
         }
 
         if let url = Bundle.main.url(
-            forResource: "marker_reference",
+            forResource: fileName,
             withExtension: "stl",
             subdirectory: "Models"
         ) {
             return url
         }
 
-        throw ExportError.missingReferenceModel
+        throw ExportError.missingReferenceModel(fileName: fileName)
     }
 
     private func validateConfiguration() throws {
         guard configuration.referenceModelScale.isFinite,
               configuration.referenceModelScale > 0,
-              isFinite(configuration.referenceModelTagCenterInModelMillimeters)
+              isFinite(configuration.referenceModelTopTagCenterInModelMillimeters),
+              configuration.referenceModelBottomTagCenterInModelMillimeters.map({ isFinite($0) }) ?? true,
+              configuration.bottomTagSizeMillimeters.map({ $0.isFinite && $0 > 0 }) ?? true,
+              configuration.bottomTagCenterInMarkerMillimeters.map({ isFinite($0) }) ?? true
         else {
             throw ExportError.invalidConfiguration
         }
