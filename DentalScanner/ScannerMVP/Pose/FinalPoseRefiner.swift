@@ -4,6 +4,7 @@ import simd
 
 struct FinalPoseObservation {
     let markerId: Int
+    let poseSource: MarkerPoseSource
     let objectPoints: [SIMD3<Double>]
     let imagePoints: [CGPoint]
     let cameraMatrix: simd_double3x3
@@ -119,11 +120,13 @@ final class FinalPoseRefiner {
             $0.reprojectionError.isFinite &&
                 $0.reprojectionError <= configuration.maximumObservationReprojectionError
         }
-        guard let referenceCameraMatrix = lowErrorObservations.last?.cameraMatrix else {
+        let preferredObservations = preferredObservations(from: lowErrorObservations)
+
+        guard let referenceCameraMatrix = preferredObservations.last?.cameraMatrix else {
             return nil
         }
 
-        let compatibleObservations = lowErrorObservations.filter {
+        let compatibleObservations = preferredObservations.filter {
             Self.maximumMatrixDelta($0.cameraMatrix, referenceCameraMatrix) <=
                 configuration.maximumCameraMatrixDelta
         }
@@ -226,6 +229,50 @@ final class FinalPoseRefiner {
             detectedTopTagId: fallbackMetadata.detectedTopTagId,
             detectedBottomTagId: fallbackMetadata.detectedBottomTagId
         )
+    }
+
+    private func preferredObservations(
+        from observations: [FinalPoseObservation]
+    ) -> [FinalPoseObservation] {
+        let dualTagObservations = observations.filter {
+            if case .dualTag = $0.poseSource {
+                return true
+            }
+
+            return false
+        }
+        if dualTagObservations.count >= configuration.minimumObservationsPerMarker {
+            return dualTagObservations
+        }
+
+        let topFallbackObservations = observations.filter {
+            if case let .singleFallback(_, role) = $0.poseSource {
+                return role == .top
+            }
+
+            return false
+        }
+        if topFallbackObservations.count >= configuration.minimumObservationsPerMarker {
+            return topFallbackObservations
+        }
+
+        let dualAndTopObservations = dualTagObservations + topFallbackObservations
+        if dualAndTopObservations.count >= configuration.minimumObservationsPerMarker {
+            return dualAndTopObservations
+        }
+
+        let bottomFallbackObservations = observations.filter {
+            if case let .singleFallback(_, role) = $0.poseSource {
+                return role == .bottom
+            }
+
+            return false
+        }
+        if bottomFallbackObservations.count >= configuration.minimumObservationsPerMarker {
+            return bottomFallbackObservations
+        }
+
+        return observations
     }
 
     private static func vector3(from values: [NSNumber]) -> SIMD3<Double>? {

@@ -65,9 +65,9 @@ enum MarkerPoseSource: Equatable {
         case let .singleFallback(_, role):
             switch role {
             case .top:
-                return 0.65
-            case .bottom:
                 return 0.35
+            case .bottom:
+                return 0.15
             }
         case .singleArucoV1, .dualTag:
             return 1.0
@@ -181,7 +181,7 @@ struct DualArucoMarkerDefinition: Equatable, Identifiable {
 }
 
 enum MarkerConfiguration {
-    static let defaultProfile: MarkerProfile = .singleArucoV1
+    static let defaultProfile: MarkerProfile = .dualArucoV2
 
     static let dualMarkers: [DualArucoMarkerDefinition] = [
         DualArucoMarkerDefinition(
@@ -245,6 +245,12 @@ struct DualArucoMarkerDebugState: Equatable, Identifiable {
     let poseSource: MarkerPoseSource?
     let reprojectionError: Double?
     let usedPointCount: Int?
+    let scanDualTagFrameCount: Int
+    let scanTopFallbackFrameCount: Int
+    let scanBottomFallbackFrameCount: Int
+    let scanDualTagPosePercent: Double
+    let scanDominantPoseSource: MarkerPoseSource?
+    let scanConsistencyWarning: String?
 
     var id: Int {
         physicalMarkerId

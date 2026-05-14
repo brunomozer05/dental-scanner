@@ -93,6 +93,8 @@ final class ScannerViewModel: ObservableObject {
         static let maximumRequiredAngularCoveragePercent: Double = 95.0
         static let angularCoverageStepPercent: Double = 5.0
         static let precisionErrorHistoryLimit: Int = 30
+        static let defaultMinimumDualTagFramesPerMarker: Int = 10
+        static let minimumDualTagFramesPerMarkerRange: ClosedRange<Int> = 0...30
     }
 
     enum CameraState: Equatable {
@@ -230,6 +232,9 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var scanTargetValidFrameCount: Int = ScanConfiguration.defaultTargetValidFrameCount
     @Published private(set) var scanRequiredAngularCoveragePercent: Double =
         ScanConfiguration.defaultRequiredAngularCoveragePercent
+    @Published private(set) var scanDualTagReady: Bool = false
+    @Published private(set) var scanMinimumDualTagFrameCount: Int =
+        ScanConfiguration.defaultMinimumDualTagFramesPerMarker
     @Published private(set) var stlExportURL: URL?
     @Published private(set) var stlExportedImplantCount: Int = 0
     @Published private(set) var stlExportErrorMessage: String?
@@ -277,6 +282,9 @@ final class ScannerViewModel: ObservableObject {
     private var scanPoseHistoryByMarkerId: [Int: [ScanPoseSample]] = [:]
     private var scanCoverageBinsByMarkerId: [Int: Set<Int>] = [:]
     private var scanFrameCountsByMarkerId: [Int: Int] = [:]
+    private var scanDualTagFrameCountsByMarkerId: [Int: Int] = [:]
+    private var scanTopFallbackFrameCountsByMarkerId: [Int: Int] = [:]
+    private var scanBottomFallbackFrameCountsByMarkerId: [Int: Int] = [:]
     private var scanReadinessStableStartTimestamp: Double?
     private var scanCurrentFrameIsGood = false
     private var scanCurrentFrameReadinessBlocker: String?
@@ -320,6 +328,10 @@ final class ScannerViewModel: ObservableObject {
 
     var scanAngularCoverageStepPercent: Double {
         ScanConfiguration.angularCoverageStepPercent
+    }
+
+    var scanMinimumDualTagFrameRange: ClosedRange<Int> {
+        ScanConfiguration.minimumDualTagFramesPerMarkerRange
     }
 
     var dualMarkerRecentDetectionWindowFrameCount: Int {
@@ -615,6 +627,23 @@ final class ScannerViewModel: ObservableObject {
             ScanConfiguration.maximumRequiredAngularCoveragePercent
         )
         rebuildScanTagCoverages()
+
+        if scanState != .idle {
+            updateScanProgressAndState(
+                timestamp: lastFrameTimestamp ?? Date().timeIntervalSinceReferenceDate
+            )
+        }
+    }
+
+    @MainActor
+    func setScanMinimumDualTagFrameCount(_ minimumDualTagFrameCount: Int) {
+        scanMinimumDualTagFrameCount = min(
+            max(
+                minimumDualTagFrameCount,
+                ScanConfiguration.minimumDualTagFramesPerMarkerRange.lowerBound
+            ),
+            ScanConfiguration.minimumDualTagFramesPerMarkerRange.upperBound
+        )
 
         if scanState != .idle {
             updateScanProgressAndState(
@@ -960,11 +989,15 @@ final class ScannerViewModel: ObservableObject {
         scanJitterReady = false
         scanStableReady = false
         scanCurrentFrameGood = false
+        scanDualTagReady = false
         scanTagCoverages = [:]
         scanReprojectionErrors = []
         scanPoseHistoryByMarkerId = [:]
         scanCoverageBinsByMarkerId = [:]
         scanFrameCountsByMarkerId = [:]
+        scanDualTagFrameCountsByMarkerId = [:]
+        scanTopFallbackFrameCountsByMarkerId = [:]
+        scanBottomFallbackFrameCountsByMarkerId = [:]
         scanReadinessStableStartTimestamp = nil
         scanCurrentFrameIsGood = false
         scanCurrentFrameReadinessBlocker = nil
@@ -1039,6 +1072,7 @@ final class ScannerViewModel: ObservableObject {
         trimRecentValues(&scanReprojectionErrors, to: scanTargetValidFrameCount)
 
         recordAngularCoverage(from: goodPoseResults)
+        recordDualArucoV2PoseSourceFrames(from: goodPoseResults)
 
         let goodConsolidatedPoseResults = consolidatedPoseResults.filter {
             goodMarkerIds.contains($0.markerId)
@@ -1133,6 +1167,7 @@ final class ScannerViewModel: ObservableObject {
         scanJitterReady = evaluation.hasStablePosition && evaluation.hasStableRotation
         scanStableReady = hasStableDuration
         scanCurrentFrameGood = evaluation.hasCurrentGoodFrame
+        scanDualTagReady = evaluation.hasMinimumDualTagFrames
     }
 
     @MainActor
@@ -1260,6 +1295,7 @@ final class ScannerViewModel: ObservableObject {
         let hasStableRotation = (scanRotationJitterDegrees ?? .infinity) <=
             scanReadinessConfiguration.maximumRotationJitterDegrees
         let hasExportableTagPoses = currentExportableTagPoseCount > 0
+        let hasMinimumDualTagFrames = hasMinimumDualTagFramesPerMarker()
 
         return ScanReadinessEvaluation(
             hasCurrentGoodFrame: scanCurrentFrameIsGood,
@@ -1267,12 +1303,30 @@ final class ScannerViewModel: ObservableObject {
             hasCompleteTagCoverage: hasCompleteTagCoverage,
             hasEnoughGoodFrames: hasEnoughGoodFrames,
             hasPerTagGoodFrames: hasPerTagGoodFrames,
+            hasMinimumDualTagFrames: hasMinimumDualTagFrames,
             hasAcceptableDistance: hasAcceptableDistance,
             hasAcceptableReprojectionError: hasAcceptableReprojectionError,
             hasStablePosition: hasStablePosition,
             hasStableRotation: hasStableRotation,
             hasExportableTagPoses: hasExportableTagPoses
         )
+    }
+
+    private func hasMinimumDualTagFramesPerMarker() -> Bool {
+        guard markerProfile == .dualArucoV2,
+              scanMinimumDualTagFrameCount > 0
+        else {
+            return true
+        }
+
+        let physicalMarkerIds = MarkerConfiguration.dualMarkers.map(\.physicalMarkerId)
+        guard !physicalMarkerIds.isEmpty else {
+            return false
+        }
+
+        return physicalMarkerIds.allSatisfy {
+            (scanDualTagFrameCountsByMarkerId[$0] ?? 0) >= scanMinimumDualTagFrameCount
+        }
     }
 
     private func readinessMessage(
@@ -1285,6 +1339,10 @@ final class ScannerViewModel: ObservableObject {
 
         if !evaluation.hasCompleteTagCoverage {
             return "Colete mais angulos"
+        }
+
+        if !evaluation.hasMinimumDualTagFrames {
+            return "Capture melhor as duas tags"
         }
 
         if !evaluation.hasEnoughGoodFrames || !evaluation.hasPerTagGoodFrames {
@@ -1346,6 +1404,10 @@ final class ScannerViewModel: ObservableObject {
 
         if !evaluation.hasCompleteTagCoverage {
             return "Bloqueio principal: cobertura"
+        }
+
+        if !evaluation.hasMinimumDualTagFrames {
+            return "Bloqueio principal: dual-tag"
         }
 
         if !evaluation.hasEnoughGoodFrames || !evaluation.hasPerTagGoodFrames {
@@ -1491,6 +1553,29 @@ final class ScannerViewModel: ObservableObject {
         }
 
         rebuildScanTagCoverages()
+    }
+
+    @MainActor
+    private func recordDualArucoV2PoseSourceFrames(from poseResults: [PoseResult]) {
+        guard markerProfile == .dualArucoV2 else {
+            return
+        }
+
+        for poseResult in poseResults {
+            switch poseResult.poseSource {
+            case .dualTag:
+                scanDualTagFrameCountsByMarkerId[poseResult.markerId, default: 0] += 1
+            case let .singleFallback(_, role):
+                switch role {
+                case .top:
+                    scanTopFallbackFrameCountsByMarkerId[poseResult.markerId, default: 0] += 1
+                case .bottom:
+                    scanBottomFallbackFrameCountsByMarkerId[poseResult.markerId, default: 0] += 1
+                }
+            case .singleArucoV1:
+                continue
+            }
+        }
     }
 
     @MainActor
@@ -2223,7 +2308,7 @@ final class ScannerViewModel: ObservableObject {
             DualMarkerDebugConfiguration.minimumMarkerAreaPixels
 
         if bottomAreaBelowMinimum {
-            return "Bottom tag instável: aproxime ou melhore iluminação"
+            return "Bottom tag instavel: aproxime ou melhore iluminacao"
         }
 
         if topAreaBelowMinimum {
@@ -2231,6 +2316,60 @@ final class ScannerViewModel: ObservableObject {
         }
 
         return nil
+    }
+
+    private func dominantPoseSource(
+        for definition: DualArucoMarkerDefinition,
+        dualTagFrameCount: Int,
+        topFallbackFrameCount: Int,
+        bottomFallbackFrameCount: Int
+    ) -> MarkerPoseSource? {
+        let dualTag = MarkerPoseSource.dualTag
+        let topFallback = MarkerPoseSource.singleFallback(
+            tagId: definition.topTagId,
+            role: .top
+        )
+        let bottomFallback = MarkerPoseSource.singleFallback(
+            tagId: definition.bottomTagId,
+            role: .bottom
+        )
+        let weightedSources: [(source: MarkerPoseSource, weight: Double)] = [
+            (dualTag, Double(dualTagFrameCount) * dualTag.qualityWeight),
+            (topFallback, Double(topFallbackFrameCount) * topFallback.qualityWeight),
+            (bottomFallback, Double(bottomFallbackFrameCount) * bottomFallback.qualityWeight)
+        ]
+
+        guard let dominantSource = weightedSources.max(by: { $0.weight < $1.weight }),
+              dominantSource.weight > 0
+        else {
+            return nil
+        }
+
+        return dominantSource.source
+    }
+
+    private func dualTagPosePercent(
+        dualTagFrameCount: Int,
+        topFallbackFrameCount: Int,
+        bottomFallbackFrameCount: Int
+    ) -> Double {
+        let totalCount = dualTagFrameCount + topFallbackFrameCount + bottomFallbackFrameCount
+        guard totalCount > 0 else {
+            return 0
+        }
+
+        return Double(dualTagFrameCount) / Double(totalCount) * 100.0
+    }
+
+    private func dualMarkerConsistencyWarning(dualTagFrameCount: Int) -> String? {
+        guard markerProfile == .dualArucoV2,
+              scanMinimumDualTagFrameCount > 0,
+              dualTagFrameCount < scanMinimumDualTagFrameCount
+        else {
+            return nil
+        }
+
+        return "Poucos frames dual-tag: aproxime ou melhore iluminacao"
     }
 
     private func makeDualMarkerDebugStates(
@@ -2271,6 +2410,15 @@ final class ScannerViewModel: ObservableObject {
             )
             let topArea = topRawArea ?? topRecentSummary.latestAreaPixels
             let bottomArea = bottomRawArea ?? bottomRecentSummary.latestAreaPixels
+            let dualTagFrameCount = scanDualTagFrameCountsByMarkerId[
+                definition.physicalMarkerId
+            ] ?? 0
+            let topFallbackFrameCount = scanTopFallbackFrameCountsByMarkerId[
+                definition.physicalMarkerId
+            ] ?? 0
+            let bottomFallbackFrameCount = scanBottomFallbackFrameCountsByMarkerId[
+                definition.physicalMarkerId
+            ] ?? 0
 
             return DualArucoMarkerDebugState(
                 physicalMarkerId: definition.physicalMarkerId,
@@ -2302,7 +2450,24 @@ final class ScannerViewModel: ObservableObject {
                 ),
                 poseSource: poseResult?.poseSource,
                 reprojectionError: poseResult?.reprojectionError,
-                usedPointCount: poseResult?.usedPointCount
+                usedPointCount: poseResult?.usedPointCount,
+                scanDualTagFrameCount: dualTagFrameCount,
+                scanTopFallbackFrameCount: topFallbackFrameCount,
+                scanBottomFallbackFrameCount: bottomFallbackFrameCount,
+                scanDualTagPosePercent: dualTagPosePercent(
+                    dualTagFrameCount: dualTagFrameCount,
+                    topFallbackFrameCount: topFallbackFrameCount,
+                    bottomFallbackFrameCount: bottomFallbackFrameCount
+                ),
+                scanDominantPoseSource: dominantPoseSource(
+                    for: definition,
+                    dualTagFrameCount: dualTagFrameCount,
+                    topFallbackFrameCount: topFallbackFrameCount,
+                    bottomFallbackFrameCount: bottomFallbackFrameCount
+                ),
+                scanConsistencyWarning: dualMarkerConsistencyWarning(
+                    dualTagFrameCount: dualTagFrameCount
+                )
             )
         }
     }
@@ -2461,6 +2626,7 @@ final class ScannerViewModel: ObservableObject {
 
                 return FinalPoseObservation(
                     markerId: poseResult.markerId,
+                    poseSource: poseResult.poseSource,
                     objectPoints: objectPoints,
                     imagePoints: detection.corners,
                     cameraMatrix: cameraMatrix,
@@ -2491,6 +2657,7 @@ final class ScannerViewModel: ObservableObject {
 
                 return FinalPoseObservation(
                     markerId: poseResult.markerId,
+                    poseSource: poseResult.poseSource,
                     objectPoints: observationPoints.objectPoints,
                     imagePoints: observationPoints.imagePoints,
                     cameraMatrix: cameraMatrix,
@@ -2974,6 +3141,7 @@ final class ScannerViewModel: ObservableObject {
         let hasCompleteTagCoverage: Bool
         let hasEnoughGoodFrames: Bool
         let hasPerTagGoodFrames: Bool
+        let hasMinimumDualTagFrames: Bool
         let hasAcceptableDistance: Bool
         let hasAcceptableReprojectionError: Bool
         let hasStablePosition: Bool
@@ -2985,6 +3153,7 @@ final class ScannerViewModel: ObservableObject {
                 hasCompleteTagCoverage &&
                 hasEnoughGoodFrames &&
                 hasPerTagGoodFrames &&
+                hasMinimumDualTagFrames &&
                 hasAcceptableReprojectionError &&
                 hasExportableTagPoses
         }

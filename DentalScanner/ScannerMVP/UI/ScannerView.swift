@@ -500,6 +500,11 @@ struct ScannerView: View {
                         metricRow(title: "Top ultimos", value: formattedDualTagRecentCounts(state, role: .top))
                         metricRow(title: "Bottom ultimos", value: formattedDualTagRecentCounts(state, role: .bottom))
                         metricRow(title: "Modo", value: formattedDualMarkerPoseMode(state))
+                        metricRow(title: "Dual validos", value: "\(state.scanDualTagFrameCount)")
+                        metricRow(title: "Top fallback validos", value: "\(state.scanTopFallbackFrameCount)")
+                        metricRow(title: "Bottom fallback validos", value: "\(state.scanBottomFallbackFrameCount)")
+                        metricRow(title: "Dual %", value: formattedDualMarkerScanDualPercent(state))
+                        metricRow(title: "Modo dominante", value: formattedDualMarkerDominantMode(state))
                         metricRow(title: "Erro reproj.", value: formattedDualMarkerReprojectionError(state))
                         metricRow(title: "Pontos", value: formattedDualMarkerPointCount(state))
                         metricRow(title: "Aviso", value: formattedDualMarkerDetectionWarning(state))
@@ -961,6 +966,13 @@ struct ScannerView: View {
         )
     }
 
+    private var scanMinimumDualTagFrameBinding: Binding<Int> {
+        Binding(
+            get: { viewModel.scanMinimumDualTagFrameCount },
+            set: { viewModel.setScanMinimumDualTagFrameCount($0) }
+        )
+    }
+
     private var showDistanceGuideBinding: Binding<Bool> {
         Binding(
             get: { viewModel.showDistanceGuide },
@@ -1122,8 +1134,20 @@ struct ScannerView: View {
         return "\(usedPointCount)"
     }
 
+    private func formattedDualMarkerScanDualPercent(_ state: DualArucoMarkerDebugState) -> String {
+        guard state.scanDualTagPosePercent.isFinite else {
+            return "-"
+        }
+
+        return String(format: "%.0f%%", state.scanDualTagPosePercent)
+    }
+
+    private func formattedDualMarkerDominantMode(_ state: DualArucoMarkerDebugState) -> String {
+        state.scanDominantPoseSource?.debugTitle ?? "-"
+    }
+
     private func formattedDualMarkerDetectionWarning(_ state: DualArucoMarkerDebugState) -> String {
-        state.detectionWarning ?? "-"
+        state.scanConsistencyWarning ?? state.detectionWarning ?? "-"
     }
 
     private var formattedImplantPositions: String {
@@ -1365,6 +1389,9 @@ struct ScannerView: View {
             metricRow(title: "jitterReady", value: formattedBool(viewModel.scanJitterReady))
             metricRow(title: "stableReady", value: formattedBool(viewModel.scanStableReady))
             metricRow(title: "currentFrameGood", value: formattedBool(viewModel.scanCurrentFrameGood))
+            if viewModel.markerProfile == .dualArucoV2 {
+                metricRow(title: "dualTagReady", value: formattedBool(viewModel.scanDualTagReady))
+            }
             metricRow(title: "Gerando STL", value: formattedBool(viewModel.isGeneratingSTL))
             metricRow(title: "Export iniciado", value: formattedBool(viewModel.didStartSTLExportForCurrentScan))
             metricRow(title: "tagPoses atuais", value: formattedCurrentExportableTagPoseCount)
@@ -1429,6 +1456,24 @@ struct ScannerView: View {
 
                     Text(formattedScanRequiredCoverage)
                         .monospacedDigit()
+                }
+            }
+
+            if viewModel.markerProfile == .dualArucoV2 {
+                Stepper(
+                    value: scanMinimumDualTagFrameBinding,
+                    in: viewModel.scanMinimumDualTagFrameRange,
+                    step: 1
+                ) {
+                    HStack(alignment: .center) {
+                        Text("Frames dual-tag min")
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        Text("\(viewModel.scanMinimumDualTagFrameCount)")
+                            .monospacedDigit()
+                    }
                 }
             }
         }
