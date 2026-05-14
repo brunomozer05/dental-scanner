@@ -251,6 +251,12 @@ struct DualArucoMarkerDebugState: Equatable, Identifiable {
     let scanDualTagPosePercent: Double
     let scanDominantPoseSource: MarkerPoseSource?
     let scanConsistencyWarning: String?
+    let scanDualAngularCoveragePercent: Double
+    let scanDualTagRejectedFrameCount: Int
+    let scanDualTagRejectionReason: String?
+    let finalRefinementUsedObservationCount: Int
+    let finalRefinementDiscardedObservationCount: Int
+    let finalRefinementDiscardReason: String?
 
     var id: Int {
         physicalMarkerId

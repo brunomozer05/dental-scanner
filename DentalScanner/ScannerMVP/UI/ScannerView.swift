@@ -504,7 +504,12 @@ struct ScannerView: View {
                         metricRow(title: "Top fallback validos", value: "\(state.scanTopFallbackFrameCount)")
                         metricRow(title: "Bottom fallback validos", value: "\(state.scanBottomFallbackFrameCount)")
                         metricRow(title: "Dual %", value: formattedDualMarkerScanDualPercent(state))
+                        metricRow(title: "Dual angular", value: formattedDualMarkerAngularCoverage(state))
                         metricRow(title: "Modo dominante", value: formattedDualMarkerDominantMode(state))
+                        metricRow(title: "Dual descartados", value: "\(state.scanDualTagRejectedFrameCount)")
+                        metricRow(title: "Obs refino usadas", value: "\(state.finalRefinementUsedObservationCount)")
+                        metricRow(title: "Obs refino descart.", value: "\(state.finalRefinementDiscardedObservationCount)")
+                        metricRow(title: "Desc. principal", value: formattedDualMarkerDiscardReason(state))
                         metricRow(title: "Erro reproj.", value: formattedDualMarkerReprojectionError(state))
                         metricRow(title: "Pontos", value: formattedDualMarkerPointCount(state))
                         metricRow(title: "Aviso", value: formattedDualMarkerDetectionWarning(state))
@@ -973,6 +978,13 @@ struct ScannerView: View {
         )
     }
 
+    private var scanRequiredDualAngularCoverageBinding: Binding<Double> {
+        Binding(
+            get: { viewModel.scanRequiredDualAngularCoveragePercent },
+            set: { viewModel.setScanRequiredDualAngularCoveragePercent($0) }
+        )
+    }
+
     private var showDistanceGuideBinding: Binding<Bool> {
         Binding(
             get: { viewModel.showDistanceGuide },
@@ -1142,12 +1154,24 @@ struct ScannerView: View {
         return String(format: "%.0f%%", state.scanDualTagPosePercent)
     }
 
+    private func formattedDualMarkerAngularCoverage(_ state: DualArucoMarkerDebugState) -> String {
+        guard state.scanDualAngularCoveragePercent.isFinite else {
+            return "-"
+        }
+
+        return String(format: "%.1f%%", state.scanDualAngularCoveragePercent)
+    }
+
     private func formattedDualMarkerDominantMode(_ state: DualArucoMarkerDebugState) -> String {
         state.scanDominantPoseSource?.debugTitle ?? "-"
     }
 
     private func formattedDualMarkerDetectionWarning(_ state: DualArucoMarkerDebugState) -> String {
         state.scanConsistencyWarning ?? state.detectionWarning ?? "-"
+    }
+
+    private func formattedDualMarkerDiscardReason(_ state: DualArucoMarkerDebugState) -> String {
+        state.finalRefinementDiscardReason ?? state.scanDualTagRejectionReason ?? "-"
     }
 
     private var formattedImplantPositions: String {
@@ -1391,6 +1415,7 @@ struct ScannerView: View {
             metricRow(title: "currentFrameGood", value: formattedBool(viewModel.scanCurrentFrameGood))
             if viewModel.markerProfile == .dualArucoV2 {
                 metricRow(title: "dualTagReady", value: formattedBool(viewModel.scanDualTagReady))
+                metricRow(title: "dualAngularReady", value: formattedBool(viewModel.scanDualAngularCoverageReady))
             }
             metricRow(title: "Gerando STL", value: formattedBool(viewModel.isGeneratingSTL))
             metricRow(title: "Export iniciado", value: formattedBool(viewModel.didStartSTLExportForCurrentScan))
@@ -1473,6 +1498,24 @@ struct ScannerView: View {
 
                         Text("\(viewModel.scanMinimumDualTagFrameCount)")
                             .monospacedDigit()
+                    }
+                }
+
+                Stepper(
+                    value: scanRequiredDualAngularCoverageBinding,
+                    in: viewModel.scanRequiredDualAngularCoverageRange,
+                    step: viewModel.scanAngularCoverageStepPercent
+                ) {
+                    HStack(alignment: .center) {
+                        Text("Cobertura dual-tag")
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        Text(formattedPreciseCoveragePercent(
+                            viewModel.scanRequiredDualAngularCoveragePercent
+                        ))
+                        .monospacedDigit()
                     }
                 }
             }

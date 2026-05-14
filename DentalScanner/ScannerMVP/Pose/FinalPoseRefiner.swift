@@ -10,6 +10,7 @@ struct FinalPoseObservation {
     let cameraMatrix: simd_double3x3
     let reprojectionError: Double
     let markerAreaPixels: Double
+    let distanceMm: Double
 
     static func markerObjectPoints(markerSizeMillimeters: Double) -> [SIMD3<Double>] {
         let halfSize = markerSizeMillimeters / 2.0
@@ -23,6 +24,14 @@ struct FinalPoseObservation {
     }
 }
 
+struct FinalPoseObservationSelectionDiagnostics: Equatable {
+    let markerId: Int
+    let totalObservationCount: Int
+    let selectedObservationCount: Int
+    let discardedObservationCount: Int
+    let dominantDiscardReason: String?
+}
+
 final class FinalPoseRefiner {
     struct Configuration {
         let maximumObservationReprojectionError: Double
@@ -30,14 +39,31 @@ final class FinalPoseRefiner {
         let maximumAcceptedReprojectionError: Double
         let maximumAcceptedErrorMultiplier: Double
         let maximumCameraMatrixDelta: Double
+        let minimumFinalObservationsPerMarker: Int
+        let topQualityObservationRatio: Double
+        let minimumObservationMarkerAreaPixels: Double
+        let idealMinimumDistanceMm: Double
+        let idealMaximumDistanceMm: Double
+        let maximumDistanceMm: Double
 
         static let scannerDefault = Configuration(
             maximumObservationReprojectionError: 2.0,
             minimumObservationsPerMarker: 2,
             maximumAcceptedReprojectionError: 2.0,
             maximumAcceptedErrorMultiplier: 1.25,
-            maximumCameraMatrixDelta: 0.5
+            maximumCameraMatrixDelta: 0.5,
+            minimumFinalObservationsPerMarker: 10,
+            topQualityObservationRatio: 0.5,
+            minimumObservationMarkerAreaPixels: 80.0,
+            idealMinimumDistanceMm: 80.0,
+            idealMaximumDistanceMm: 180.0,
+            maximumDistanceMm: 250.0
         )
+    }
+
+    private struct ObservationSelection {
+        let observations: [FinalPoseObservation]
+        let diagnostics: FinalPoseObservationSelectionDiagnostics
     }
 
     private let configuration: Configuration
@@ -87,6 +113,19 @@ final class FinalPoseRefiner {
         }
     }
 
+    func selectionDiagnostics(
+        observations: [FinalPoseObservation]
+    ) -> [Int: FinalPoseObservationSelectionDiagnostics] {
+        let observationsByMarkerId = Dictionary(grouping: observations, by: \.markerId)
+
+        return observationsByMarkerId.reduce(into: [:]) { partialResult, item in
+            partialResult[item.key] = selectedObservationSelection(
+                markerId: item.key,
+                observations: item.value
+            ).diagnostics
+        }
+    }
+
     private func refinedCameraPoses(
         observations: [FinalPoseObservation],
         currentPosesByMarkerId: [Int: PoseResult]
@@ -116,11 +155,8 @@ final class FinalPoseRefiner {
         observations: [FinalPoseObservation],
         currentPose: PoseResult
     ) -> PoseResult? {
-        let lowErrorObservations = observations.filter {
-            $0.reprojectionError.isFinite &&
-                $0.reprojectionError <= configuration.maximumObservationReprojectionError
-        }
-        let preferredObservations = preferredObservations(from: lowErrorObservations)
+        let selection = selectedObservationSelection(markerId: markerId, observations: observations)
+        let preferredObservations = selection.observations
 
         guard let referenceCameraMatrix = preferredObservations.last?.cameraMatrix else {
             return nil
@@ -231,48 +267,216 @@ final class FinalPoseRefiner {
         )
     }
 
-    private func preferredObservations(
-        from observations: [FinalPoseObservation]
-    ) -> [FinalPoseObservation] {
-        let dualTagObservations = observations.filter {
-            if case .dualTag = $0.poseSource {
+    private func selectedObservationSelection(
+        markerId: Int,
+        observations: [FinalPoseObservation]
+    ) -> ObservationSelection {
+        if observations.allSatisfy({ observation in
+            if case .singleArucoV1 = observation.poseSource {
+                return true
+            }
+
+            return false
+        }) {
+            return singleArucoV1ObservationSelection(
+                markerId: markerId,
+                observations: observations
+            )
+        }
+
+        let indexedObservations = Array(observations.enumerated())
+        var discardReasonCounts: [String: Int] = [:]
+        let validIndexedObservations = indexedObservations.filter { item in
+            if let reason = qualityRejectionReason(for: item.element) {
+                discardReasonCounts[reason, default: 0] += 1
+                return false
+            }
+
+            return true
+        }
+        let candidateIndexedObservations = preferredIndexedObservations(
+            from: validIndexedObservations
+        )
+        let candidateIndices = Set(candidateIndexedObservations.map(\.offset))
+        for item in validIndexedObservations where !candidateIndices.contains(item.offset) {
+            discardReasonCounts[sourcePriorityRejectionReason(for: item.element), default: 0] += 1
+        }
+
+        let sortedCandidates = candidateIndexedObservations.sorted {
+            qualityScore(for: $0.element) > qualityScore(for: $1.element)
+        }
+        let selectedCount = selectedObservationCount(from: sortedCandidates.count)
+        let selectedIndexedObservations = Array(sortedCandidates.prefix(selectedCount))
+        let selectedIndices = Set(selectedIndexedObservations.map(\.offset))
+        for item in candidateIndexedObservations where !selectedIndices.contains(item.offset) {
+            discardReasonCounts["baixa qualidade", default: 0] += 1
+        }
+
+        let selectedObservations = selectedIndexedObservations.map(\.element)
+        let discardedObservationCount = max(observations.count - selectedObservations.count, 0)
+
+        return ObservationSelection(
+            observations: selectedObservations,
+            diagnostics: FinalPoseObservationSelectionDiagnostics(
+                markerId: markerId,
+                totalObservationCount: observations.count,
+                selectedObservationCount: selectedObservations.count,
+                discardedObservationCount: discardedObservationCount,
+                dominantDiscardReason: dominantReason(in: discardReasonCounts)
+            )
+        )
+    }
+
+    private func singleArucoV1ObservationSelection(
+        markerId: Int,
+        observations: [FinalPoseObservation]
+    ) -> ObservationSelection {
+        let selectedObservations = observations.filter {
+            $0.reprojectionError.isFinite &&
+                $0.reprojectionError <= configuration.maximumObservationReprojectionError
+        }
+        let discardedObservationCount = max(observations.count - selectedObservations.count, 0)
+
+        return ObservationSelection(
+            observations: selectedObservations,
+            diagnostics: FinalPoseObservationSelectionDiagnostics(
+                markerId: markerId,
+                totalObservationCount: observations.count,
+                selectedObservationCount: selectedObservations.count,
+                discardedObservationCount: discardedObservationCount,
+                dominantDiscardReason: discardedObservationCount > 0
+                    ? "reprojection error alto"
+                    : nil
+            )
+        )
+    }
+
+    private func preferredIndexedObservations(
+        from indexedObservations: [(offset: Int, element: FinalPoseObservation)]
+    ) -> [(offset: Int, element: FinalPoseObservation)] {
+        let dualTagObservations = indexedObservations.filter {
+            if case .dualTag = $0.element.poseSource {
                 return true
             }
 
             return false
         }
-        if dualTagObservations.count >= configuration.minimumObservationsPerMarker {
+        if dualTagObservations.count >= configuration.minimumFinalObservationsPerMarker {
             return dualTagObservations
         }
 
-        let topFallbackObservations = observations.filter {
-            if case let .singleFallback(_, role) = $0.poseSource {
+        let topFallbackObservations = indexedObservations.filter {
+            if case let .singleFallback(_, role) = $0.element.poseSource {
                 return role == .top
             }
 
             return false
         }
-        if topFallbackObservations.count >= configuration.minimumObservationsPerMarker {
-            return topFallbackObservations
-        }
-
         let dualAndTopObservations = dualTagObservations + topFallbackObservations
-        if dualAndTopObservations.count >= configuration.minimumObservationsPerMarker {
+        if dualAndTopObservations.count >= configuration.minimumFinalObservationsPerMarker ||
+            !dualAndTopObservations.isEmpty {
             return dualAndTopObservations
         }
 
-        let bottomFallbackObservations = observations.filter {
-            if case let .singleFallback(_, role) = $0.poseSource {
+        let bottomFallbackObservations = indexedObservations.filter {
+            if case let .singleFallback(_, role) = $0.element.poseSource {
                 return role == .bottom
             }
 
             return false
         }
-        if bottomFallbackObservations.count >= configuration.minimumObservationsPerMarker {
+        if !bottomFallbackObservations.isEmpty {
             return bottomFallbackObservations
         }
 
-        return observations
+        return indexedObservations
+    }
+
+    private func selectedObservationCount(from candidateCount: Int) -> Int {
+        guard candidateCount > 0 else {
+            return 0
+        }
+
+        let ratioCount = Int(ceil(Double(candidateCount) * configuration.topQualityObservationRatio))
+        let desiredCount = max(configuration.minimumFinalObservationsPerMarker, ratioCount)
+
+        return min(candidateCount, desiredCount)
+    }
+
+    private func qualityRejectionReason(for observation: FinalPoseObservation) -> String? {
+        guard observation.reprojectionError.isFinite,
+              observation.reprojectionError <= configuration.maximumObservationReprojectionError
+        else {
+            return "reprojection error alto"
+        }
+
+        guard observation.markerAreaPixels.isFinite,
+              observation.markerAreaPixels >= configuration.minimumObservationMarkerAreaPixels
+        else {
+            return "area baixa"
+        }
+
+        return nil
+    }
+
+    private func sourcePriorityRejectionReason(for observation: FinalPoseObservation) -> String {
+        switch observation.poseSource {
+        case .dualTag:
+            return "baixa qualidade"
+        case let .singleFallback(_, role):
+            switch role {
+            case .top:
+                return "fallback baixa prioridade"
+            case .bottom:
+                return "bottom baixa prioridade"
+            }
+        case .singleArucoV1:
+            return "baixa qualidade"
+        }
+    }
+
+    private func qualityScore(for observation: FinalPoseObservation) -> Double {
+        let reprojectionScore = 1.0 / max(observation.reprojectionError, 0.05)
+        let areaScore = min(max(log10(max(observation.markerAreaPixels, 1.0)) / 4.0, 0.0), 1.0)
+        let distanceScore = qualityScoreForDistance(observation.distanceMm)
+        let sourceScore: Double
+        switch observation.poseSource {
+        case .dualTag:
+            sourceScore = 2.0
+        case let .singleFallback(_, role):
+            sourceScore = role == .top ? 0.65 : 0.25
+        case .singleArucoV1:
+            sourceScore = 1.0
+        }
+
+        return sourceScore * 2.0 + reprojectionScore * 1.5 + areaScore + distanceScore
+    }
+
+    private func qualityScoreForDistance(_ distanceMm: Double) -> Double {
+        guard distanceMm.isFinite, distanceMm > 0 else {
+            return 0
+        }
+
+        if distanceMm >= configuration.idealMinimumDistanceMm &&
+            distanceMm <= configuration.idealMaximumDistanceMm {
+            return 1.0
+        }
+
+        if distanceMm <= configuration.maximumDistanceMm {
+            return 0.45
+        }
+
+        return 0
+    }
+
+    private func dominantReason(in counts: [String: Int]) -> String? {
+        counts.max {
+            if $0.value == $1.value {
+                return $0.key > $1.key
+            }
+
+            return $0.value < $1.value
+        }?.key
     }
 
     private static func vector3(from values: [NSNumber]) -> SIMD3<Double>? {

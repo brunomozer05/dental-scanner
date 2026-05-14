@@ -5,6 +5,13 @@ import simd
 final class PoseEstimator {
     private enum DualArucoV2PoseSelection {
         static let maximumPreferredDualTagReprojectionError = 2.0
+        static let minimumBottomAreaPixels = 80.0
+        static let minimumAnyTagAreaPixels = 80.0
+        static let minimumTopToBottomAreaRatio = 0.35
+        static let maximumTopToBottomAreaRatio = 4.5
+        static let minimumCenterDistanceRatio = 0.45
+        static let maximumCenterDistanceRatio = 2.0
+        static let minimumTopDownDirectionDot = 0.15
     }
 
     enum EstimatorError: LocalizedError {
@@ -28,6 +35,7 @@ final class PoseEstimator {
     }
 
     private let bridge: OpenCVArucoPoseBridge
+    private(set) var lastDualArucoV2RejectionReasonsByMarkerId: [Int: String] = [:]
 
     init(bridge: OpenCVArucoPoseBridge = OpenCVArucoPoseBridge()) {
         self.bridge = bridge
@@ -68,6 +76,8 @@ final class PoseEstimator {
         markerProfile: MarkerProfile = .singleArucoV1,
         dualMarkers: [DualArucoMarkerDefinition] = MarkerConfiguration.dualMarkers
     ) throws -> [PoseResult] {
+        lastDualArucoV2RejectionReasonsByMarkerId = [:]
+
         switch markerProfile {
         case .singleArucoV1:
             guard markerSizeMillimeters.isFinite, markerSizeMillimeters > 0 else {
@@ -157,23 +167,36 @@ final class PoseEstimator {
         bottomDetection: ArUcoDetectionResult?,
         intrinsics: CameraIntrinsics
     ) -> PoseResult? {
-        var dualTagPoseCandidate: PoseResult?
-
         if let topDetection,
-           let bottomDetection,
-           let dualTagPose = try? estimateDualTagPose(
+           let bottomDetection {
+            if let rejectionReason = dualTagPlausibilityRejectionReason(
+                for: definition,
+                topDetection: topDetection,
+                bottomDetection: bottomDetection
+            ) {
+                lastDualArucoV2RejectionReasonsByMarkerId[
+                    definition.physicalMarkerId
+                ] = rejectionReason
+            } else if let dualTagPose = try? estimateDualTagPose(
                 for: definition,
                 topDetection: topDetection,
                 bottomDetection: bottomDetection,
                 intrinsics: intrinsics
-           ) {
-            if dualTagPose.reprojectionError.isFinite &&
-                dualTagPose.reprojectionError <=
-                DualArucoV2PoseSelection.maximumPreferredDualTagReprojectionError {
-                return dualTagPose
-            }
+            ) {
+                if dualTagPose.reprojectionError.isFinite &&
+                    dualTagPose.reprojectionError <=
+                    DualArucoV2PoseSelection.maximumPreferredDualTagReprojectionError {
+                    return dualTagPose
+                }
 
-            dualTagPoseCandidate = dualTagPose
+                lastDualArucoV2RejectionReasonsByMarkerId[
+                    definition.physicalMarkerId
+                ] = "reprojection error alto"
+            } else {
+                lastDualArucoV2RejectionReasonsByMarkerId[
+                    definition.physicalMarkerId
+                ] = "par top/bottom inconsistente"
+            }
         }
 
         if let topDetection,
@@ -196,7 +219,81 @@ final class PoseEstimator {
             return bottomFallbackPose
         }
 
-        return dualTagPoseCandidate
+        return nil
+    }
+
+    private func dualTagPlausibilityRejectionReason(
+        for definition: DualArucoMarkerDefinition,
+        topDetection: ArUcoDetectionResult,
+        bottomDetection: ArUcoDetectionResult
+    ) -> String? {
+        let topArea = Self.markerAreaPixels(for: topDetection.corners)
+        let bottomArea = Self.markerAreaPixels(for: bottomDetection.corners)
+
+        guard topArea >= DualArucoV2PoseSelection.minimumAnyTagAreaPixels,
+              bottomArea >= DualArucoV2PoseSelection.minimumAnyTagAreaPixels
+        else {
+            return bottomArea < DualArucoV2PoseSelection.minimumBottomAreaPixels
+                ? "bottom pequena"
+                : "area baixa"
+        }
+
+        guard bottomArea >= DualArucoV2PoseSelection.minimumBottomAreaPixels else {
+            return "bottom pequena"
+        }
+
+        let areaRatio = topArea / bottomArea
+        guard areaRatio >= DualArucoV2PoseSelection.minimumTopToBottomAreaRatio,
+              areaRatio <= DualArucoV2PoseSelection.maximumTopToBottomAreaRatio
+        else {
+            return "par top/bottom inconsistente"
+        }
+
+        let topCenter = Self.center(of: topDetection.corners)
+        let bottomCenter = Self.center(of: bottomDetection.corners)
+        let centerDelta = SIMD2<Double>(
+            Double(bottomCenter.x - topCenter.x),
+            Double(bottomCenter.y - topCenter.y)
+        )
+        let centerDistancePixels = simd_length(centerDelta)
+        let topSideLength = Self.averageSideLengthPixels(for: topDetection.corners)
+        let bottomSideLength = Self.averageSideLengthPixels(for: bottomDetection.corners)
+        let expectedDistanceFromTop = topSideLength *
+            abs(definition.bottomTagCenterInMarkerCoordinates.y) /
+            definition.topTagSizeMm
+        let expectedDistanceFromBottom = bottomSideLength *
+            abs(definition.bottomTagCenterInMarkerCoordinates.y) /
+            definition.bottomTagSizeMm
+        let expectedCenterDistancePixels = (expectedDistanceFromTop + expectedDistanceFromBottom) / 2.0
+
+        guard centerDistancePixels.isFinite,
+              expectedCenterDistancePixels.isFinite,
+              expectedCenterDistancePixels > 1e-6
+        else {
+            return "par top/bottom inconsistente"
+        }
+
+        let centerDistanceRatio = centerDistancePixels / expectedCenterDistancePixels
+        guard centerDistanceRatio >= DualArucoV2PoseSelection.minimumCenterDistanceRatio,
+              centerDistanceRatio <= DualArucoV2PoseSelection.maximumCenterDistanceRatio
+        else {
+            return "par top/bottom inconsistente"
+        }
+
+        guard let topDownDirection = Self.tagDownDirection(for: topDetection.corners),
+              centerDistancePixels > 1e-6
+        else {
+            return "par top/bottom inconsistente"
+        }
+
+        let centerDirection = centerDelta / centerDistancePixels
+        guard simd_dot(centerDirection, topDownDirection) >=
+            DualArucoV2PoseSelection.minimumTopDownDirectionDot
+        else {
+            return "par top/bottom inconsistente"
+        }
+
+        return nil
     }
 
     private func estimateDualTagPose(
@@ -292,6 +389,67 @@ final class PoseEstimator {
 
         let area = abs(signedArea) * 0.5
         return area.isFinite ? area : 0.0
+    }
+
+    private static func center(of corners: [CGPoint]) -> CGPoint {
+        guard !corners.isEmpty else {
+            return .zero
+        }
+
+        let accumulated = corners.reduce(CGPoint.zero) { partialResult, corner in
+            CGPoint(
+                x: partialResult.x + corner.x,
+                y: partialResult.y + corner.y
+            )
+        }
+
+        return CGPoint(
+            x: accumulated.x / CGFloat(corners.count),
+            y: accumulated.y / CGFloat(corners.count)
+        )
+    }
+
+    private static func averageSideLengthPixels(for corners: [CGPoint]) -> Double {
+        guard corners.count == 4 else {
+            return 0
+        }
+
+        let sideLengths = corners.indices.map { index in
+            let nextIndex = (index + 1) % corners.count
+            return hypot(
+                Double(corners[nextIndex].x - corners[index].x),
+                Double(corners[nextIndex].y - corners[index].y)
+            )
+        }
+
+        let averageSideLength = sideLengths.reduce(0.0, +) / Double(sideLengths.count)
+        return averageSideLength.isFinite ? averageSideLength : 0
+    }
+
+    private static func tagDownDirection(for corners: [CGPoint]) -> SIMD2<Double>? {
+        guard corners.count == 4 else {
+            return nil
+        }
+
+        let topEdgeCenter = CGPoint(
+            x: (corners[0].x + corners[1].x) / 2.0,
+            y: (corners[0].y + corners[1].y) / 2.0
+        )
+        let bottomEdgeCenter = CGPoint(
+            x: (corners[2].x + corners[3].x) / 2.0,
+            y: (corners[2].y + corners[3].y) / 2.0
+        )
+        let direction = SIMD2<Double>(
+            Double(bottomEdgeCenter.x - topEdgeCenter.x),
+            Double(bottomEdgeCenter.y - topEdgeCenter.y)
+        )
+        let length = simd_length(direction)
+
+        guard length.isFinite, length > 1e-6 else {
+            return nil
+        }
+
+        return direction / length
     }
 
     private func vector3(from values: [NSNumber], name: String) throws -> SIMD3<Double> {
