@@ -1224,6 +1224,9 @@ final class ScannerViewModel: ObservableObject {
 
         didApplyFinalPoseRefinement = true
 
+        finalObservationDiagnosticsByMarkerId = finalPoseRefiner.selectionDiagnostics(
+            observations: finalPoseObservations
+        )
         let currentPoseResults = consolidatedPoseResults()
         let refinedPoseResults = finalPoseRefiner.refine(
             observations: finalPoseObservations,
@@ -2490,6 +2493,50 @@ final class ScannerViewModel: ObservableObject {
             finalObservationDiagnosticsByMarkerId[markerId]?.dominantDiscardReason
     }
 
+    private func finalRefinementConfidence(
+        finalDiagnostics: FinalPoseObservationSelectionDiagnostics?,
+        dualTagFrameCount: Int,
+        dualAngularCoveragePercent: Double
+    ) -> FinalPoseMarkerConfidence {
+        if scanMinimumDualTagFrameCount > 0,
+           dualTagFrameCount < scanMinimumDualTagFrameCount {
+            return .low
+        }
+
+        if scanRequiredDualAngularCoveragePercent > 0,
+           dualAngularCoveragePercent < scanRequiredDualAngularCoveragePercent {
+            return .low
+        }
+
+        guard let finalDiagnostics = finalDiagnostics else {
+            return .low
+        }
+
+        return finalDiagnostics.finalConfidence
+    }
+
+    private func finalRefinementConfidenceReason(
+        finalDiagnostics: FinalPoseObservationSelectionDiagnostics?,
+        dualTagFrameCount: Int,
+        dualAngularCoveragePercent: Double
+    ) -> String? {
+        if scanMinimumDualTagFrameCount > 0,
+           dualTagFrameCount < scanMinimumDualTagFrameCount {
+            return "poucos dual-tag"
+        }
+
+        if scanRequiredDualAngularCoveragePercent > 0,
+           dualAngularCoveragePercent < scanRequiredDualAngularCoveragePercent {
+            return "pouca cobertura dual"
+        }
+
+        guard let finalDiagnostics = finalDiagnostics else {
+            return "sem observacoes finais"
+        }
+
+        return finalDiagnostics.finalConfidenceReason
+    }
+
     private func dominantReason(in counts: [String: Int]) -> String? {
         counts.max {
             if $0.value == $1.value {
@@ -2550,6 +2597,13 @@ final class ScannerViewModel: ObservableObject {
             let finalDiagnostics = finalObservationDiagnosticsByMarkerId[
                 definition.physicalMarkerId
             ]
+            let observationsBeforeOutlierRejection =
+                finalDiagnostics?.observationsBeforeOutlierRejectionCount ?? 0
+            let finalAverageReprojectionError =
+                finalDiagnostics?.finalAverageReprojectionError
+            let dualAngularCoverage = dualAngularCoveragePercent(
+                forPhysicalMarkerId: definition.physicalMarkerId
+            )
 
             return DualArucoMarkerDebugState(
                 physicalMarkerId: definition.physicalMarkerId,
@@ -2599,17 +2653,28 @@ final class ScannerViewModel: ObservableObject {
                 scanConsistencyWarning: dualMarkerConsistencyWarning(
                     dualTagFrameCount: dualTagFrameCount
                 ),
-                scanDualAngularCoveragePercent: dualAngularCoveragePercent(
-                    forPhysicalMarkerId: definition.physicalMarkerId
-                ),
+                scanDualAngularCoveragePercent: dualAngularCoverage,
                 scanDualTagRejectedFrameCount: dualTagRejectedFrameCount(
                     forPhysicalMarkerId: definition.physicalMarkerId
                 ),
                 scanDualTagRejectionReason: dominantDualTagRejectionReason(
                     forPhysicalMarkerId: definition.physicalMarkerId
                 ),
+                finalRefinementObservationCountBeforeFilter: observationsBeforeOutlierRejection,
                 finalRefinementUsedObservationCount: finalDiagnostics?.selectedObservationCount ?? 0,
                 finalRefinementDiscardedObservationCount: finalDiagnostics?.discardedObservationCount ?? 0,
+                finalRefinementOutlierRemovedCount: finalDiagnostics?.outlierRemovedCount ?? 0,
+                finalRefinementAverageReprojectionError: finalAverageReprojectionError,
+                finalRefinementConfidence: finalRefinementConfidence(
+                    finalDiagnostics: finalDiagnostics,
+                    dualTagFrameCount: dualTagFrameCount,
+                    dualAngularCoveragePercent: dualAngularCoverage
+                ),
+                finalRefinementConfidenceReason: finalRefinementConfidenceReason(
+                    finalDiagnostics: finalDiagnostics,
+                    dualTagFrameCount: dualTagFrameCount,
+                    dualAngularCoveragePercent: dualAngularCoverage
+                ),
                 finalRefinementDiscardReason: finalRefinementDiscardReason(
                     forPhysicalMarkerId: definition.physicalMarkerId
                 )
@@ -2779,6 +2844,8 @@ final class ScannerViewModel: ObservableObject {
                     objectPoints: objectPoints,
                     imagePoints: detection.corners,
                     cameraMatrix: cameraMatrix,
+                    rotationMatrix: poseResult.rotationMatrix,
+                    translationVector: poseResult.translationVector,
                     reprojectionError: poseResult.reprojectionError,
                     markerAreaPixels: poseResult.markerAreaPixels,
                     distanceMm: poseResult.distanceMm
@@ -2811,6 +2878,8 @@ final class ScannerViewModel: ObservableObject {
                     objectPoints: observationPoints.objectPoints,
                     imagePoints: observationPoints.imagePoints,
                     cameraMatrix: cameraMatrix,
+                    rotationMatrix: poseResult.rotationMatrix,
+                    translationVector: poseResult.translationVector,
                     reprojectionError: poseResult.reprojectionError,
                     markerAreaPixels: poseResult.markerAreaPixels,
                     distanceMm: poseResult.distanceMm

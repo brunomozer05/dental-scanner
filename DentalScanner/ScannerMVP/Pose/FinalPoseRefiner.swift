@@ -8,6 +8,8 @@ struct FinalPoseObservation {
     let objectPoints: [SIMD3<Double>]
     let imagePoints: [CGPoint]
     let cameraMatrix: simd_double3x3
+    let rotationMatrix: simd_double3x3
+    let translationVector: SIMD3<Double>
     let reprojectionError: Double
     let markerAreaPixels: Double
     let distanceMm: Double
@@ -24,11 +26,22 @@ struct FinalPoseObservation {
     }
 }
 
+enum FinalPoseMarkerConfidence: String, Equatable {
+    case high = "Alta"
+    case medium = "Media"
+    case low = "Baixa"
+}
+
 struct FinalPoseObservationSelectionDiagnostics: Equatable {
     let markerId: Int
     let totalObservationCount: Int
+    let observationsBeforeOutlierRejectionCount: Int
     let selectedObservationCount: Int
     let discardedObservationCount: Int
+    let outlierRemovedCount: Int
+    let finalAverageReprojectionError: Double?
+    let finalConfidence: FinalPoseMarkerConfidence
+    let finalConfidenceReason: String?
     let dominantDiscardReason: String?
 }
 
@@ -45,6 +58,10 @@ final class FinalPoseRefiner {
         let idealMinimumDistanceMm: Double
         let idealMaximumDistanceMm: Double
         let maximumDistanceMm: Double
+        let maximumFinalPositionOutlierMm: Double
+        let maximumFinalRotationOutlierDegrees: Double
+        let minimumFinalObservationsAfterOutlierRejection: Int
+        let minimumRobustReferenceObservations: Int
 
         static let scannerDefault = Configuration(
             maximumObservationReprojectionError: 2.0,
@@ -57,13 +74,24 @@ final class FinalPoseRefiner {
             minimumObservationMarkerAreaPixels: 80.0,
             idealMinimumDistanceMm: 80.0,
             idealMaximumDistanceMm: 180.0,
-            maximumDistanceMm: 250.0
+            maximumDistanceMm: 250.0,
+            maximumFinalPositionOutlierMm: 1.0,
+            maximumFinalRotationOutlierDegrees: 5.0,
+            minimumFinalObservationsAfterOutlierRejection: 5,
+            minimumRobustReferenceObservations: 3
         )
     }
 
     private struct ObservationSelection {
         let observations: [FinalPoseObservation]
         let diagnostics: FinalPoseObservationSelectionDiagnostics
+    }
+
+    private struct OutlierRejectionResult {
+        let indexedObservations: [(offset: Int, element: FinalPoseObservation)]
+        let removedCount: Int
+        let discardReasonCounts: [String: Int]
+        let wasRelaxed: Bool
     }
 
     private let configuration: Configuration
@@ -307,21 +335,41 @@ final class FinalPoseRefiner {
         }
         let selectedCount = selectedObservationCount(from: sortedCandidates.count)
         let selectedIndexedObservations = Array(sortedCandidates.prefix(selectedCount))
-        let selectedIndices = Set(selectedIndexedObservations.map(\.offset))
-        for item in candidateIndexedObservations where !selectedIndices.contains(item.offset) {
+        let preOutlierSelectedIndices = Set(selectedIndexedObservations.map(\.offset))
+        for item in candidateIndexedObservations where !preOutlierSelectedIndices.contains(item.offset) {
             discardReasonCounts["baixa qualidade", default: 0] += 1
         }
 
-        let selectedObservations = selectedIndexedObservations.map(\.element)
+        let outlierResult = selectedIndexedObservationsAfterOutlierRejection(
+            from: selectedIndexedObservations
+        )
+        for (reason, count) in outlierResult.discardReasonCounts {
+            discardReasonCounts[reason, default: 0] += count
+        }
+
+        let selectedObservations = outlierResult.indexedObservations.map(\.element)
         let discardedObservationCount = max(observations.count - selectedObservations.count, 0)
+        let averageReprojectionError = averageReprojectionError(in: selectedObservations)
+        let confidence = finalConfidence(
+            selectedObservations: selectedObservations,
+            observationsBeforeOutlierRejectionCount: selectedIndexedObservations.count,
+            outlierRemovedCount: outlierResult.removedCount,
+            averageReprojectionError: averageReprojectionError,
+            wasOutlierFilterRelaxed: outlierResult.wasRelaxed
+        )
 
         return ObservationSelection(
             observations: selectedObservations,
             diagnostics: FinalPoseObservationSelectionDiagnostics(
                 markerId: markerId,
                 totalObservationCount: observations.count,
+                observationsBeforeOutlierRejectionCount: selectedIndexedObservations.count,
                 selectedObservationCount: selectedObservations.count,
                 discardedObservationCount: discardedObservationCount,
+                outlierRemovedCount: outlierResult.removedCount,
+                finalAverageReprojectionError: averageReprojectionError,
+                finalConfidence: confidence.value,
+                finalConfidenceReason: confidence.reason,
                 dominantDiscardReason: dominantReason(in: discardReasonCounts)
             )
         )
@@ -342,8 +390,13 @@ final class FinalPoseRefiner {
             diagnostics: FinalPoseObservationSelectionDiagnostics(
                 markerId: markerId,
                 totalObservationCount: observations.count,
+                observationsBeforeOutlierRejectionCount: selectedObservations.count,
                 selectedObservationCount: selectedObservations.count,
                 discardedObservationCount: discardedObservationCount,
+                outlierRemovedCount: 0,
+                finalAverageReprojectionError: averageReprojectionError(in: selectedObservations),
+                finalConfidence: selectedObservations.isEmpty ? .low : .medium,
+                finalConfidenceReason: selectedObservations.isEmpty ? "sem observacoes finais" : nil,
                 dominantDiscardReason: discardedObservationCount > 0
                     ? "reprojection error alto"
                     : nil
@@ -403,6 +456,163 @@ final class FinalPoseRefiner {
         return min(candidateCount, desiredCount)
     }
 
+    private func selectedIndexedObservationsAfterOutlierRejection(
+        from indexedObservations: [(offset: Int, element: FinalPoseObservation)]
+    ) -> OutlierRejectionResult {
+        guard indexedObservations.count >= configuration.minimumFinalObservationsAfterOutlierRejection,
+              configuration.maximumFinalPositionOutlierMm.isFinite,
+              configuration.maximumFinalPositionOutlierMm > 0,
+              configuration.maximumFinalRotationOutlierDegrees.isFinite,
+              configuration.maximumFinalRotationOutlierDegrees > 0,
+              let referenceTranslation = medianTranslation(
+                from: robustReferenceIndexedObservations(from: indexedObservations)
+              ),
+              let referenceRotation = referenceRotationMatrix(
+                from: robustReferenceIndexedObservations(from: indexedObservations)
+              )
+        else {
+            return OutlierRejectionResult(
+                indexedObservations: indexedObservations,
+                removedCount: 0,
+                discardReasonCounts: [:],
+                wasRelaxed: false
+            )
+        }
+
+        var keptObservations: [(offset: Int, element: FinalPoseObservation)] = []
+        var discardReasonCounts: [String: Int] = [:]
+
+        for item in indexedObservations {
+            let positionDistanceMm = simd_distance(
+                item.element.translationVector,
+                referenceTranslation
+            )
+            let rotationDistanceDegrees = Self.rotationAngularDistanceDegrees(
+                item.element.rotationMatrix,
+                referenceRotation
+            )
+            let isPositionOutlier = positionDistanceMm.isFinite &&
+                positionDistanceMm > configuration.maximumFinalPositionOutlierMm
+            let isRotationOutlier = rotationDistanceDegrees.isFinite &&
+                rotationDistanceDegrees > configuration.maximumFinalRotationOutlierDegrees
+
+            if isPositionOutlier && isRotationOutlier {
+                discardReasonCounts["outlier posicao/rotacao", default: 0] += 1
+            } else if isPositionOutlier {
+                discardReasonCounts["outlier posicao", default: 0] += 1
+            } else if isRotationOutlier {
+                discardReasonCounts["outlier rotacao", default: 0] += 1
+            } else {
+                keptObservations.append(item)
+            }
+        }
+
+        let removedCount = indexedObservations.count - keptObservations.count
+        guard removedCount > 0 else {
+            return OutlierRejectionResult(
+                indexedObservations: indexedObservations,
+                removedCount: 0,
+                discardReasonCounts: [:],
+                wasRelaxed: false
+            )
+        }
+
+        guard keptObservations.count >= configuration.minimumFinalObservationsAfterOutlierRejection else {
+            return OutlierRejectionResult(
+                indexedObservations: indexedObservations,
+                removedCount: 0,
+                discardReasonCounts: ["filtro outlier relaxado": removedCount],
+                wasRelaxed: true
+            )
+        }
+
+        return OutlierRejectionResult(
+            indexedObservations: keptObservations,
+            removedCount: removedCount,
+            discardReasonCounts: discardReasonCounts,
+            wasRelaxed: false
+        )
+    }
+
+    private func robustReferenceIndexedObservations(
+        from indexedObservations: [(offset: Int, element: FinalPoseObservation)]
+    ) -> [(offset: Int, element: FinalPoseObservation)] {
+        let dualTagObservations = indexedObservations.filter {
+            isDualTagObservation($0.element)
+        }
+        if dualTagObservations.count >= configuration.minimumRobustReferenceObservations {
+            return dualTagObservations
+        }
+
+        let topFallbackObservations = indexedObservations.filter {
+            isTopFallbackObservation($0.element)
+        }
+        let dualAndTopObservations = dualTagObservations + topFallbackObservations
+        if dualAndTopObservations.count >= configuration.minimumRobustReferenceObservations {
+            return dualAndTopObservations
+        }
+
+        return indexedObservations
+    }
+
+    private func medianTranslation(
+        from indexedObservations: [(offset: Int, element: FinalPoseObservation)]
+    ) -> SIMD3<Double>? {
+        guard let x = median(indexedObservations.map(\.element.translationVector.x)),
+              let y = median(indexedObservations.map(\.element.translationVector.y)),
+              let z = median(indexedObservations.map(\.element.translationVector.z))
+        else {
+            return nil
+        }
+
+        let translation = SIMD3<Double>(x, y, z)
+        return PoseMath.isFinite(translation) ? translation : nil
+    }
+
+    private func referenceRotationMatrix(
+        from indexedObservations: [(offset: Int, element: FinalPoseObservation)]
+    ) -> simd_double3x3? {
+        guard !indexedObservations.isEmpty else {
+            return nil
+        }
+
+        if indexedObservations.count == 1 {
+            let matrix = indexedObservations[0].element.rotationMatrix
+            return PoseMath.isFinite(matrix) ? matrix : nil
+        }
+
+        let medoid = indexedObservations.min { lhs, rhs in
+            totalRotationDistanceDegrees(
+                from: lhs.element.rotationMatrix,
+                to: indexedObservations
+            ) < totalRotationDistanceDegrees(
+                from: rhs.element.rotationMatrix,
+                to: indexedObservations
+            )
+        }
+        let matrix = medoid?.element.rotationMatrix
+
+        guard let matrix = matrix,
+              PoseMath.isFinite(matrix)
+        else {
+            return nil
+        }
+
+        return matrix
+    }
+
+    private func totalRotationDistanceDegrees(
+        from rotationMatrix: simd_double3x3,
+        to indexedObservations: [(offset: Int, element: FinalPoseObservation)]
+    ) -> Double {
+        indexedObservations.reduce(0.0) {
+            $0 + Self.rotationAngularDistanceDegrees(
+                rotationMatrix,
+                $1.element.rotationMatrix
+            )
+        }
+    }
+
     private func qualityRejectionReason(for observation: FinalPoseObservation) -> String? {
         guard observation.reprojectionError.isFinite,
               observation.reprojectionError <= configuration.maximumObservationReprojectionError
@@ -417,6 +627,78 @@ final class FinalPoseRefiner {
         }
 
         return nil
+    }
+
+    private func averageReprojectionError(in observations: [FinalPoseObservation]) -> Double? {
+        let errors = observations
+            .map(\.reprojectionError)
+            .filter { $0.isFinite }
+
+        guard !errors.isEmpty else {
+            return nil
+        }
+
+        return errors.reduce(0.0, +) / Double(errors.count)
+    }
+
+    private func finalConfidence(
+        selectedObservations: [FinalPoseObservation],
+        observationsBeforeOutlierRejectionCount: Int,
+        outlierRemovedCount: Int,
+        averageReprojectionError: Double?,
+        wasOutlierFilterRelaxed: Bool
+    ) -> (value: FinalPoseMarkerConfidence, reason: String?) {
+        guard !selectedObservations.isEmpty else {
+            return (.low, "sem observacoes finais")
+        }
+
+        if selectedObservations.count < configuration.minimumFinalObservationsAfterOutlierRejection {
+            return (.low, "poucas observacoes finais")
+        }
+
+        if wasOutlierFilterRelaxed {
+            return (.low, "filtro outlier relaxado")
+        }
+
+        let outlierRatio = observationsBeforeOutlierRejectionCount > 0
+            ? Double(outlierRemovedCount) / Double(observationsBeforeOutlierRejectionCount)
+            : 0
+        if outlierRatio > 0.40 {
+            return (.low, "muitos outliers")
+        }
+
+        if let averageReprojectionError = averageReprojectionError,
+           averageReprojectionError > configuration.maximumObservationReprojectionError {
+            return (.low, "erro alto")
+        }
+
+        let dualTagObservationCount = selectedObservations.filter {
+            isDualTagObservation($0)
+        }.count
+        if selectedObservations.count >= configuration.minimumFinalObservationsPerMarker,
+           dualTagObservationCount >= configuration.minimumFinalObservationsPerMarker,
+           (averageReprojectionError ?? .infinity) <= 1.2,
+           outlierRatio <= 0.20 {
+            return (.high, nil)
+        }
+
+        return (.medium, nil)
+    }
+
+    private func isDualTagObservation(_ observation: FinalPoseObservation) -> Bool {
+        if case .dualTag = observation.poseSource {
+            return true
+        }
+
+        return false
+    }
+
+    private func isTopFallbackObservation(_ observation: FinalPoseObservation) -> Bool {
+        if case let .singleFallback(_, role) = observation.poseSource {
+            return role == .top
+        }
+
+        return false
     }
 
     private func sourcePriorityRejectionReason(for observation: FinalPoseObservation) -> String {
@@ -477,6 +759,44 @@ final class FinalPoseRefiner {
 
             return $0.value < $1.value
         }?.key
+    }
+
+    private func median(_ values: [Double]) -> Double? {
+        let sortedValues = values
+            .filter { $0.isFinite }
+            .sorted()
+        guard !sortedValues.isEmpty else {
+            return nil
+        }
+
+        let middleIndex = sortedValues.count / 2
+        if sortedValues.count.isMultiple(of: 2) {
+            return (sortedValues[middleIndex - 1] + sortedValues[middleIndex]) / 2.0
+        }
+
+        return sortedValues[middleIndex]
+    }
+
+    private static func rotationAngularDistanceDegrees(
+        _ lhs: simd_double3x3,
+        _ rhs: simd_double3x3
+    ) -> Double {
+        guard PoseMath.isFinite(lhs), PoseMath.isFinite(rhs) else {
+            return .infinity
+        }
+
+        let delta = simd_transpose(lhs) * rhs
+        let trace = PoseMath.matrixElement(delta, row: 0, column: 0) +
+            PoseMath.matrixElement(delta, row: 1, column: 1) +
+            PoseMath.matrixElement(delta, row: 2, column: 2)
+        let cosineTheta = min(max((trace - 1.0) / 2.0, -1.0), 1.0)
+        let radians = acos(cosineTheta)
+
+        guard radians.isFinite else {
+            return .infinity
+        }
+
+        return radians * 180.0 / Double.pi
     }
 
     private static func vector3(from values: [NSNumber]) -> SIMD3<Double>? {

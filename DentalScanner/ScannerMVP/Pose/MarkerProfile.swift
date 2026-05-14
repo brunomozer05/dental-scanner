@@ -254,8 +254,13 @@ struct DualArucoMarkerDebugState: Equatable, Identifiable {
     let scanDualAngularCoveragePercent: Double
     let scanDualTagRejectedFrameCount: Int
     let scanDualTagRejectionReason: String?
+    let finalRefinementObservationCountBeforeFilter: Int
     let finalRefinementUsedObservationCount: Int
     let finalRefinementDiscardedObservationCount: Int
+    let finalRefinementOutlierRemovedCount: Int
+    let finalRefinementAverageReprojectionError: Double?
+    let finalRefinementConfidence: FinalPoseMarkerConfidence
+    let finalRefinementConfidenceReason: String?
     let finalRefinementDiscardReason: String?
 
     var id: Int {

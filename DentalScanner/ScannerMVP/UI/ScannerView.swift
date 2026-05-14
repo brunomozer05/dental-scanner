@@ -507,8 +507,25 @@ struct ScannerView: View {
                         metricRow(title: "Dual angular", value: formattedDualMarkerAngularCoverage(state))
                         metricRow(title: "Modo dominante", value: formattedDualMarkerDominantMode(state))
                         metricRow(title: "Dual descartados", value: "\(state.scanDualTagRejectedFrameCount)")
+                        metricRow(
+                            title: "Obs antes filtro",
+                            value: "\(state.finalRefinementObservationCountBeforeFilter)"
+                        )
                         metricRow(title: "Obs refino usadas", value: "\(state.finalRefinementUsedObservationCount)")
                         metricRow(title: "Obs refino descart.", value: "\(state.finalRefinementDiscardedObservationCount)")
+                        metricRow(title: "Outliers removidos", value: "\(state.finalRefinementOutlierRemovedCount)")
+                        metricRow(
+                            title: "Erro medio final",
+                            value: formattedDualMarkerFinalAverageReprojectionError(state)
+                        )
+                        metricRow(
+                            title: "Confianca final",
+                            value: formattedDualMarkerFinalConfidence(state)
+                        )
+                        metricRow(
+                            title: "Motivo confianca",
+                            value: formattedDualMarkerFinalConfidenceReason(state)
+                        )
                         metricRow(title: "Desc. principal", value: formattedDualMarkerDiscardReason(state))
                         metricRow(title: "Erro reproj.", value: formattedDualMarkerReprojectionError(state))
                         metricRow(title: "Pontos", value: formattedDualMarkerPointCount(state))
@@ -1168,6 +1185,28 @@ struct ScannerView: View {
 
     private func formattedDualMarkerDetectionWarning(_ state: DualArucoMarkerDebugState) -> String {
         state.scanConsistencyWarning ?? state.detectionWarning ?? "-"
+    }
+
+    private func formattedDualMarkerFinalAverageReprojectionError(
+        _ state: DualArucoMarkerDebugState
+    ) -> String {
+        guard let error = state.finalRefinementAverageReprojectionError,
+              error.isFinite
+        else {
+            return "-"
+        }
+
+        return String(format: "%.2f px", error)
+    }
+
+    private func formattedDualMarkerFinalConfidence(_ state: DualArucoMarkerDebugState) -> String {
+        state.finalRefinementConfidence.rawValue
+    }
+
+    private func formattedDualMarkerFinalConfidenceReason(
+        _ state: DualArucoMarkerDebugState
+    ) -> String {
+        state.finalRefinementConfidenceReason ?? "-"
     }
 
     private func formattedDualMarkerDiscardReason(_ state: DualArucoMarkerDebugState) -> String {
