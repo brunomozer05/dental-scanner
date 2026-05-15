@@ -264,6 +264,7 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var scanDualAngularCoverageReady: Bool = false
     @Published private(set) var scanRequiredDualAngularCoveragePercent: Double =
         ScanConfiguration.defaultMinimumDualAngularCoveragePercent
+    @Published private(set) var precisionModeV2: Bool = true
     @Published private(set) var preferDualTagForFinalExport: Bool = true
     @Published private(set) var scanPlanarAverageErrorMm: Double?
     @Published private(set) var scanPlanarMaximumErrorMm: Double?
@@ -618,7 +619,8 @@ final class ScannerViewModel: ObservableObject {
         }
 
         self.markerProfile = markerProfile
-        preferDualTagForFinalExport = markerProfile == .dualArucoV2
+        precisionModeV2 = markerProfile == .dualArucoV2
+        preferDualTagForFinalExport = precisionModeV2
         dualMarkerDebugStates = []
         overlayMarkers = []
         lastValidOverlayMarkers = []
@@ -717,18 +719,24 @@ final class ScannerViewModel: ObservableObject {
 
     @MainActor
     func setPreferDualTagForFinalExport(_ preferDualTagForFinalExport: Bool) {
-        guard self.preferDualTagForFinalExport != preferDualTagForFinalExport else {
+        setPrecisionModeV2(preferDualTagForFinalExport)
+    }
+
+    @MainActor
+    func setPrecisionModeV2(_ precisionModeV2: Bool) {
+        guard self.precisionModeV2 != precisionModeV2 else {
             return
         }
 
-        self.preferDualTagForFinalExport = preferDualTagForFinalExport
+        self.precisionModeV2 = precisionModeV2
+        preferDualTagForFinalExport = precisionModeV2
         didApplyFinalPoseRefinement = false
         stlExportURL = nil
         stlExportedImplantCount = 0
         stlExportErrorMessage = nil
         finalObservationDiagnosticsByMarkerId = finalPoseRefiner.selectionDiagnostics(
             observations: finalPoseObservations,
-            preferDualTagForFinalExport: preferDualTagForFinalExport
+            preferDualTagForFinalExport: precisionModeV2
         )
         updateExportDiagnostics()
     }
@@ -2797,6 +2805,8 @@ final class ScannerViewModel: ObservableObject {
                 finalDiagnostics?.observationsBeforeOutlierRejectionCount ?? 0
             let finalAverageReprojectionError =
                 finalDiagnostics?.finalAverageReprojectionError
+            let finalAverageQualityScore =
+                finalDiagnostics?.finalAverageQualityScore
             let dualAngularCoverage = dualAngularCoveragePercent(
                 forPhysicalMarkerId: definition.physicalMarkerId
             )
@@ -2877,11 +2887,22 @@ final class ScannerViewModel: ObservableObject {
                 finalPlanarDistanceMm: scanMarkerPlanarDistancesMm[
                     definition.physicalMarkerId
                 ],
+                finalRefinementCollectedObservationCount: finalDiagnostics?.totalObservationCount ?? 0,
                 finalRefinementObservationCountBeforeFilter: observationsBeforeOutlierRejection,
                 finalRefinementUsedObservationCount: finalDiagnostics?.selectedObservationCount ?? 0,
                 finalRefinementDiscardedObservationCount: finalDiagnostics?.discardedObservationCount ?? 0,
                 finalRefinementOutlierRemovedCount: finalDiagnostics?.outlierRemovedCount ?? 0,
                 finalRefinementAverageReprojectionError: finalAverageReprojectionError,
+                finalRefinementAverageQualityScore: finalAverageQualityScore,
+                finalRefinementEdgeDiscardedObservationCount:
+                    finalDiagnostics?.edgeDiscardedObservationCount ?? 0,
+                finalRefinementSmallBottomDiscardedObservationCount:
+                    finalDiagnostics?.smallBottomDiscardedObservationCount ?? 0,
+                finalRefinementReprojectionDiscardedObservationCount:
+                    finalDiagnostics?.reprojectionDiscardedObservationCount ?? 0,
+                finalRefinementLowPriorityFallbackDiscardedObservationCount:
+                    finalDiagnostics?.lowPriorityFallbackDiscardedObservationCount ?? 0,
+                finalRefinementDominantPoseSource: finalDiagnostics?.finalDominantPoseSource,
                 finalRefinementConfidence: finalRefinementConfidence(
                     finalDiagnostics: finalDiagnostics,
                     dualTagFrameCount: dualTagFrameCount,
@@ -3061,10 +3082,16 @@ final class ScannerViewModel: ObservableObject {
                     objectPoints: objectPoints,
                     imagePoints: detection.corners,
                     cameraMatrix: cameraMatrix,
+                    frameSizePixels: CGSize(
+                        width: CGFloat(frame.width),
+                        height: CGFloat(frame.height)
+                    ),
                     rotationMatrix: poseResult.rotationMatrix,
                     translationVector: poseResult.translationVector,
                     reprojectionError: poseResult.reprojectionError,
                     markerAreaPixels: poseResult.markerAreaPixels,
+                    topTagAreaPixels: detection.markerAreaPixels,
+                    bottomTagAreaPixels: nil,
                     distanceMm: poseResult.distanceMm
                 )
             }
@@ -3095,10 +3122,16 @@ final class ScannerViewModel: ObservableObject {
                     objectPoints: observationPoints.objectPoints,
                     imagePoints: observationPoints.imagePoints,
                     cameraMatrix: cameraMatrix,
+                    frameSizePixels: CGSize(
+                        width: CGFloat(frame.width),
+                        height: CGFloat(frame.height)
+                    ),
                     rotationMatrix: poseResult.rotationMatrix,
                     translationVector: poseResult.translationVector,
                     reprojectionError: poseResult.reprojectionError,
                     markerAreaPixels: poseResult.markerAreaPixels,
+                    topTagAreaPixels: observationPoints.topTagAreaPixels,
+                    bottomTagAreaPixels: observationPoints.bottomTagAreaPixels,
                     distanceMm: poseResult.distanceMm
                 )
             }
@@ -3109,7 +3142,12 @@ final class ScannerViewModel: ObservableObject {
         for poseResult: PoseResult,
         definition: DualArucoMarkerDefinition,
         detectionsByTagId: [Int: ArUcoDetectionResult]
-    ) -> (objectPoints: [SIMD3<Double>], imagePoints: [CGPoint])? {
+    ) -> (
+        objectPoints: [SIMD3<Double>],
+        imagePoints: [CGPoint],
+        topTagAreaPixels: Double?,
+        bottomTagAreaPixels: Double?
+    )? {
         switch poseResult.poseSource {
         case .dualTag:
             guard let topDetection = detectionsByTagId[definition.topTagId],
@@ -3120,7 +3158,9 @@ final class ScannerViewModel: ObservableObject {
 
             return (
                 objectPoints: definition.dualObjectPoints,
-                imagePoints: topDetection.corners + bottomDetection.corners
+                imagePoints: topDetection.corners + bottomDetection.corners,
+                topTagAreaPixels: topDetection.markerAreaPixels,
+                bottomTagAreaPixels: bottomDetection.markerAreaPixels
             )
         case let .singleFallback(_, role):
             let tagId = definition.tagId(for: role)
@@ -3130,7 +3170,9 @@ final class ScannerViewModel: ObservableObject {
 
             return (
                 objectPoints: definition.objectPoints(for: role),
-                imagePoints: detection.corners
+                imagePoints: detection.corners,
+                topTagAreaPixels: role == .top ? detection.markerAreaPixels : nil,
+                bottomTagAreaPixels: role == .bottom ? detection.markerAreaPixels : nil
             )
         case .singleArucoV1:
             return nil

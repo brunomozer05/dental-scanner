@@ -513,11 +513,39 @@ struct ScannerView: View {
                         metricRow(title: "Dist. plano", value: formattedDualMarkerPlanarDistance(state))
                         metricRow(title: "Dual descartados", value: "\(state.scanDualTagRejectedFrameCount)")
                         metricRow(
+                            title: "Obs coletadas",
+                            value: "\(state.finalRefinementCollectedObservationCount)"
+                        )
+                        metricRow(
                             title: "Obs antes filtro",
                             value: "\(state.finalRefinementObservationCountBeforeFilter)"
                         )
                         metricRow(title: "Obs refino usadas", value: "\(state.finalRefinementUsedObservationCount)")
                         metricRow(title: "Obs refino descart.", value: "\(state.finalRefinementDiscardedObservationCount)")
+                        metricRow(
+                            title: "Score medio final",
+                            value: formattedDualMarkerFinalAverageQualityScore(state)
+                        )
+                        metricRow(
+                            title: "Modo final",
+                            value: formattedDualMarkerFinalDominantMode(state)
+                        )
+                        metricRow(
+                            title: "Desc borda",
+                            value: "\(state.finalRefinementEdgeDiscardedObservationCount)"
+                        )
+                        metricRow(
+                            title: "Desc bottom peq.",
+                            value: "\(state.finalRefinementSmallBottomDiscardedObservationCount)"
+                        )
+                        metricRow(
+                            title: "Desc reproj.",
+                            value: "\(state.finalRefinementReprojectionDiscardedObservationCount)"
+                        )
+                        metricRow(
+                            title: "Desc fallback",
+                            value: "\(state.finalRefinementLowPriorityFallbackDiscardedObservationCount)"
+                        )
                         metricRow(title: "Outliers removidos", value: "\(state.finalRefinementOutlierRemovedCount)")
                         metricRow(
                             title: "Erro medio final",
@@ -1059,10 +1087,10 @@ struct ScannerView: View {
         )
     }
 
-    private var preferDualTagForFinalExportBinding: Binding<Bool> {
+    private var precisionModeV2Binding: Binding<Bool> {
         Binding(
-            get: { viewModel.preferDualTagForFinalExport },
-            set: { viewModel.setPreferDualTagForFinalExport($0) }
+            get: { viewModel.precisionModeV2 },
+            set: { viewModel.setPrecisionModeV2($0) }
         )
     }
 
@@ -1291,6 +1319,22 @@ struct ScannerView: View {
         }
 
         return String(format: "%.2f px", error)
+    }
+
+    private func formattedDualMarkerFinalAverageQualityScore(
+        _ state: DualArucoMarkerDebugState
+    ) -> String {
+        guard let score = state.finalRefinementAverageQualityScore,
+              score.isFinite
+        else {
+            return "-"
+        }
+
+        return String(format: "%.2f", score)
+    }
+
+    private func formattedDualMarkerFinalDominantMode(_ state: DualArucoMarkerDebugState) -> String {
+        state.finalRefinementDominantPoseSource?.debugTitle ?? "-"
     }
 
     private func formattedDualMarkerFinalConfidence(_ state: DualArucoMarkerDebugState) -> String {
@@ -1541,7 +1585,7 @@ struct ScannerView: View {
             if viewModel.markerProfile == .dualArucoV2 {
                 metricRow(title: "dualTagReady", value: formattedBool(viewModel.scanDualTagReady))
                 metricRow(title: "dualAngularReady", value: formattedBool(viewModel.scanDualAngularCoverageReady))
-                metricRow(title: "preferDualExport", value: formattedBool(viewModel.preferDualTagForFinalExport))
+                metricRow(title: "precisionModeV2", value: formattedBool(viewModel.precisionModeV2))
                 metricRow(title: "Plane avg error", value: formattedPlanarAverageError)
                 metricRow(title: "Plane max error", value: formattedPlanarMaximumError)
                 metricRow(title: "Plane markers", value: formattedPlanarMarkerDistances)
@@ -1649,7 +1693,7 @@ struct ScannerView: View {
                     }
                 }
 
-                Toggle("Preferir dual-tag no export", isOn: preferDualTagForFinalExportBinding)
+                Toggle("Modo precisao v2", isOn: precisionModeV2Binding)
             }
         }
         .font(.caption)
