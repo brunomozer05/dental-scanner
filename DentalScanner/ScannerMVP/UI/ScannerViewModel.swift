@@ -137,6 +137,16 @@ final class ScannerViewModel: ObservableObject {
         }
     }
 
+    struct MarkerPairDistance: Equatable, Identifiable {
+        let firstMarkerId: Int
+        let secondMarkerId: Int
+        let distanceMm: Double
+
+        var id: String {
+            "\(firstMarkerId)-\(secondMarkerId)"
+        }
+    }
+
     private struct OverlayMarkerSample {
         let marker: MarkerOverlayResult
         let timestamp: Double
@@ -160,6 +170,12 @@ final class ScannerViewModel: ObservableObject {
     private struct DualMarkerPoseObservation {
         let frameIndex: Int
         let timestamp: Double
+    }
+
+    private struct PlanarDiagnostics {
+        let averageErrorMm: Double
+        let maximumErrorMm: Double
+        let signedDistancesByMarkerId: [Int: Double]
     }
 
     @Published private(set) var cameraState: CameraState = .idle
@@ -240,6 +256,11 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var scanDualAngularCoverageReady: Bool = false
     @Published private(set) var scanRequiredDualAngularCoveragePercent: Double =
         ScanConfiguration.defaultMinimumDualAngularCoveragePercent
+    @Published private(set) var preferDualTagForFinalExport: Bool = true
+    @Published private(set) var scanPlanarAverageErrorMm: Double?
+    @Published private(set) var scanPlanarMaximumErrorMm: Double?
+    @Published private(set) var scanMarkerPlanarDistancesMm: [Int: Double] = [:]
+    @Published private(set) var scanMarkerPairDistances: [MarkerPairDistance] = []
     @Published private(set) var stlExportURL: URL?
     @Published private(set) var stlExportedImplantCount: Int = 0
     @Published private(set) var stlExportErrorMessage: String?
@@ -589,6 +610,7 @@ final class ScannerViewModel: ObservableObject {
         }
 
         self.markerProfile = markerProfile
+        preferDualTagForFinalExport = markerProfile == .dualArucoV2
         dualMarkerDebugStates = []
         overlayMarkers = []
         lastValidOverlayMarkers = []
@@ -683,6 +705,24 @@ final class ScannerViewModel: ObservableObject {
                 timestamp: lastFrameTimestamp ?? Date().timeIntervalSinceReferenceDate
             )
         }
+    }
+
+    @MainActor
+    func setPreferDualTagForFinalExport(_ preferDualTagForFinalExport: Bool) {
+        guard self.preferDualTagForFinalExport != preferDualTagForFinalExport else {
+            return
+        }
+
+        self.preferDualTagForFinalExport = preferDualTagForFinalExport
+        didApplyFinalPoseRefinement = false
+        stlExportURL = nil
+        stlExportedImplantCount = 0
+        stlExportErrorMessage = nil
+        finalObservationDiagnosticsByMarkerId = finalPoseRefiner.selectionDiagnostics(
+            observations: finalPoseObservations,
+            preferDualTagForFinalExport: preferDualTagForFinalExport
+        )
+        updateExportDiagnostics()
     }
 
     func setPreviewOrientation(_ orientation: CameraPreviewOrientation) {
@@ -1025,6 +1065,10 @@ final class ScannerViewModel: ObservableObject {
         scanCurrentFrameGood = false
         scanDualTagReady = false
         scanDualAngularCoverageReady = false
+        scanPlanarAverageErrorMm = nil
+        scanPlanarMaximumErrorMm = nil
+        scanMarkerPlanarDistancesMm = [:]
+        scanMarkerPairDistances = []
         scanTagCoverages = [:]
         scanReprojectionErrors = []
         scanPoseHistoryByMarkerId = [:]
@@ -1109,7 +1153,8 @@ final class ScannerViewModel: ObservableObject {
         )
         recordDualArucoV2RejectionReasons(dualTagRejectionReasons)
         finalObservationDiagnosticsByMarkerId = finalPoseRefiner.selectionDiagnostics(
-            observations: self.finalPoseObservations
+            observations: self.finalPoseObservations,
+            preferDualTagForFinalExport: preferDualTagForFinalExport
         )
         scanReprojectionErrors.append(goodFrameReprojectionError)
         trimRecentValues(&scanReprojectionErrors, to: scanTargetValidFrameCount)
@@ -1225,16 +1270,19 @@ final class ScannerViewModel: ObservableObject {
         didApplyFinalPoseRefinement = true
 
         finalObservationDiagnosticsByMarkerId = finalPoseRefiner.selectionDiagnostics(
-            observations: finalPoseObservations
+            observations: finalPoseObservations,
+            preferDualTagForFinalExport: preferDualTagForFinalExport
         )
         let currentPoseResults = consolidatedPoseResults()
         let refinedPoseResults = finalPoseRefiner.refine(
             observations: finalPoseObservations,
-            currentPoseResults: currentPoseResults
+            currentPoseResults: currentPoseResults,
+            preferDualTagForFinalExport: preferDualTagForFinalExport
         )
         guard !refinedPoseResults.isEmpty,
               refinedPoseResults != currentPoseResults
         else {
+            updateExportDiagnostics()
             return
         }
 
@@ -1248,6 +1296,7 @@ final class ScannerViewModel: ObservableObject {
             in: implantMetrics.implantPoseResults
         )
         updatePrecisionValidationCurrentError()
+        updateExportDiagnostics()
     }
 
     private var minimumStabilizingFrameCount: Int {
@@ -1408,14 +1457,6 @@ final class ScannerViewModel: ObservableObject {
             return "Colete mais angulos"
         }
 
-        if !evaluation.hasMinimumDualTagFrames {
-            return "Capture melhor as duas tags"
-        }
-
-        if !evaluation.hasMinimumDualAngularCoverage {
-            return "Aproxime para detectar a tag inferior"
-        }
-
         if !evaluation.hasEnoughGoodFrames || !evaluation.hasPerTagGoodFrames {
             return "Colete mais frames bons"
         }
@@ -1426,6 +1467,14 @@ final class ScannerViewModel: ObservableObject {
 
         if !evaluation.hasExportableTagPoses {
             return "Preparando poses"
+        }
+
+        if !evaluation.hasMinimumDualTagFrames {
+            return "Capture melhor as duas tags"
+        }
+
+        if !evaluation.hasMinimumDualAngularCoverage {
+            return "Aproxime para detectar a tag inferior"
         }
 
         if !hasStableDuration {
@@ -1477,14 +1526,6 @@ final class ScannerViewModel: ObservableObject {
             return "Bloqueio principal: cobertura"
         }
 
-        if !evaluation.hasMinimumDualTagFrames {
-            return "Bloqueio principal: dual-tag"
-        }
-
-        if !evaluation.hasMinimumDualAngularCoverage {
-            return "Bloqueio principal: cobertura dual-tag"
-        }
-
         if !evaluation.hasEnoughGoodFrames || !evaluation.hasPerTagGoodFrames {
             return "Bloqueio principal: frames bons"
         }
@@ -1499,6 +1540,14 @@ final class ScannerViewModel: ObservableObject {
 
         if !hasStableDuration {
             return "Bloqueio principal: aguardando estabilidade"
+        }
+
+        if !evaluation.hasMinimumDualTagFrames {
+            return "Aviso: dual-tag"
+        }
+
+        if !evaluation.hasMinimumDualAngularCoverage {
+            return "Aviso: cobertura dual-tag"
         }
 
         if !evaluation.hasAcceptableDistance {
@@ -2466,12 +2515,19 @@ final class ScannerViewModel: ObservableObject {
         return Double(dualTagFrameCount) / Double(totalCount) * 100.0
     }
 
-    private func dualMarkerConsistencyWarning(dualTagFrameCount: Int) -> String? {
+    private func dualMarkerConsistencyWarning(
+        markerId: Int,
+        dualTagFrameCount: Int
+    ) -> String? {
         guard markerProfile == .dualArucoV2,
               scanMinimumDualTagFrameCount > 0,
               dualTagFrameCount < scanMinimumDualTagFrameCount
         else {
             return nil
+        }
+
+        if preferDualTagForFinalExport {
+            return "Marker \(markerId) com poucos frames dual-tag"
         }
 
         return "Poucos frames dual-tag: aproxime ou melhore iluminacao"
@@ -2651,6 +2707,7 @@ final class ScannerViewModel: ObservableObject {
                     bottomFallbackFrameCount: bottomFallbackFrameCount
                 ),
                 scanConsistencyWarning: dualMarkerConsistencyWarning(
+                    markerId: definition.physicalMarkerId,
                     dualTagFrameCount: dualTagFrameCount
                 ),
                 scanDualAngularCoveragePercent: dualAngularCoverage,
@@ -2660,6 +2717,9 @@ final class ScannerViewModel: ObservableObject {
                 scanDualTagRejectionReason: dominantDualTagRejectionReason(
                     forPhysicalMarkerId: definition.physicalMarkerId
                 ),
+                finalPlanarDistanceMm: scanMarkerPlanarDistancesMm[
+                    definition.physicalMarkerId
+                ],
                 finalRefinementObservationCountBeforeFilter: observationsBeforeOutlierRejection,
                 finalRefinementUsedObservationCount: finalDiagnostics?.selectedObservationCount ?? 0,
                 finalRefinementDiscardedObservationCount: finalDiagnostics?.discardedObservationCount ?? 0,
@@ -3004,9 +3064,10 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private func updateExportDiagnostics() {
-        let exportablePoseCount = tagPosesForSTLExport().count
-        currentExportableTagPoseCount = exportablePoseCount
+        let tagPoses = tagPosesForSTLExport()
+        currentExportableTagPoseCount = tagPoses.count
         hasSTLExportURL = stlExportURL != nil
+        updatePlanarAndDistanceDiagnostics(from: tagPoses)
 
         if let stlExportURL {
             hasSTLExportFile = FileManager.default.fileExists(atPath: stlExportURL.path)
@@ -3015,7 +3076,125 @@ final class ScannerViewModel: ObservableObject {
         }
 
         canExportSTL = scanState == .ready &&
-            (hasSTLExportURL || exportablePoseCount > 0)
+            (hasSTLExportURL || !tagPoses.isEmpty)
+    }
+
+    private func updatePlanarAndDistanceDiagnostics(from poseResults: [PoseResult]) {
+        let sortedPoseResults = poseResults.sorted { $0.markerId < $1.markerId }
+        scanMarkerPairDistances = markerPairDistances(from: sortedPoseResults)
+
+        guard let planarDiagnostics = planarDiagnostics(from: sortedPoseResults) else {
+            scanPlanarAverageErrorMm = nil
+            scanPlanarMaximumErrorMm = nil
+            scanMarkerPlanarDistancesMm = [:]
+            return
+        }
+
+        scanPlanarAverageErrorMm = planarDiagnostics.averageErrorMm
+        scanPlanarMaximumErrorMm = planarDiagnostics.maximumErrorMm
+        scanMarkerPlanarDistancesMm = planarDiagnostics.signedDistancesByMarkerId
+    }
+
+    private func markerPairDistances(from poseResults: [PoseResult]) -> [MarkerPairDistance] {
+        guard poseResults.count >= 2 else {
+            return []
+        }
+
+        var distances: [MarkerPairDistance] = []
+        for firstIndex in poseResults.indices.dropLast() {
+            for secondIndex in poseResults.indices where secondIndex > firstIndex {
+                let firstPose = poseResults[firstIndex]
+                let secondPose = poseResults[secondIndex]
+                let distance = simd_distance(
+                    firstPose.translationVector,
+                    secondPose.translationVector
+                )
+                guard distance.isFinite else {
+                    continue
+                }
+
+                distances.append(MarkerPairDistance(
+                    firstMarkerId: firstPose.markerId,
+                    secondMarkerId: secondPose.markerId,
+                    distanceMm: distance
+                ))
+            }
+        }
+
+        return distances
+    }
+
+    private func planarDiagnostics(from poseResults: [PoseResult]) -> PlanarDiagnostics? {
+        guard poseResults.count >= 3 else {
+            return nil
+        }
+
+        let points = poseResults.map(\.translationVector)
+        let centroid = points.reduce(SIMD3<Double>.zero) { $0 + $1 } / Double(points.count)
+        var bestNormal: SIMD3<Double>?
+        var bestScore = Double.infinity
+
+        for firstIndex in 0..<(points.count - 2) {
+            for secondIndex in (firstIndex + 1)..<(points.count - 1) {
+                for thirdIndex in (secondIndex + 1)..<points.count {
+                    let normal = simd_cross(
+                        points[secondIndex] - points[firstIndex],
+                        points[thirdIndex] - points[firstIndex]
+                    )
+                    let normalLength = simd_length(normal)
+                    guard normalLength.isFinite, normalLength > 1e-9 else {
+                        continue
+                    }
+
+                    let unitNormal = normal / normalLength
+                    let distances = points.map {
+                        simd_dot($0 - centroid, unitNormal)
+                    }
+                    let absoluteDistances = distances.map(abs)
+                    let averageError = average(absoluteDistances) ?? .infinity
+                    let maximumError = absoluteDistances.max() ?? .infinity
+                    let score = averageError + maximumError * 0.25
+                    if score < bestScore {
+                        bestScore = score
+                        bestNormal = unitNormal
+                    }
+                }
+            }
+        }
+
+        guard var normal = bestNormal else {
+            return nil
+        }
+
+        var signedDistances = points.map {
+            simd_dot($0 - centroid, normal)
+        }
+        if let firstNonZero = signedDistances.first(where: { abs($0) > 1e-9 }),
+           firstNonZero < 0 {
+            normal = -normal
+            signedDistances = points.map {
+                simd_dot($0 - centroid, normal)
+            }
+        }
+
+        let absoluteDistances = signedDistances.map(abs)
+        guard let averageError = average(absoluteDistances),
+              let maximumError = absoluteDistances.max(),
+              averageError.isFinite,
+              maximumError.isFinite
+        else {
+            return nil
+        }
+
+        let distancesByMarkerId = Dictionary(
+            uniqueKeysWithValues: zip(poseResults.map(\.markerId), signedDistances)
+        )
+
+        return PlanarDiagnostics(
+            averageErrorMm: averageError,
+            maximumErrorMm: maximumError,
+            signedDistancesByMarkerId: distancesByMarkerId
+        )
     }
 
     private func tagPosesForSTLExport() -> [PoseResult] {
@@ -3374,8 +3553,6 @@ final class ScannerViewModel: ObservableObject {
                 hasCompleteTagCoverage &&
                 hasEnoughGoodFrames &&
                 hasPerTagGoodFrames &&
-                hasMinimumDualTagFrames &&
-                hasMinimumDualAngularCoverage &&
                 hasAcceptableReprojectionError &&
                 hasExportableTagPoses
         }

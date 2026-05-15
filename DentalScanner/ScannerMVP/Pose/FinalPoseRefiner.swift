@@ -107,7 +107,8 @@ final class FinalPoseRefiner {
 
     func refine(
         observations: [FinalPoseObservation],
-        currentPoseResults: [PoseResult]
+        currentPoseResults: [PoseResult],
+        preferDualTagForFinalExport: Bool = true
     ) -> [PoseResult] {
         let currentPoseResults = currentPoseResults.sorted { $0.markerId < $1.markerId }
         guard let anchorMarkerId = currentPoseResults.first?.markerId else {
@@ -119,7 +120,8 @@ final class FinalPoseRefiner {
         })
         let refinedCameraPosesByMarkerId = refinedCameraPoses(
             observations: observations,
-            currentPosesByMarkerId: currentPosesByMarkerId
+            currentPosesByMarkerId: currentPosesByMarkerId,
+            preferDualTagForFinalExport: preferDualTagForFinalExport
         )
 
         guard let refinedAnchorPose = refinedCameraPosesByMarkerId[anchorMarkerId] else {
@@ -142,21 +144,24 @@ final class FinalPoseRefiner {
     }
 
     func selectionDiagnostics(
-        observations: [FinalPoseObservation]
+        observations: [FinalPoseObservation],
+        preferDualTagForFinalExport: Bool = true
     ) -> [Int: FinalPoseObservationSelectionDiagnostics] {
         let observationsByMarkerId = Dictionary(grouping: observations, by: \.markerId)
 
         return observationsByMarkerId.reduce(into: [:]) { partialResult, item in
             partialResult[item.key] = selectedObservationSelection(
                 markerId: item.key,
-                observations: item.value
+                observations: item.value,
+                preferDualTagForFinalExport: preferDualTagForFinalExport
             ).diagnostics
         }
     }
 
     private func refinedCameraPoses(
         observations: [FinalPoseObservation],
-        currentPosesByMarkerId: [Int: PoseResult]
+        currentPosesByMarkerId: [Int: PoseResult],
+        preferDualTagForFinalExport: Bool
     ) -> [Int: PoseResult] {
         let observationsByMarkerId = Dictionary(grouping: observations, by: \.markerId)
         var refinedPosesByMarkerId: [Int: PoseResult] = [:]
@@ -166,7 +171,8 @@ final class FinalPoseRefiner {
                   let refinedPose = refinedCameraPose(
                     markerId: markerId,
                     observations: markerObservations,
-                    currentPose: currentPose
+                    currentPose: currentPose,
+                    preferDualTagForFinalExport: preferDualTagForFinalExport
                   )
             else {
                 continue
@@ -181,9 +187,14 @@ final class FinalPoseRefiner {
     private func refinedCameraPose(
         markerId: Int,
         observations: [FinalPoseObservation],
-        currentPose: PoseResult
+        currentPose: PoseResult,
+        preferDualTagForFinalExport: Bool
     ) -> PoseResult? {
-        let selection = selectedObservationSelection(markerId: markerId, observations: observations)
+        let selection = selectedObservationSelection(
+            markerId: markerId,
+            observations: observations,
+            preferDualTagForFinalExport: preferDualTagForFinalExport
+        )
         let preferredObservations = selection.observations
 
         guard let referenceCameraMatrix = preferredObservations.last?.cameraMatrix else {
@@ -297,7 +308,8 @@ final class FinalPoseRefiner {
 
     private func selectedObservationSelection(
         markerId: Int,
-        observations: [FinalPoseObservation]
+        observations: [FinalPoseObservation],
+        preferDualTagForFinalExport: Bool
     ) -> ObservationSelection {
         if observations.allSatisfy({ observation in
             if case .singleArucoV1 = observation.poseSource {
@@ -323,7 +335,8 @@ final class FinalPoseRefiner {
             return true
         }
         let candidateIndexedObservations = preferredIndexedObservations(
-            from: validIndexedObservations
+            from: validIndexedObservations,
+            preferDualTagForFinalExport: preferDualTagForFinalExport
         )
         let candidateIndices = Set(candidateIndexedObservations.map(\.offset))
         for item in validIndexedObservations where !candidateIndices.contains(item.offset) {
@@ -405,8 +418,13 @@ final class FinalPoseRefiner {
     }
 
     private func preferredIndexedObservations(
-        from indexedObservations: [(offset: Int, element: FinalPoseObservation)]
+        from indexedObservations: [(offset: Int, element: FinalPoseObservation)],
+        preferDualTagForFinalExport: Bool
     ) -> [(offset: Int, element: FinalPoseObservation)] {
+        guard preferDualTagForFinalExport else {
+            return indexedObservations
+        }
+
         let dualTagObservations = indexedObservations.filter {
             if case .dualTag = $0.element.poseSource {
                 return true

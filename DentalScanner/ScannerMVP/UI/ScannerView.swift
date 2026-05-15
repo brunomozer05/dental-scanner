@@ -506,6 +506,7 @@ struct ScannerView: View {
                         metricRow(title: "Dual %", value: formattedDualMarkerScanDualPercent(state))
                         metricRow(title: "Dual angular", value: formattedDualMarkerAngularCoverage(state))
                         metricRow(title: "Modo dominante", value: formattedDualMarkerDominantMode(state))
+                        metricRow(title: "Dist. plano", value: formattedDualMarkerPlanarDistance(state))
                         metricRow(title: "Dual descartados", value: "\(state.scanDualTagRejectedFrameCount)")
                         metricRow(
                             title: "Obs antes filtro",
@@ -904,6 +905,58 @@ struct ScannerView: View {
             .joined(separator: "\n")
     }
 
+    private var formattedPlanarAverageError: String {
+        formattedMillimeterValue(viewModel.scanPlanarAverageErrorMm)
+    }
+
+    private var formattedPlanarMaximumError: String {
+        formattedMillimeterValue(viewModel.scanPlanarMaximumErrorMm)
+    }
+
+    private var formattedPlanarMarkerDistances: String {
+        guard !viewModel.scanMarkerPlanarDistancesMm.isEmpty else {
+            return "-"
+        }
+
+        return viewModel.scanMarkerPlanarDistancesMm.keys
+            .sorted()
+            .compactMap { markerId in
+                guard let distanceMm = viewModel.scanMarkerPlanarDistancesMm[markerId],
+                      distanceMm.isFinite
+                else {
+                    return nil
+                }
+
+                return String(format: "M%d: %+.2f mm", markerId, distanceMm)
+            }
+            .joined(separator: "\n")
+    }
+
+    private var formattedMarkerPairDistances: String {
+        guard !viewModel.scanMarkerPairDistances.isEmpty else {
+            return "-"
+        }
+
+        return viewModel.scanMarkerPairDistances
+            .map { pairDistance in
+                String(
+                    format: "M%d-M%d: %.2f mm",
+                    pairDistance.firstMarkerId,
+                    pairDistance.secondMarkerId,
+                    pairDistance.distanceMm
+                )
+            }
+            .joined(separator: "\n")
+    }
+
+    private func formattedMillimeterValue(_ value: Double?) -> String {
+        guard let value, value.isFinite else {
+            return "-"
+        }
+
+        return String(format: "%.2f mm", value)
+    }
+
     private var formattedResolution: String {
         guard let resolution = viewModel.frameResolution else {
             return "-"
@@ -999,6 +1052,13 @@ struct ScannerView: View {
         Binding(
             get: { viewModel.scanRequiredDualAngularCoveragePercent },
             set: { viewModel.setScanRequiredDualAngularCoveragePercent($0) }
+        )
+    }
+
+    private var preferDualTagForFinalExportBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.preferDualTagForFinalExport },
+            set: { viewModel.setPreferDualTagForFinalExport($0) }
         )
     }
 
@@ -1181,6 +1241,16 @@ struct ScannerView: View {
 
     private func formattedDualMarkerDominantMode(_ state: DualArucoMarkerDebugState) -> String {
         state.scanDominantPoseSource?.debugTitle ?? "-"
+    }
+
+    private func formattedDualMarkerPlanarDistance(_ state: DualArucoMarkerDebugState) -> String {
+        guard let distanceMm = state.finalPlanarDistanceMm,
+              distanceMm.isFinite
+        else {
+            return "-"
+        }
+
+        return String(format: "%+.2f mm", distanceMm)
     }
 
     private func formattedDualMarkerDetectionWarning(_ state: DualArucoMarkerDebugState) -> String {
@@ -1455,6 +1525,11 @@ struct ScannerView: View {
             if viewModel.markerProfile == .dualArucoV2 {
                 metricRow(title: "dualTagReady", value: formattedBool(viewModel.scanDualTagReady))
                 metricRow(title: "dualAngularReady", value: formattedBool(viewModel.scanDualAngularCoverageReady))
+                metricRow(title: "preferDualExport", value: formattedBool(viewModel.preferDualTagForFinalExport))
+                metricRow(title: "Plane avg error", value: formattedPlanarAverageError)
+                metricRow(title: "Plane max error", value: formattedPlanarMaximumError)
+                metricRow(title: "Plane markers", value: formattedPlanarMarkerDistances)
+                metricRow(title: "Dist markers", value: formattedMarkerPairDistances)
             }
             metricRow(title: "Gerando STL", value: formattedBool(viewModel.isGeneratingSTL))
             metricRow(title: "Export iniciado", value: formattedBool(viewModel.didStartSTLExportForCurrentScan))
@@ -1557,6 +1632,8 @@ struct ScannerView: View {
                         .monospacedDigit()
                     }
                 }
+
+                Toggle("Preferir dual-tag no export", isOn: preferDualTagForFinalExportBinding)
             }
         }
         .font(.caption)
