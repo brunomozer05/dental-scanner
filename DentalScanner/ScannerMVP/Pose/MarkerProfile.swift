@@ -245,6 +245,12 @@ struct DualArucoMarkerDebugState: Equatable, Identifiable {
     let poseSource: MarkerPoseSource?
     let reprojectionError: Double?
     let usedPointCount: Int?
+    let normalizedImageX: Double?
+    let normalizedImageY: Double?
+    let nearImageEdge: Bool
+    let nearestImageEdge: String?
+    let imageEdgeDistancePercent: Double?
+    let imageEdgeWarning: String?
     let visualMarkerActive: Bool
     let visualModeTitle: String?
     let visualLastSeenAgeSeconds: Double?
@@ -252,6 +258,9 @@ struct DualArucoMarkerDebugState: Equatable, Identifiable {
     let scanDualTagFrameCount: Int
     let scanTopFallbackFrameCount: Int
     let scanBottomFallbackFrameCount: Int
+    let scanNearImageEdgeFrameCount: Int
+    let scanNearImageEdgeFramePercent: Double
+    let scanNearImageEdgeDominantPoseSource: MarkerPoseSource?
     let scanDualTagPosePercent: Double
     let scanDominantPoseSource: MarkerPoseSource?
     let scanConsistencyWarning: String?
@@ -266,6 +275,11 @@ struct DualArucoMarkerDebugState: Equatable, Identifiable {
     let finalRefinementOutlierRemovedCount: Int
     let finalRefinementAverageReprojectionError: Double?
     let finalRefinementAverageQualityScore: Double?
+    let finalRefinementAverageNormalizedImageX: Double?
+    let finalRefinementAverageNormalizedImageY: Double?
+    let finalRefinementAverageImageEdgeMargin: Double?
+    let finalRefinementPositionVariationMm: Double?
+    let finalRefinementRotationVariationDegrees: Double?
     let finalRefinementEdgeDiscardedObservationCount: Int
     let finalRefinementSmallBottomDiscardedObservationCount: Int
     let finalRefinementReprojectionDiscardedObservationCount: Int

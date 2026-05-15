@@ -20,6 +20,23 @@ final class ScannerViewModel: ObservableObject {
         static let recentDualPoseTimeoutSeconds: Double = 0.25
     }
 
+    private enum ImageEdgeDiagnosticsConfiguration {
+        static let minimumPreferredNormalizedMargin: Double = 0.15
+        static let frequentEdgeFrameRatio: Double = 0.35
+        static let minimumFramesForWarning: Int = 5
+    }
+
+    private struct MarkerImagePositionDiagnostics {
+        let normalizedX: Double
+        let normalizedY: Double
+        let edgeMargin: Double
+        let nearestEdge: String
+
+        var isNearPreferredEdge: Bool {
+            edgeMargin < ImageEdgeDiagnosticsConfiguration.minimumPreferredNormalizedMargin
+        }
+    }
+
     private enum PoseConfiguration {
         static let defaultMarkerSizeMillimeters: Double = 6.9
         static let minimumMarkerSizeMillimeters: Double = 1.0
@@ -270,6 +287,9 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var scanPlanarMaximumErrorMm: Double?
     @Published private(set) var scanMarkerPlanarDistancesMm: [Int: Double] = [:]
     @Published private(set) var scanMarkerPairDistances: [MarkerPairDistance] = []
+    @Published private(set) var scanFinalConfidenceSummary: String = "-"
+    @Published private(set) var scanFinalWorstMarkerSummary: String = "-"
+    @Published private(set) var scanFinalMainIssueSummary: String = "-"
     @Published private(set) var stlExportURL: URL?
     @Published private(set) var stlExportedImplantCount: Int = 0
     @Published private(set) var stlExportErrorMessage: String?
@@ -321,6 +341,11 @@ final class ScannerViewModel: ObservableObject {
     private var scanDualTagFrameCountsByMarkerId: [Int: Int] = [:]
     private var scanTopFallbackFrameCountsByMarkerId: [Int: Int] = [:]
     private var scanBottomFallbackFrameCountsByMarkerId: [Int: Int] = [:]
+    private var scanNearImageEdgeFrameCountsByMarkerId: [Int: Int] = [:]
+    private var scanNearImageEdgeDualTagFrameCountsByMarkerId: [Int: Int] = [:]
+    private var scanNearImageEdgeTopFallbackFrameCountsByMarkerId: [Int: Int] = [:]
+    private var scanNearImageEdgeBottomFallbackFrameCountsByMarkerId: [Int: Int] = [:]
+    private var scanNearImageEdgeNameCountsByMarkerId: [Int: [String: Int]] = [:]
     private var scanDualTagRejectionReasonCountsByMarkerId: [Int: [String: Int]] = [:]
     private var scanReadinessStableStartTimestamp: Double?
     private var scanCurrentFrameIsGood = false
@@ -961,6 +986,10 @@ final class ScannerViewModel: ObservableObject {
             poseResults: poseMetrics.rawPoseResults,
             markerProfile: activeMarkerProfile,
             dualMarkerDefinitions: dualMarkerDefinitions,
+            frameSizePixels: CGSize(
+                width: CGFloat(frame.width),
+                height: CGFloat(frame.height)
+            ),
             timestamp: metrics.lastFrameTimestamp,
             frameIndex: metrics.totalFramesReceived
         )
@@ -1085,6 +1114,9 @@ final class ScannerViewModel: ObservableObject {
         scanPlanarMaximumErrorMm = nil
         scanMarkerPlanarDistancesMm = [:]
         scanMarkerPairDistances = []
+        scanFinalConfidenceSummary = "-"
+        scanFinalWorstMarkerSummary = "-"
+        scanFinalMainIssueSummary = "-"
         scanTagCoverages = [:]
         scanReprojectionErrors = []
         scanPoseHistoryByMarkerId = [:]
@@ -1094,6 +1126,11 @@ final class ScannerViewModel: ObservableObject {
         scanDualTagFrameCountsByMarkerId = [:]
         scanTopFallbackFrameCountsByMarkerId = [:]
         scanBottomFallbackFrameCountsByMarkerId = [:]
+        scanNearImageEdgeFrameCountsByMarkerId = [:]
+        scanNearImageEdgeDualTagFrameCountsByMarkerId = [:]
+        scanNearImageEdgeTopFallbackFrameCountsByMarkerId = [:]
+        scanNearImageEdgeBottomFallbackFrameCountsByMarkerId = [:]
+        scanNearImageEdgeNameCountsByMarkerId = [:]
         scanDualTagRejectionReasonCountsByMarkerId = [:]
         scanReadinessStableStartTimestamp = nil
         scanCurrentFrameIsGood = false
@@ -1163,10 +1200,11 @@ final class ScannerViewModel: ObservableObject {
         scanCurrentFrameReadinessBlocker = nil
         scanAverageDistanceMm = averageDistance(in: goodPoseResults) ?? scanAverageDistanceMm
 
+        let goodFinalPoseObservations = finalPoseObservations.filter {
+            goodMarkerIds.contains($0.markerId)
+        }
         scanValidFrameCount += 1
-        self.finalPoseObservations.append(
-            contentsOf: finalPoseObservations.filter { goodMarkerIds.contains($0.markerId) }
-        )
+        self.finalPoseObservations.append(contentsOf: goodFinalPoseObservations)
         recordDualArucoV2RejectionReasons(dualTagRejectionReasons)
         finalObservationDiagnosticsByMarkerId = finalPoseRefiner.selectionDiagnostics(
             observations: self.finalPoseObservations,
@@ -1177,6 +1215,7 @@ final class ScannerViewModel: ObservableObject {
 
         recordAngularCoverage(from: goodPoseResults)
         recordDualArucoV2PoseSourceFrames(from: goodPoseResults)
+        recordDualArucoV2ImageEdgeFrames(from: goodFinalPoseObservations)
 
         let goodConsolidatedPoseResults = consolidatedPoseResults.filter {
             goodMarkerIds.contains($0.markerId)
@@ -1515,6 +1554,10 @@ final class ScannerViewModel: ObservableObject {
             return "Mantenha estavel"
         }
 
+        if let imageEdgeFramingWarning = imageEdgeFramingWarning() {
+            return imageEdgeFramingWarning
+        }
+
         return "Preparando finalizacao"
     }
 
@@ -1572,6 +1615,10 @@ final class ScannerViewModel: ObservableObject {
 
         if !evaluation.hasStablePosition || !evaluation.hasStableRotation {
             return "Aviso: jitter alto"
+        }
+
+        if imageEdgeFramingWarning() != nil {
+            return "Aviso: enquadramento"
         }
 
         if !evaluation.hasCurrentGoodFrame {
@@ -1716,6 +1763,50 @@ final class ScannerViewModel: ObservableObject {
                     scanTopFallbackFrameCountsByMarkerId[poseResult.markerId, default: 0] += 1
                 case .bottom:
                     scanBottomFallbackFrameCountsByMarkerId[poseResult.markerId, default: 0] += 1
+                }
+            case .singleArucoV1:
+                continue
+            }
+        }
+    }
+
+    @MainActor
+    private func recordDualArucoV2ImageEdgeFrames(from observations: [FinalPoseObservation]) {
+        guard markerProfile == .dualArucoV2 else {
+            return
+        }
+
+        for observation in observations {
+            guard let diagnostics = imagePositionDiagnostics(
+                for: observation.imagePoints,
+                frameSizePixels: observation.frameSizePixels
+            ),
+                  diagnostics.isNearPreferredEdge
+            else {
+                continue
+            }
+
+            scanNearImageEdgeFrameCountsByMarkerId[observation.markerId, default: 0] += 1
+            scanNearImageEdgeNameCountsByMarkerId[
+                observation.markerId,
+                default: [:]
+            ][diagnostics.nearestEdge, default: 0] += 1
+
+            switch observation.poseSource {
+            case .dualTag:
+                scanNearImageEdgeDualTagFrameCountsByMarkerId[observation.markerId, default: 0] += 1
+            case let .singleFallback(_, role):
+                switch role {
+                case .top:
+                    scanNearImageEdgeTopFallbackFrameCountsByMarkerId[
+                        observation.markerId,
+                        default: 0
+                    ] += 1
+                case .bottom:
+                    scanNearImageEdgeBottomFallbackFrameCountsByMarkerId[
+                        observation.markerId,
+                        default: 0
+                    ] += 1
                 }
             case .singleArucoV1:
                 continue
@@ -2757,6 +2848,7 @@ final class ScannerViewModel: ObservableObject {
         poseResults: [PoseResult],
         markerProfile: MarkerProfile,
         dualMarkerDefinitions: [DualArucoMarkerDefinition],
+        frameSizePixels: CGSize,
         timestamp: Double,
         frameIndex: Int
     ) -> [DualArucoMarkerDebugState] {
@@ -2821,6 +2913,24 @@ final class ScannerViewModel: ObservableObject {
                 timestamp: timestamp,
                 lastTimestamp: visualTrackedMarker?.lastDualSeenTimestamp
             )
+            let imageDiagnostics = currentImagePositionDiagnostics(
+                for: definition,
+                acceptedDetectionsByTagId: acceptedDetectionsByTagId,
+                rawDetectionsByTagId: rawDetectionsByTagId,
+                frameSizePixels: frameSizePixels
+            )
+            let nearImageEdgeFrameCount = scanNearImageEdgeFrameCountsByMarkerId[
+                definition.physicalMarkerId
+            ] ?? 0
+            let totalFrameCount = scanFrameCountsByMarkerId[
+                definition.physicalMarkerId
+            ] ?? 0
+            let nearImageEdgeFramePercent = totalFrameCount > 0
+                ? Double(nearImageEdgeFrameCount) / Double(totalFrameCount) * 100.0
+                : 0
+            let nearImageEdgeDominantPoseSource = dominantNearImageEdgePoseSource(
+                for: definition
+            )
 
             return DualArucoMarkerDebugState(
                 physicalMarkerId: definition.physicalMarkerId,
@@ -2853,6 +2963,15 @@ final class ScannerViewModel: ObservableObject {
                 poseSource: poseResult?.poseSource,
                 reprojectionError: poseResult?.reprojectionError,
                 usedPointCount: poseResult?.usedPointCount,
+                normalizedImageX: imageDiagnostics?.normalizedX,
+                normalizedImageY: imageDiagnostics?.normalizedY,
+                nearImageEdge: imageDiagnostics?.isNearPreferredEdge ?? false,
+                nearestImageEdge: imageDiagnostics?.nearestEdge,
+                imageEdgeDistancePercent: imageDiagnostics.map { $0.edgeMargin * 100.0 },
+                imageEdgeWarning: imageEdgeWarning(
+                    markerId: definition.physicalMarkerId,
+                    diagnostics: imageDiagnostics
+                ),
                 visualMarkerActive: visualLastSeenAge.map {
                     $0 <= OverlayStabilization.timeout
                 } ?? false,
@@ -2862,6 +2981,9 @@ final class ScannerViewModel: ObservableObject {
                 scanDualTagFrameCount: dualTagFrameCount,
                 scanTopFallbackFrameCount: topFallbackFrameCount,
                 scanBottomFallbackFrameCount: bottomFallbackFrameCount,
+                scanNearImageEdgeFrameCount: nearImageEdgeFrameCount,
+                scanNearImageEdgeFramePercent: nearImageEdgeFramePercent,
+                scanNearImageEdgeDominantPoseSource: nearImageEdgeDominantPoseSource,
                 scanDualTagPosePercent: dualTagPosePercent(
                     dualTagFrameCount: dualTagFrameCount,
                     topFallbackFrameCount: topFallbackFrameCount,
@@ -2894,6 +3016,16 @@ final class ScannerViewModel: ObservableObject {
                 finalRefinementOutlierRemovedCount: finalDiagnostics?.outlierRemovedCount ?? 0,
                 finalRefinementAverageReprojectionError: finalAverageReprojectionError,
                 finalRefinementAverageQualityScore: finalAverageQualityScore,
+                finalRefinementAverageNormalizedImageX:
+                    finalDiagnostics?.averageNormalizedImageX,
+                finalRefinementAverageNormalizedImageY:
+                    finalDiagnostics?.averageNormalizedImageY,
+                finalRefinementAverageImageEdgeMargin:
+                    finalDiagnostics?.averageImageEdgeMargin,
+                finalRefinementPositionVariationMm:
+                    finalDiagnostics?.finalPositionVariationMm,
+                finalRefinementRotationVariationDegrees:
+                    finalDiagnostics?.finalRotationVariationDegrees,
                 finalRefinementEdgeDiscardedObservationCount:
                     finalDiagnostics?.edgeDiscardedObservationCount ?? 0,
                 finalRefinementSmallBottomDiscardedObservationCount:
@@ -2918,6 +3050,167 @@ final class ScannerViewModel: ObservableObject {
                 )
             )
         }
+    }
+
+    private func currentImagePositionDiagnostics(
+        for definition: DualArucoMarkerDefinition,
+        acceptedDetectionsByTagId: [Int: ArUcoDetectionResult],
+        rawDetectionsByTagId: [Int: ArUcoDetectionResult],
+        frameSizePixels: CGSize
+    ) -> MarkerImagePositionDiagnostics? {
+        let acceptedPoints = [
+            acceptedDetectionsByTagId[definition.topTagId]?.corners ?? [],
+            acceptedDetectionsByTagId[definition.bottomTagId]?.corners ?? []
+        ].flatMap { $0 }
+        let rawPoints = [
+            rawDetectionsByTagId[definition.topTagId]?.corners ?? [],
+            rawDetectionsByTagId[definition.bottomTagId]?.corners ?? []
+        ].flatMap { $0 }
+        let points = acceptedPoints.isEmpty ? rawPoints : acceptedPoints
+
+        return imagePositionDiagnostics(
+            for: points,
+            frameSizePixels: frameSizePixels
+        )
+    }
+
+    private func imagePositionDiagnostics(
+        for points: [CGPoint],
+        frameSizePixels: CGSize
+    ) -> MarkerImagePositionDiagnostics? {
+        guard !points.isEmpty,
+              frameSizePixels.width.isFinite,
+              frameSizePixels.height.isFinite,
+              frameSizePixels.width > 0,
+              frameSizePixels.height > 0
+        else {
+            return nil
+        }
+
+        let sum = points.reduce(CGPoint.zero) { partialResult, point in
+            CGPoint(
+                x: partialResult.x + point.x,
+                y: partialResult.y + point.y
+            )
+        }
+        let pointCount = CGFloat(points.count)
+        let normalizedX = Double(sum.x / pointCount / frameSizePixels.width)
+        let normalizedY = Double(sum.y / pointCount / frameSizePixels.height)
+
+        guard normalizedX.isFinite,
+              normalizedY.isFinite
+        else {
+            return nil
+        }
+
+        let clampedX = min(max(normalizedX, 0), 1)
+        let clampedY = min(max(normalizedY, 0), 1)
+        let edgeMargin = [
+            clampedX,
+            1.0 - clampedX,
+            clampedY,
+            1.0 - clampedY
+        ].min() ?? 0
+
+        return MarkerImagePositionDiagnostics(
+            normalizedX: clampedX,
+            normalizedY: clampedY,
+            edgeMargin: edgeMargin,
+            nearestEdge: nearestImageEdgeName(
+                normalizedX: clampedX,
+                normalizedY: clampedY
+            )
+        )
+    }
+
+    private func nearestImageEdgeName(
+        normalizedX: Double,
+        normalizedY: Double
+    ) -> String {
+        let distances = [
+            ("esquerda", normalizedX),
+            ("direita", 1.0 - normalizedX),
+            ("topo", normalizedY),
+            ("baixo", 1.0 - normalizedY)
+        ]
+
+        return distances.min { $0.1 < $1.1 }?.0 ?? "-"
+    }
+
+    private func imageEdgeWarning(
+        markerId: Int,
+        diagnostics: MarkerImagePositionDiagnostics?
+    ) -> String? {
+        guard let diagnostics,
+              diagnostics.isNearPreferredEdge
+        else {
+            return nil
+        }
+
+        return "Marker \(markerId) perto da borda \(diagnostics.nearestEdge)"
+    }
+
+    private func imageEdgeFramingWarning() -> String? {
+        guard markerProfile == .dualArucoV2 else {
+            return nil
+        }
+
+        for markerId in MarkerConfiguration.dualMarkers.map(\.physicalMarkerId).sorted() {
+            let totalFrameCount = scanFrameCountsByMarkerId[markerId] ?? 0
+            let nearImageEdgeFrameCount = scanNearImageEdgeFrameCountsByMarkerId[markerId] ?? 0
+            guard totalFrameCount >= ImageEdgeDiagnosticsConfiguration.minimumFramesForWarning,
+                  nearImageEdgeFrameCount > 0
+            else {
+                continue
+            }
+
+            let edgeRatio = Double(nearImageEdgeFrameCount) / Double(totalFrameCount)
+            guard edgeRatio >= ImageEdgeDiagnosticsConfiguration.frequentEdgeFrameRatio else {
+                continue
+            }
+
+            let edgeName = dominantNearImageEdgeName(forPhysicalMarkerId: markerId) ?? "-"
+            return "Marker \(markerId) frequentemente perto da borda \(edgeName)"
+        }
+
+        return nil
+    }
+
+    private func dominantNearImageEdgeName(forPhysicalMarkerId markerId: Int) -> String? {
+        dominantReason(in: scanNearImageEdgeNameCountsByMarkerId[markerId] ?? [:])
+    }
+
+    private func dominantNearImageEdgePoseSource(
+        for definition: DualArucoMarkerDefinition
+    ) -> MarkerPoseSource? {
+        let candidates: [(source: MarkerPoseSource, count: Int)] = [
+            (
+                source: .dualTag,
+                count: scanNearImageEdgeDualTagFrameCountsByMarkerId[
+                    definition.physicalMarkerId
+                ] ?? 0
+            ),
+            (
+                source: .singleFallback(tagId: definition.topTagId, role: .top),
+                count: scanNearImageEdgeTopFallbackFrameCountsByMarkerId[
+                    definition.physicalMarkerId
+                ] ?? 0
+            ),
+            (
+                source: .singleFallback(tagId: definition.bottomTagId, role: .bottom),
+                count: scanNearImageEdgeBottomFallbackFrameCountsByMarkerId[
+                    definition.physicalMarkerId
+                ] ?? 0
+            )
+        ]
+
+        guard let dominantCandidate = candidates.max(by: { $0.count < $1.count }),
+              dominantCandidate.count > 0
+        else {
+            return nil
+        }
+
+        return dominantCandidate.source
     }
 
     private func bestDetectionsByMarkerId(
@@ -3267,6 +3560,7 @@ final class ScannerViewModel: ObservableObject {
         currentExportableTagPoseCount = tagPoses.count
         hasSTLExportURL = stlExportURL != nil
         updatePlanarAndDistanceDiagnostics(from: tagPoses)
+        updateFinalConfidenceSummary()
 
         if let stlExportURL {
             hasSTLExportFile = FileManager.default.fileExists(atPath: stlExportURL.path)
@@ -3276,6 +3570,106 @@ final class ScannerViewModel: ObservableObject {
 
         canExportSTL = scanState == .ready &&
             (hasSTLExportURL || !tagPoses.isEmpty)
+    }
+
+    private func updateFinalConfidenceSummary() {
+        guard markerProfile == .dualArucoV2,
+              !finalObservationDiagnosticsByMarkerId.isEmpty
+        else {
+            scanFinalConfidenceSummary = "-"
+            scanFinalWorstMarkerSummary = "-"
+            scanFinalMainIssueSummary = "-"
+            return
+        }
+
+        let diagnostics = finalObservationDiagnosticsByMarkerId.values.sorted {
+            $0.markerId < $1.markerId
+        }
+        let confidence = diagnostics.reduce(FinalPoseMarkerConfidence.high) { partialResult, item in
+            if confidenceRank(item.finalConfidence) > confidenceRank(partialResult) {
+                return item.finalConfidence
+            }
+
+            return partialResult
+        }
+        let worstDiagnostics = diagnostics.max {
+            let lhsRank = confidenceRank($0.finalConfidence)
+            let rhsRank = confidenceRank($1.finalConfidence)
+            if lhsRank == rhsRank {
+                return finalIssueWeight(for: $0) < finalIssueWeight(for: $1)
+            }
+
+            return lhsRank < rhsRank
+        }
+
+        scanFinalConfidenceSummary = confidence.rawValue
+        scanFinalWorstMarkerSummary = worstDiagnostics.map { "M\($0.markerId)" } ?? "-"
+        scanFinalMainIssueSummary = worstDiagnostics.map { finalMainIssue(for: $0) } ?? "-"
+    }
+
+    private func confidenceRank(_ confidence: FinalPoseMarkerConfidence) -> Int {
+        switch confidence {
+        case .high:
+            return 0
+        case .medium:
+            return 1
+        case .low:
+            return 2
+        }
+    }
+
+    private func finalIssueWeight(
+        for diagnostics: FinalPoseObservationSelectionDiagnostics
+    ) -> Int {
+        let edgeFrameCount = scanNearImageEdgeFrameCountsByMarkerId[diagnostics.markerId] ?? 0
+        return diagnostics.outlierRemovedCount +
+            diagnostics.edgeDiscardedObservationCount +
+            diagnostics.smallBottomDiscardedObservationCount +
+            diagnostics.reprojectionDiscardedObservationCount +
+            diagnostics.lowPriorityFallbackDiscardedObservationCount +
+            edgeFrameCount
+    }
+
+    private func finalMainIssue(
+        for diagnostics: FinalPoseObservationSelectionDiagnostics
+    ) -> String {
+        let totalFrameCount = scanFrameCountsByMarkerId[diagnostics.markerId] ?? 0
+        let edgeFrameCount = scanNearImageEdgeFrameCountsByMarkerId[diagnostics.markerId] ?? 0
+        let edgeFrameRatio = totalFrameCount > 0
+            ? Double(edgeFrameCount) / Double(totalFrameCount)
+            : 0
+
+        if diagnostics.edgeDiscardedObservationCount > 0 ||
+            edgeFrameRatio >= ImageEdgeDiagnosticsConfiguration.frequentEdgeFrameRatio ||
+            (diagnostics.averageImageEdgeMargin ?? 1.0) <
+                ImageEdgeDiagnosticsConfiguration.minimumPreferredNormalizedMargin {
+            return "edge"
+        }
+
+        if diagnostics.smallBottomDiscardedObservationCount > 0 {
+            return "bottom small"
+        }
+
+        if diagnostics.reprojectionDiscardedObservationCount > 0 ||
+            (diagnostics.finalAverageReprojectionError ?? 0) >
+                scanReadinessConfiguration.maximumAverageReprojectionError {
+            return "reprojection"
+        }
+
+        if diagnostics.outlierRemovedCount > 0 {
+            return "outliers"
+        }
+
+        if diagnostics.lowPriorityFallbackDiscardedObservationCount > 0 {
+            return "fallback"
+        }
+
+        if let dominantSource = diagnostics.finalDominantPoseSource,
+           case .singleFallback(_, _) = dominantSource {
+            return "fallback"
+        }
+
+        return diagnostics.finalConfidenceReason ?? "ok"
     }
 
     private func updatePlanarAndDistanceDiagnostics(from poseResults: [PoseResult]) {

@@ -29,6 +29,22 @@ struct FinalPoseObservation {
     }
 }
 
+struct PoseObservationQuality: Equatable {
+    let markerId: Int
+    let source: MarkerPoseSource
+    let qualityScore: Double
+    let reprojectionError: Double
+    let topAreaPixels: Double?
+    let bottomAreaPixels: Double?
+    let normalizedImageX: Double?
+    let normalizedImageY: Double?
+    let edgeMargin: Double?
+    let wasNearImageEdge: Bool
+    let wasHardRejectedByEdge: Bool
+    let wasRejectedByBottomArea: Bool
+    let rejectionReason: String?
+}
+
 enum FinalPoseMarkerConfidence: String, Equatable {
     case high = "Alta"
     case medium = "Media"
@@ -44,6 +60,11 @@ struct FinalPoseObservationSelectionDiagnostics: Equatable {
     let outlierRemovedCount: Int
     let finalAverageReprojectionError: Double?
     let finalAverageQualityScore: Double?
+    let averageNormalizedImageX: Double?
+    let averageNormalizedImageY: Double?
+    let averageImageEdgeMargin: Double?
+    let finalPositionVariationMm: Double?
+    let finalRotationVariationDegrees: Double?
     let finalConfidence: FinalPoseMarkerConfidence
     let finalConfidenceReason: String?
     let edgeDiscardedObservationCount: Int
@@ -62,11 +83,12 @@ final class FinalPoseRefiner {
         let maximumAcceptedErrorMultiplier: Double
         let maximumCameraMatrixDelta: Double
         let minimumFinalObservationsPerMarker: Int
+        let maximumFinalObservationsPerMarker: Int
         let finalTopObservationRatio: Double
         let minimumObservationMarkerAreaPixels: Double
-        let minimumBottomTagAreaForFinalDualUse: Double
-        let minimumImageEdgeMarginPixels: Double
-        let idealImageEdgeMarginPixels: Double
+        let minimumBottomTagAreaForHighConfidenceDual: Double
+        let minimumPreferredImageEdgeMargin: Double
+        let hardRejectImageEdgeMargin: Double
         let idealMinimumDistanceMm: Double
         let idealMaximumDistanceMm: Double
         let maximumDistanceMm: Double
@@ -82,11 +104,12 @@ final class FinalPoseRefiner {
             maximumAcceptedErrorMultiplier: 1.25,
             maximumCameraMatrixDelta: 0.5,
             minimumFinalObservationsPerMarker: 8,
+            maximumFinalObservationsPerMarker: 40,
             finalTopObservationRatio: 0.4,
             minimumObservationMarkerAreaPixels: 80.0,
-            minimumBottomTagAreaForFinalDualUse: 120.0,
-            minimumImageEdgeMarginPixels: 12.0,
-            idealImageEdgeMarginPixels: 80.0,
+            minimumBottomTagAreaForHighConfidenceDual: 120.0,
+            minimumPreferredImageEdgeMargin: 0.15,
+            hardRejectImageEdgeMargin: 0.06,
             idealMinimumDistanceMm: 80.0,
             idealMaximumDistanceMm: 180.0,
             maximumDistanceMm: 250.0,
@@ -340,14 +363,37 @@ final class FinalPoseRefiner {
         }
 
         let indexedObservations = Array(observations.enumerated())
+        let qualitiesByOffset = qualityByOffset(for: indexedObservations)
         var discardReasonCounts: [String: Int] = [:]
-        let validIndexedObservations = indexedObservations.filter { item in
-            if let reason = qualityRejectionReason(for: item.element) {
+        let structurallyValidIndexedObservations = indexedObservations.filter { item in
+            if let reason = structuralQualityRejectionReason(
+                for: item.element,
+                quality: qualitiesByOffset[item.offset]
+            ) {
                 discardReasonCounts[reason, default: 0] += 1
                 return false
             }
 
             return true
+        }
+        let validIndexedObservations: [(offset: Int, element: FinalPoseObservation)]
+        if preferDualTagForFinalExport {
+            let edgeFilteredIndexedObservations = indexedObservationsAfterConditionalRejection(
+                from: structurallyValidIndexedObservations,
+                qualitiesByOffset: qualitiesByOffset,
+                reason: "borda da imagem",
+                shouldReject: { $0.wasHardRejectedByEdge },
+                discardReasonCounts: &discardReasonCounts
+            )
+            validIndexedObservations = indexedObservationsAfterConditionalRejection(
+                from: edgeFilteredIndexedObservations,
+                qualitiesByOffset: qualitiesByOffset,
+                reason: "bottom pequena",
+                shouldReject: { $0.wasRejectedByBottomArea },
+                discardReasonCounts: &discardReasonCounts
+            )
+        } else {
+            validIndexedObservations = structurallyValidIndexedObservations
         }
         let candidateIndexedObservations = preferredIndexedObservations(
             from: validIndexedObservations,
@@ -359,7 +405,8 @@ final class FinalPoseRefiner {
         }
 
         let sortedCandidates = candidateIndexedObservations.sorted {
-            qualityScore(for: $0.element) > qualityScore(for: $1.element)
+            qualityScore(for: $0.element, qualitiesByOffset: qualitiesByOffset[$0.offset]) >
+                qualityScore(for: $1.element, qualitiesByOffset: qualitiesByOffset[$1.offset])
         }
         let selectedCount = selectedObservationCount(from: sortedCandidates.count)
         let selectedIndexedObservations = Array(sortedCandidates.prefix(selectedCount))
@@ -376,14 +423,23 @@ final class FinalPoseRefiner {
         }
 
         let selectedObservations = outlierResult.indexedObservations.map(\.element)
+        let selectedQualities = qualities(
+            for: outlierResult.indexedObservations,
+            qualitiesByOffset: qualitiesByOffset
+        )
         let discardedObservationCount = max(observations.count - selectedObservations.count, 0)
         let averageReprojectionError = averageReprojectionError(in: selectedObservations)
-        let averageQualityScore = averageQualityScore(in: selectedObservations)
+        let averageQualityScore = averageQualityScore(in: selectedQualities)
+        let averageImagePosition = averageImagePosition(in: selectedQualities)
+        let averageEdgeMargin = averageImageEdgeMargin(in: selectedQualities)
+        let positionVariation = averagePositionVariationMm(in: selectedObservations)
+        let rotationVariation = averageRotationVariationDegrees(in: selectedObservations)
         let confidence = finalConfidence(
             selectedObservations: selectedObservations,
             observationsBeforeOutlierRejectionCount: selectedIndexedObservations.count,
             outlierRemovedCount: outlierResult.removedCount,
             averageReprojectionError: averageReprojectionError,
+            averageImageEdgeMargin: averageEdgeMargin,
             wasOutlierFilterRelaxed: outlierResult.wasRelaxed
         )
 
@@ -398,6 +454,11 @@ final class FinalPoseRefiner {
                 outlierRemovedCount: outlierResult.removedCount,
                 finalAverageReprojectionError: averageReprojectionError,
                 finalAverageQualityScore: averageQualityScore,
+                averageNormalizedImageX: averageImagePosition.x,
+                averageNormalizedImageY: averageImagePosition.y,
+                averageImageEdgeMargin: averageEdgeMargin,
+                finalPositionVariationMm: positionVariation,
+                finalRotationVariationDegrees: rotationVariation,
                 finalConfidence: confidence.value,
                 finalConfidenceReason: confidence.reason,
                 edgeDiscardedObservationCount: discardReasonCounts["borda da imagem"] ?? 0,
@@ -421,6 +482,8 @@ final class FinalPoseRefiner {
                 $0.reprojectionError <= configuration.maximumObservationReprojectionError
         }
         let discardedObservationCount = max(observations.count - selectedObservations.count, 0)
+        let selectedQualities = selectedObservations.map { observationQuality(for: $0) }
+        let averageImagePosition = averageImagePosition(in: selectedQualities)
 
         return ObservationSelection(
             observations: selectedObservations,
@@ -432,7 +495,12 @@ final class FinalPoseRefiner {
                 discardedObservationCount: discardedObservationCount,
                 outlierRemovedCount: 0,
                 finalAverageReprojectionError: averageReprojectionError(in: selectedObservations),
-                finalAverageQualityScore: averageQualityScore(in: selectedObservations),
+                finalAverageQualityScore: averageQualityScore(in: selectedQualities),
+                averageNormalizedImageX: averageImagePosition.x,
+                averageNormalizedImageY: averageImagePosition.y,
+                averageImageEdgeMargin: averageImageEdgeMargin(in: selectedQualities),
+                finalPositionVariationMm: averagePositionVariationMm(in: selectedObservations),
+                finalRotationVariationDegrees: averageRotationVariationDegrees(in: selectedObservations),
                 finalConfidence: selectedObservations.isEmpty ? .low : .medium,
                 finalConfidenceReason: selectedObservations.isEmpty ? "sem observacoes finais" : nil,
                 edgeDiscardedObservationCount: 0,
@@ -500,8 +568,9 @@ final class FinalPoseRefiner {
 
         let ratioCount = Int(ceil(Double(candidateCount) * configuration.finalTopObservationRatio))
         let desiredCount = max(configuration.minimumFinalObservationsPerMarker, ratioCount)
+        let cappedDesiredCount = min(desiredCount, configuration.maximumFinalObservationsPerMarker)
 
-        return min(candidateCount, desiredCount)
+        return min(candidateCount, cappedDesiredCount)
     }
 
     private func selectedIndexedObservationsAfterOutlierRejection(
@@ -661,7 +730,20 @@ final class FinalPoseRefiner {
         }
     }
 
-    private func qualityRejectionReason(for observation: FinalPoseObservation) -> String? {
+    private func structuralQualityRejectionReason(
+        for observation: FinalPoseObservation,
+        quality: PoseObservationQuality?
+    ) -> String? {
+        let structuralReasons = Set([
+            "pose invalida",
+            "reprojection error alto",
+            "area baixa"
+        ])
+        if let rejectionReason = quality?.rejectionReason,
+           structuralReasons.contains(rejectionReason) {
+            return rejectionReason
+        }
+
         guard isValidObservationPose(observation) else {
             return "pose invalida"
         }
@@ -678,16 +760,44 @@ final class FinalPoseRefiner {
             return "area baixa"
         }
 
-        if case .dualTag = observation.poseSource,
-           (observation.bottomTagAreaPixels ?? 0) < configuration.minimumBottomTagAreaForFinalDualUse {
-            return "bottom pequena"
-        }
-
-        guard imageEdgeMarginPixels(for: observation) >= configuration.minimumImageEdgeMarginPixels else {
-            return "borda da imagem"
-        }
-
         return nil
+    }
+
+    private func indexedObservationsAfterConditionalRejection(
+        from indexedObservations: [(offset: Int, element: FinalPoseObservation)],
+        qualitiesByOffset: [Int: PoseObservationQuality],
+        reason: String,
+        shouldReject: (PoseObservationQuality) -> Bool,
+        discardReasonCounts: inout [String: Int]
+    ) -> [(offset: Int, element: FinalPoseObservation)] {
+        guard indexedObservations.count > configuration.minimumFinalObservationsAfterOutlierRejection else {
+            return indexedObservations
+        }
+
+        let rejectedObservations = indexedObservations.filter {
+            guard let quality = qualitiesByOffset[$0.offset] else {
+                return false
+            }
+
+            return shouldReject(quality)
+        }
+        guard !rejectedObservations.isEmpty else {
+            return indexedObservations
+        }
+
+        let betterObservations = indexedObservations.filter {
+            guard let quality = qualitiesByOffset[$0.offset] else {
+                return true
+            }
+
+            return !shouldReject(quality)
+        }
+        guard betterObservations.count >= configuration.minimumFinalObservationsAfterOutlierRejection else {
+            return indexedObservations
+        }
+
+        discardReasonCounts[reason, default: 0] += rejectedObservations.count
+        return betterObservations
     }
 
     private func isValidObservationPose(_ observation: FinalPoseObservation) -> Bool {
@@ -714,9 +824,26 @@ final class FinalPoseRefiner {
         return errors.reduce(0.0, +) / Double(errors.count)
     }
 
-    private func averageQualityScore(in observations: [FinalPoseObservation]) -> Double? {
-        let scores = observations
-            .map { qualityScore(for: $0) }
+    private func qualityByOffset(
+        for indexedObservations: [(offset: Int, element: FinalPoseObservation)]
+    ) -> [Int: PoseObservationQuality] {
+        Dictionary(
+            uniqueKeysWithValues: indexedObservations.map {
+                ($0.offset, observationQuality(for: $0.element))
+            }
+        )
+    }
+
+    private func qualities(
+        for indexedObservations: [(offset: Int, element: FinalPoseObservation)],
+        qualitiesByOffset: [Int: PoseObservationQuality]
+    ) -> [PoseObservationQuality] {
+        indexedObservations.compactMap { qualitiesByOffset[$0.offset] }
+    }
+
+    private func averageQualityScore(in qualities: [PoseObservationQuality]) -> Double? {
+        let scores = qualities
+            .map(\.qualityScore)
             .filter { $0.isFinite }
 
         guard !scores.isEmpty else {
@@ -724,6 +851,50 @@ final class FinalPoseRefiner {
         }
 
         return scores.reduce(0.0, +) / Double(scores.count)
+    }
+
+    private func averageImagePosition(
+        in qualities: [PoseObservationQuality]
+    ) -> (x: Double?, y: Double?) {
+        (
+            x: average(qualities.compactMap(\.normalizedImageX)),
+            y: average(qualities.compactMap(\.normalizedImageY))
+        )
+    }
+
+    private func averageImageEdgeMargin(in qualities: [PoseObservationQuality]) -> Double? {
+        average(qualities.compactMap(\.edgeMargin))
+    }
+
+    private func averagePositionVariationMm(in observations: [FinalPoseObservation]) -> Double? {
+        guard observations.count >= 2,
+              let referenceTranslation = medianTranslation(
+                from: Array(observations.enumerated())
+              )
+        else {
+            return nil
+        }
+
+        let distances = observations
+            .map { simd_distance($0.translationVector, referenceTranslation) }
+            .filter { $0.isFinite }
+
+        return average(distances)
+    }
+
+    private func averageRotationVariationDegrees(in observations: [FinalPoseObservation]) -> Double? {
+        let indexedObservations = Array(observations.enumerated())
+        guard indexedObservations.count >= 2,
+              let referenceRotation = referenceRotationMatrix(from: indexedObservations)
+        else {
+            return nil
+        }
+
+        let distances = observations
+            .map { Self.rotationAngularDistanceDegrees($0.rotationMatrix, referenceRotation) }
+            .filter { $0.isFinite }
+
+        return average(distances)
     }
 
     private func dominantPoseSource(in observations: [FinalPoseObservation]) -> MarkerPoseSource? {
@@ -756,6 +927,7 @@ final class FinalPoseRefiner {
         observationsBeforeOutlierRejectionCount: Int,
         outlierRemovedCount: Int,
         averageReprojectionError: Double?,
+        averageImageEdgeMargin: Double?,
         wasOutlierFilterRelaxed: Bool
     ) -> (value: FinalPoseMarkerConfidence, reason: String?) {
         guard !selectedObservations.isEmpty else {
@@ -782,12 +954,18 @@ final class FinalPoseRefiner {
             return (.low, "erro alto")
         }
 
+        if let averageImageEdgeMargin = averageImageEdgeMargin,
+           averageImageEdgeMargin < configuration.hardRejectImageEdgeMargin {
+            return (.low, "muitos frames de borda")
+        }
+
         let dualTagObservationCount = selectedObservations.filter {
             isDualTagObservation($0)
         }.count
         if selectedObservations.count >= configuration.minimumFinalObservationsPerMarker,
            dualTagObservationCount >= configuration.minimumFinalObservationsPerMarker,
            (averageReprojectionError ?? .infinity) <= 1.2,
+           (averageImageEdgeMargin ?? 1.0) >= configuration.minimumPreferredImageEdgeMargin,
            outlierRatio <= 0.20 {
             return (.high, nil)
         }
@@ -827,26 +1005,103 @@ final class FinalPoseRefiner {
         }
     }
 
+    private func qualityScore(
+        for observation: FinalPoseObservation,
+        qualitiesByOffset quality: PoseObservationQuality?
+    ) -> Double {
+        quality?.qualityScore ?? qualityScore(for: observation)
+    }
+
     private func qualityScore(for observation: FinalPoseObservation) -> Double {
+        observationQuality(for: observation).qualityScore
+    }
+
+    private func observationQuality(for observation: FinalPoseObservation) -> PoseObservationQuality {
         guard isValidObservationPose(observation) else {
-            return 0
+            return PoseObservationQuality(
+                markerId: observation.markerId,
+                source: observation.poseSource,
+                qualityScore: 0,
+                reprojectionError: observation.reprojectionError,
+                topAreaPixels: observation.topTagAreaPixels,
+                bottomAreaPixels: observation.bottomTagAreaPixels,
+                normalizedImageX: nil,
+                normalizedImageY: nil,
+                edgeMargin: nil,
+                wasNearImageEdge: false,
+                wasHardRejectedByEdge: false,
+                wasRejectedByBottomArea: false,
+                rejectionReason: "pose invalida"
+            )
         }
 
         let reprojectionScore = qualityScoreForReprojectionError(observation.reprojectionError)
         let areaScore = qualityScoreForMarkerArea(observation)
         let distanceScore = qualityScoreForDistance(observation.distanceMm)
         let imageCenterScore = qualityScoreForImagePosition(observation)
+        let normalizedCenter = normalizedImageCenter(for: observation)
+        let edgeMargin = normalizedImageEdgeMargin(for: observation)
+        let wasNearImageEdge = edgeMargin < configuration.minimumPreferredImageEdgeMargin
+        let wasHardRejectedByEdge = edgeMargin < configuration.hardRejectImageEdgeMargin
+        let wasRejectedByBottomArea = isLowConfidenceBottomArea(observation)
         let sourceScore: Double
         switch observation.poseSource {
         case .dualTag:
-            sourceScore = 2.2
+            sourceScore = 1.0
         case let .singleFallback(_, role):
-            sourceScore = role == .top ? 0.45 : 0.18
+            sourceScore = role == .top ? 0.35 : 0.15
         case .singleArucoV1:
             sourceScore = 1.0
         }
+        let bottomConfidenceScore = wasRejectedByBottomArea ? 0.25 : 1.0
+        let rawScore = sourceScore *
+            reprojectionScore *
+            areaScore *
+            distanceScore *
+            imageCenterScore *
+            bottomConfidenceScore
+        let rejectionReason: String?
+        if reprojectionScore <= 0 {
+            rejectionReason = "reprojection error alto"
+        } else if areaScore <= 0 {
+            rejectionReason = "area baixa"
+        } else if wasHardRejectedByEdge {
+            rejectionReason = "borda da imagem"
+        } else if wasRejectedByBottomArea {
+            rejectionReason = "bottom pequena"
+        } else {
+            rejectionReason = nil
+        }
 
-        return sourceScore * reprojectionScore * areaScore * distanceScore * imageCenterScore
+        return PoseObservationQuality(
+            markerId: observation.markerId,
+            source: observation.poseSource,
+            qualityScore: rawScore.isFinite ? max(rawScore, 0) : 0,
+            reprojectionError: observation.reprojectionError,
+            topAreaPixels: observation.topTagAreaPixels,
+            bottomAreaPixels: observation.bottomTagAreaPixels,
+            normalizedImageX: normalizedCenter.map { Double($0.x) },
+            normalizedImageY: normalizedCenter.map { Double($0.y) },
+            edgeMargin: edgeMargin.isFinite ? edgeMargin : nil,
+            wasNearImageEdge: wasNearImageEdge,
+            wasHardRejectedByEdge: wasHardRejectedByEdge,
+            wasRejectedByBottomArea: wasRejectedByBottomArea,
+            rejectionReason: rejectionReason
+        )
+    }
+
+    private func isLowConfidenceBottomArea(_ observation: FinalPoseObservation) -> Bool {
+        guard case .dualTag = observation.poseSource else {
+            return false
+        }
+
+        guard let bottomTagAreaPixels = observation.bottomTagAreaPixels,
+              bottomTagAreaPixels.isFinite
+        else {
+            return true
+        }
+
+        return bottomTagAreaPixels < configuration.minimumBottomTagAreaForHighConfidenceDual
     }
 
     private func qualityScoreForReprojectionError(_ reprojectionError: Double) -> Double {
@@ -918,38 +1173,72 @@ final class FinalPoseRefiner {
     }
 
     private func qualityScoreForImagePosition(_ observation: FinalPoseObservation) -> Double {
-        let edgeMargin = imageEdgeMarginPixels(for: observation)
+        let edgeMargin = normalizedImageEdgeMargin(for: observation)
         guard edgeMargin.isFinite else {
             return 0
         }
 
-        guard edgeMargin >= configuration.minimumImageEdgeMarginPixels else {
+        if edgeMargin >= configuration.minimumPreferredImageEdgeMargin {
+            return 1
+        }
+
+        if edgeMargin < configuration.hardRejectImageEdgeMargin {
+            return 0.08
+        }
+
+        let usableRange = max(
+            configuration.minimumPreferredImageEdgeMargin - configuration.hardRejectImageEdgeMargin,
+            0.001
+        )
+        let normalized = (edgeMargin - configuration.hardRejectImageEdgeMargin) / usableRange
+        return min(max(0.25 + normalized * 0.75, 0.25), 1.0)
+    }
+
+    private func normalizedImageEdgeMargin(for observation: FinalPoseObservation) -> Double {
+        guard let center = normalizedImageCenter(for: observation) else {
             return 0
         }
 
-        let normalized = edgeMargin / max(configuration.idealImageEdgeMarginPixels, 1.0)
-        return min(max(normalized, 0.25), 1.0)
+        return [
+            Double(center.x),
+            1.0 - Double(center.x),
+            Double(center.y),
+            1.0 - Double(center.y)
+        ].min() ?? 0
     }
 
-    private func imageEdgeMarginPixels(for observation: FinalPoseObservation) -> Double {
+    private func normalizedImageCenter(for observation: FinalPoseObservation) -> CGPoint? {
         guard !observation.imagePoints.isEmpty,
               observation.frameSizePixels.width.isFinite,
               observation.frameSizePixels.height.isFinite,
               observation.frameSizePixels.width > 0,
               observation.frameSizePixels.height > 0
         else {
-            return 0
+            return nil
         }
 
-        let minX = observation.imagePoints.map(\.x).min() ?? 0
-        let minY = observation.imagePoints.map(\.y).min() ?? 0
-        let maxX = observation.imagePoints.map(\.x).max() ?? 0
-        let maxY = observation.imagePoints.map(\.y).max() ?? 0
+        let sum = observation.imagePoints.reduce(CGPoint.zero) { partialResult, point in
+            CGPoint(
+                x: partialResult.x + point.x,
+                y: partialResult.y + point.y
+            )
+        }
+        let pointCount = CGFloat(observation.imagePoints.count)
         let frameWidth = observation.frameSizePixels.width
         let frameHeight = observation.frameSizePixels.height
-        let margin = min(minX, minY, frameWidth - maxX, frameHeight - maxY)
+        let center = CGPoint(
+            x: sum.x / pointCount / frameWidth,
+            y: sum.y / pointCount / frameHeight
+        )
 
-        return Double(margin)
+        guard center.x.isFinite, center.y.isFinite else {
+            return nil
+        }
+
+        return CGPoint(
+            x: min(max(center.x, 0), 1),
+            y: min(max(center.y, 0), 1)
+        )
     }
 
     private func dominantReason(in counts: [String: Int]) -> String? {
@@ -960,6 +1249,15 @@ final class FinalPoseRefiner {
 
             return $0.value < $1.value
         }?.key
+    }
+
+    private func average(_ values: [Double]) -> Double? {
+        let finiteValues = values.filter { $0.isFinite }
+        guard !finiteValues.isEmpty else {
+            return nil
+        }
+
+        return finiteValues.reduce(0.0, +) / Double(finiteValues.count)
     }
 
     private func median(_ values: [Double]) -> Double? {

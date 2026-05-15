@@ -499,6 +499,13 @@ struct ScannerView: View {
                         metricRow(title: "Bottom status", value: formattedDualTagDetection(state, role: .bottom))
                         metricRow(title: "Top area", value: formattedDualTagArea(state, role: .top))
                         metricRow(title: "Bottom area", value: formattedDualTagArea(state, role: .bottom))
+                        metricRow(title: "Image X", value: formattedDualMarkerImageX(state))
+                        metricRow(title: "Image Y", value: formattedDualMarkerImageY(state))
+                        metricRow(title: "Perto borda", value: formattedDualMarkerNearImageEdge(state))
+                        metricRow(title: "Borda prox.", value: formattedDualMarkerNearestImageEdge(state))
+                        metricRow(title: "Dist. borda", value: formattedDualMarkerImageEdgeDistance(state))
+                        metricRow(title: "Frames borda", value: formattedDualMarkerNearImageEdgeFrames(state))
+                        metricRow(title: "Modo borda", value: formattedDualMarkerNearImageEdgeMode(state))
                         metricRow(title: "Top frames", value: formattedDualTagCounts(state, role: .top))
                         metricRow(title: "Bottom frames", value: formattedDualTagCounts(state, role: .bottom))
                         metricRow(title: "Top ultimos", value: formattedDualTagRecentCounts(state, role: .top))
@@ -525,6 +532,26 @@ struct ScannerView: View {
                         metricRow(
                             title: "Score medio final",
                             value: formattedDualMarkerFinalAverageQualityScore(state)
+                        )
+                        metricRow(
+                            title: "Image X medio",
+                            value: formattedDualMarkerFinalAverageImageX(state)
+                        )
+                        metricRow(
+                            title: "Image Y medio",
+                            value: formattedDualMarkerFinalAverageImageY(state)
+                        )
+                        metricRow(
+                            title: "Edge medio",
+                            value: formattedDualMarkerFinalAverageImageEdgeMargin(state)
+                        )
+                        metricRow(
+                            title: "Var pos final",
+                            value: formattedDualMarkerFinalPositionVariation(state)
+                        )
+                        metricRow(
+                            title: "Var rot final",
+                            value: formattedDualMarkerFinalRotationVariation(state)
                         )
                         metricRow(
                             title: "Modo final",
@@ -1275,6 +1302,76 @@ struct ScannerView: View {
         return "\(usedPointCount)"
     }
 
+    private func formattedDualMarkerImageX(_ state: DualArucoMarkerDebugState) -> String {
+        guard let normalizedImageX = state.normalizedImageX,
+              normalizedImageX.isFinite
+        else {
+            return "-"
+        }
+
+        return String(format: "%.2f", normalizedImageX)
+    }
+
+    private func formattedDualMarkerImageY(_ state: DualArucoMarkerDebugState) -> String {
+        guard let normalizedImageY = state.normalizedImageY,
+              normalizedImageY.isFinite
+        else {
+            return "-"
+        }
+
+        return String(format: "%.2f", normalizedImageY)
+    }
+
+    private func formattedDualMarkerNearestImageEdge(
+        _ state: DualArucoMarkerDebugState
+    ) -> String {
+        state.nearestImageEdge ?? "-"
+    }
+
+    private func formattedDualMarkerNearImageEdge(
+        _ state: DualArucoMarkerDebugState
+    ) -> String {
+        guard state.normalizedImageX != nil,
+              state.normalizedImageY != nil
+        else {
+            return "-"
+        }
+
+        return formattedBool(state.nearImageEdge)
+    }
+
+    private func formattedDualMarkerImageEdgeDistance(
+        _ state: DualArucoMarkerDebugState
+    ) -> String {
+        guard let imageEdgeDistancePercent = state.imageEdgeDistancePercent,
+              imageEdgeDistancePercent.isFinite
+        else {
+            return "-"
+        }
+
+        return String(format: "%.0f%%", imageEdgeDistancePercent)
+    }
+
+    private func formattedDualMarkerNearImageEdgeFrames(
+        _ state: DualArucoMarkerDebugState
+    ) -> String {
+        guard state.scanNearImageEdgeFramePercent.isFinite else {
+            return "\(state.scanNearImageEdgeFrameCount)"
+        }
+
+        return String(
+            format: "%d (%.0f%%)",
+            state.scanNearImageEdgeFrameCount,
+            state.scanNearImageEdgeFramePercent
+        )
+    }
+
+    private func formattedDualMarkerNearImageEdgeMode(
+        _ state: DualArucoMarkerDebugState
+    ) -> String {
+        state.scanNearImageEdgeDominantPoseSource?.debugTitle ?? "-"
+    }
+
     private func formattedDualMarkerScanDualPercent(_ state: DualArucoMarkerDebugState) -> String {
         guard state.scanDualTagPosePercent.isFinite else {
             return "-"
@@ -1306,7 +1403,13 @@ struct ScannerView: View {
     }
 
     private func formattedDualMarkerDetectionWarning(_ state: DualArucoMarkerDebugState) -> String {
-        state.scanConsistencyWarning ?? state.detectionWarning ?? "-"
+        state.scanConsistencyWarning ??
+            state.imageEdgeWarning ??
+            (state.finalRefinementSmallBottomDiscardedObservationCount > 0
+                ? "Bottom pequena / baixa confianca"
+                : nil) ??
+            state.detectionWarning ??
+            "-"
     }
 
     private func formattedDualMarkerFinalAverageReprojectionError(
@@ -1331,6 +1434,66 @@ struct ScannerView: View {
         }
 
         return String(format: "%.2f", score)
+    }
+
+    private func formattedDualMarkerFinalAverageImageX(
+        _ state: DualArucoMarkerDebugState
+    ) -> String {
+        guard let normalizedImageX = state.finalRefinementAverageNormalizedImageX,
+              normalizedImageX.isFinite
+        else {
+            return "-"
+        }
+
+        return String(format: "%.2f", normalizedImageX)
+    }
+
+    private func formattedDualMarkerFinalAverageImageY(
+        _ state: DualArucoMarkerDebugState
+    ) -> String {
+        guard let normalizedImageY = state.finalRefinementAverageNormalizedImageY,
+              normalizedImageY.isFinite
+        else {
+            return "-"
+        }
+
+        return String(format: "%.2f", normalizedImageY)
+    }
+
+    private func formattedDualMarkerFinalAverageImageEdgeMargin(
+        _ state: DualArucoMarkerDebugState
+    ) -> String {
+        guard let edgeMargin = state.finalRefinementAverageImageEdgeMargin,
+              edgeMargin.isFinite
+        else {
+            return "-"
+        }
+
+        return String(format: "%.0f%%", edgeMargin * 100.0)
+    }
+
+    private func formattedDualMarkerFinalPositionVariation(
+        _ state: DualArucoMarkerDebugState
+    ) -> String {
+        guard let positionVariation = state.finalRefinementPositionVariationMm,
+              positionVariation.isFinite
+        else {
+            return "-"
+        }
+
+        return String(format: "%.2f mm", positionVariation)
+    }
+
+    private func formattedDualMarkerFinalRotationVariation(
+        _ state: DualArucoMarkerDebugState
+    ) -> String {
+        guard let rotationVariation = state.finalRefinementRotationVariationDegrees,
+              rotationVariation.isFinite
+        else {
+            return "-"
+        }
+
+        return String(format: "%.2f deg", rotationVariation)
     }
 
     private func formattedDualMarkerFinalDominantMode(_ state: DualArucoMarkerDebugState) -> String {
@@ -1590,6 +1753,9 @@ struct ScannerView: View {
                 metricRow(title: "Plane max error", value: formattedPlanarMaximumError)
                 metricRow(title: "Plane markers", value: formattedPlanarMarkerDistances)
                 metricRow(title: "Dist markers", value: formattedMarkerPairDistances)
+                metricRow(title: "Scan confidence", value: viewModel.scanFinalConfidenceSummary)
+                metricRow(title: "Worst marker", value: viewModel.scanFinalWorstMarkerSummary)
+                metricRow(title: "Main issue", value: viewModel.scanFinalMainIssueSummary)
             }
             metricRow(title: "Gerando STL", value: formattedBool(viewModel.isGeneratingSTL))
             metricRow(title: "Export iniciado", value: formattedBool(viewModel.didStartSTLExportForCurrentScan))
