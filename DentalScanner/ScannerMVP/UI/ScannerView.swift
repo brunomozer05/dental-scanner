@@ -491,6 +491,10 @@ struct ScannerView: View {
                         metricRow(title: "Top agora \(state.topTagId)", value: formattedBool(state.topTagRawDetected))
                         metricRow(title: "Bottom agora \(state.bottomTagId)", value: formattedBool(state.bottomTagRawDetected))
                         metricRow(title: "Bottom recente", value: formattedBool(state.bottomTagRecentlySeen))
+                        metricRow(title: "Visual ativo", value: formattedBool(state.visualMarkerActive))
+                        metricRow(title: "Modo visual", value: formattedDualMarkerVisualMode(state))
+                        metricRow(title: "Visual visto ha", value: formattedDualMarkerVisualAge(state))
+                        metricRow(title: "Dual visto ha", value: formattedDualMarkerVisualDualAge(state))
                         metricRow(title: "Top status", value: formattedDualTagDetection(state, role: .top))
                         metricRow(title: "Bottom status", value: formattedDualTagDetection(state, role: .bottom))
                         metricRow(title: "Top area", value: formattedDualTagArea(state, role: .top))
@@ -1107,6 +1111,26 @@ struct ScannerView: View {
 
     private func formattedDualMarkerPoseMode(_ state: DualArucoMarkerDebugState) -> String {
         state.poseSource?.debugTitle ?? "missing"
+    }
+
+    private func formattedDualMarkerVisualMode(_ state: DualArucoMarkerDebugState) -> String {
+        state.visualModeTitle ?? "-"
+    }
+
+    private func formattedDualMarkerVisualAge(_ state: DualArucoMarkerDebugState) -> String {
+        formattedVisualAge(state.visualLastSeenAgeSeconds)
+    }
+
+    private func formattedDualMarkerVisualDualAge(_ state: DualArucoMarkerDebugState) -> String {
+        formattedVisualAge(state.visualLastDualSeenAgeSeconds)
+    }
+
+    private func formattedVisualAge(_ ageSeconds: Double?) -> String {
+        guard let ageSeconds, ageSeconds.isFinite else {
+            return "-"
+        }
+
+        return String(format: "%.2f s", ageSeconds)
     }
 
     private func formattedDualTagDetection(

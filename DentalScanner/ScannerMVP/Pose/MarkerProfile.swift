@@ -245,6 +245,10 @@ struct DualArucoMarkerDebugState: Equatable, Identifiable {
     let poseSource: MarkerPoseSource?
     let reprojectionError: Double?
     let usedPointCount: Int?
+    let visualMarkerActive: Bool
+    let visualModeTitle: String?
+    let visualLastSeenAgeSeconds: Double?
+    let visualLastDualSeenAgeSeconds: Double?
     let scanDualTagFrameCount: Int
     let scanTopFallbackFrameCount: Int
     let scanBottomFallbackFrameCount: Int

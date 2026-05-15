@@ -9,13 +9,13 @@ struct ArUcoOverlayView: View {
 
     @State private var trackedMarkers: [Int: TrackedMarker] = [:]
 
-    private let markerPersistenceDuration: TimeInterval = 0.12
-    private let markerFadeAnimation = Animation.easeInOut(duration: 0.14)
-    private let markerSlowMotionCurrentWeight: CGFloat = 0.35
-    private let markerFastMotionCurrentWeight: CGFloat = 0.93
-    private let markerFastMotionDistanceThreshold: CGFloat = 6
-    private let markerMotionResponseScale: CGFloat = 20
-    private let markerPredictionFactor: CGFloat = 0.6
+    private let markerPersistenceDuration: TimeInterval = 0.35
+    private let markerFadeAnimation = Animation.easeInOut(duration: 0.16)
+    private let markerSlowMotionCurrentWeight: CGFloat = 0.45
+    private let markerFastMotionCurrentWeight: CGFloat = 0.75
+    private let markerFastMotionDistanceThreshold: CGFloat = 20
+    private let markerMotionResponseScale: CGFloat = 36
+    private let markerPredictionFactor: CGFloat = 0.15
 
     var body: some View {
         GeometryReader { proxy in
@@ -32,7 +32,8 @@ struct ArUcoOverlayView: View {
                         modeTitle: marker.modeTitle,
                         corners: marker.corners,
                         progress: progress,
-                        displayScale: trackedMarker.displayScale
+                        displayScale: trackedMarker.displayScale,
+                        displayOpacity: trackedMarker.displayOpacity
                     )
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .transition(.scale(scale: 0.96).combined(with: .opacity))
@@ -63,7 +64,8 @@ struct ArUcoOverlayView: View {
                 markerId: detection.markerId,
                 displayTitle: detection.displayTitle,
                 modeTitle: detection.modeTitle,
-                corners: detection.corners.map(project)
+                corners: detection.corners.map(project),
+                displayOpacity: min(max(detection.visualConfidence, 0.25), 1.0)
             )
         }
     }
@@ -183,7 +185,8 @@ struct ArUcoOverlayView: View {
                     displayScale: smoothedDisplayScale(
                         previous: previousMarker.displayScale,
                         current: currentDisplayScale
-                    )
+                    ),
+                    displayOpacity: marker.displayOpacity
                 )
             } else {
                 nextMarkers[marker.markerId] = TrackedMarker(
@@ -194,7 +197,8 @@ struct ArUcoOverlayView: View {
                     lastSeen: timestamp,
                     previousCenter: markerCenter(for: marker.corners),
                     progress: progress,
-                    displayScale: currentDisplayScale
+                    displayScale: currentDisplayScale,
+                    displayOpacity: marker.displayOpacity
                 )
             }
         }
@@ -258,17 +262,10 @@ struct ArUcoOverlayView: View {
         let currentWeight = markerSlowMotionCurrentWeight * (1.0 - t) +
             markerFastMotionCurrentWeight * t
 
-        let smoothedCenter = CGPoint(
-            x: previousCenter.x + centerDeltaX * currentWeight,
-            y: previousCenter.y + centerDeltaY * currentWeight
-        )
-        let offsetX = smoothedCenter.x - currentCenter.x
-        let offsetY = smoothedCenter.y - currentCenter.y
-
-        return current.map { corner in
+        return zip(previous, current).map { previousCorner, currentCorner in
             CGPoint(
-                x: corner.x + offsetX,
-                y: corner.y + offsetY
+                x: previousCorner.x + (currentCorner.x - previousCorner.x) * currentWeight,
+                y: previousCorner.y + (currentCorner.y - previousCorner.y) * currentWeight
             )
         }
     }
@@ -316,6 +313,7 @@ struct ArUcoOverlayView: View {
         let displayTitle: String
         let modeTitle: String?
         let corners: [CGPoint]
+        let displayOpacity: Double
     }
 
     private struct TrackedMarker: Equatable, Identifiable {
@@ -327,6 +325,7 @@ struct ArUcoOverlayView: View {
         let previousCenter: CGPoint?
         let progress: Double
         let displayScale: CGFloat
+        let displayOpacity: Double
 
         var id: Int {
             markerId
@@ -337,7 +336,8 @@ struct ArUcoOverlayView: View {
                 markerId: markerId,
                 displayTitle: displayTitle,
                 modeTitle: modeTitle,
-                corners: corners
+                corners: corners,
+                displayOpacity: displayOpacity
             )
         }
     }
@@ -349,6 +349,7 @@ private struct TagAROverlayView: View {
     let corners: [CGPoint]
     let progress: Double
     let displayScale: CGFloat
+    let displayOpacity: Double
 
     private let accentColor = Color(red: 0.23, green: 0.51, blue: 0.96)
 
@@ -389,6 +390,7 @@ private struct TagAROverlayView: View {
             .scaleEffect(clampedDisplayScale)
             .position(x: markerCenter.x, y: markerCenter.y - cardVerticalOffset)
         }
+        .opacity(min(max(displayOpacity, 0.25), 1.0))
         .animation(.easeOut(duration: 0.16), value: clampedProgress)
         .animation(.easeOut(duration: 0.16), value: clampedDisplayScale)
     }
@@ -430,7 +432,7 @@ private struct TagAROverlayView: View {
     }
 
     private var cardVerticalOffset: CGFloat {
-        72 * clampedDisplayScale
+        54 * clampedDisplayScale
     }
 
     private var markerCenter: CGPoint {
@@ -463,40 +465,30 @@ private struct TagProgressCard: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.92))
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white.opacity(0.94))
+                .lineLimit(1)
+
+            Text("\(Int(round(clampedProgress * 100)))%")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white)
+                .monospacedDigit()
+
+            if let modeTitle {
+                Text(modeTitle)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.66))
                     .lineLimit(1)
-
-                if let modeTitle {
-                    Text(modeTitle)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.56))
-                        .lineLimit(1)
-                }
-            }
-
-            Spacer(minLength: 4)
-
-            HStack(spacing: 5) {
-                Circle()
-                    .fill(accentColor)
-                    .frame(width: 5, height: 5)
-
-                Text("\(Int(round(clampedProgress * 100)))%")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white)
-                    .monospacedDigit()
             }
         }
-        .frame(width: 118, height: 38)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 8)
+        .frame(minWidth: 76, maxWidth: 132, minHeight: 28)
         .background(Color.black.opacity(0.75))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.white.opacity(0.10), lineWidth: 1)
         }
         .shadow(color: Color.black.opacity(0.30), radius: 8, x: 0, y: 4)

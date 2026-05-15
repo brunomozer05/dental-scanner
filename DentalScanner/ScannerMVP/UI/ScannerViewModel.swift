@@ -7,13 +7,17 @@ import simd
 
 final class ScannerViewModel: ObservableObject {
     private enum OverlayStabilization {
-        static let timeout: Double = 0.25
+        static let timeout: Double = 0.35
+        static let dualModeHysteresisSeconds: Double = 0.40
+        static let minimumPersistedConfidence: Double = 0.45
     }
 
     private enum DualMarkerDebugConfiguration {
         static let minimumMarkerAreaPixels: Double = 80.0
         static let recentDetectionWindowFrameCount: Int = 6
         static let recentDetectionTimeoutSeconds: Double = 0.25
+        static let bottomRecentDetectionTimeoutSeconds: Double = 0.45
+        static let recentDualPoseTimeoutSeconds: Double = 0.25
     }
 
     private enum PoseConfiguration {
@@ -147,9 +151,13 @@ final class ScannerViewModel: ObservableObject {
         }
     }
 
-    private struct OverlayMarkerSample {
-        let marker: MarkerOverlayResult
-        let timestamp: Double
+    private struct VisualTrackedMarker {
+        let markerId: Int
+        var marker: MarkerOverlayResult
+        var lastSeenTimestamp: Double
+        var lastDualSeenTimestamp: Double?
+        var lastMode: MarkerPoseSource
+        var confidence: Double
     }
 
     private struct DualTagDetectionObservation {
@@ -299,7 +307,7 @@ final class ScannerViewModel: ObservableObject {
     private var recentFrameTimestamps: [Double] = []
     private var lastValidOverlayMarkers: [MarkerOverlayResult] = []
     private var lastValidOverlayTimestamp: Double?
-    private var lastValidOverlayMarkersByMarkerId: [Int: OverlayMarkerSample] = [:]
+    private var visualTrackedMarkersByMarkerId: [Int: VisualTrackedMarker] = [:]
     private var filteredPoseResult: PoseResult?
     private var acceptedPoseFrameCount = 0
     private var consecutivePoseOutlierCount = 0
@@ -614,7 +622,7 @@ final class ScannerViewModel: ObservableObject {
         dualMarkerDebugStates = []
         overlayMarkers = []
         lastValidOverlayMarkers = []
-        lastValidOverlayMarkersByMarkerId = [:]
+        visualTrackedMarkersByMarkerId = [:]
         lastValidOverlayTimestamp = nil
         resetPoseFilter()
         resetScanSession()
@@ -927,15 +935,6 @@ final class ScannerViewModel: ObservableObject {
             timestamp: metrics.lastFrameTimestamp,
             frameIndex: metrics.totalFramesReceived
         )
-        let dualMarkerDebugStates = makeDualMarkerDebugStates(
-            rawDetections: rawArucoMetrics.detections,
-            acceptedDetections: arucoMetrics.detections,
-            poseResults: poseMetrics.rawPoseResults,
-            markerProfile: activeMarkerProfile,
-            dualMarkerDefinitions: dualMarkerDefinitions,
-            timestamp: metrics.lastFrameTimestamp,
-            frameIndex: metrics.totalFramesReceived
-        )
         let overlayMarkers = stabilizedOverlayMarkers(
             from: makeOverlayMarkers(
                 detections: arucoMetrics.detections,
@@ -947,6 +946,15 @@ final class ScannerViewModel: ObservableObject {
             ),
             timestamp: metrics.lastFrameTimestamp,
             markerProfile: activeMarkerProfile
+        )
+        let dualMarkerDebugStates = makeDualMarkerDebugStates(
+            rawDetections: rawArucoMetrics.detections,
+            acceptedDetections: arucoMetrics.detections,
+            poseResults: poseMetrics.rawPoseResults,
+            markerProfile: activeMarkerProfile,
+            dualMarkerDefinitions: dualMarkerDefinitions,
+            timestamp: metrics.lastFrameTimestamp,
+            frameIndex: metrics.totalFramesReceived
         )
         let scanStateForFrame = scanState
         let shouldCollectScanFrame = scanStateForFrame.isCollectingFrames
@@ -1090,7 +1098,7 @@ final class ScannerViewModel: ObservableObject {
         dualRecentDetectionHistoryByTagId = [:]
         dualRecentDualTagPoseHistoryByMarkerId = [:]
         lastValidOverlayMarkers = []
-        lastValidOverlayMarkersByMarkerId = [:]
+        visualTrackedMarkersByMarkerId = [:]
         lastValidOverlayTimestamp = nil
         didApplyFinalPoseRefinement = false
         readyTransitionCount = 0
@@ -2086,35 +2094,138 @@ final class ScannerViewModel: ObservableObject {
             return []
         }
 
-        if !markers.isEmpty {
-            for marker in markers {
-                lastValidOverlayMarkersByMarkerId[marker.markerId] = OverlayMarkerSample(
-                    marker: marker,
-                    timestamp: timestamp
-                )
-            }
+        updateVisualTrackedMarkers(with: markers, timestamp: timestamp)
+
+        return visualTrackedMarkersByMarkerId.keys.sorted().compactMap { markerId in
+            visualTrackedMarkersByMarkerId[markerId]?.marker
         }
-
-        pruneStaleOverlayMarkers(timestamp: timestamp)
-
-        var markersById = Dictionary(uniqueKeysWithValues: markers.map { ($0.markerId, $0) })
-        for (markerId, sample) in lastValidOverlayMarkersByMarkerId
-        where markersById[markerId] == nil {
-            markersById[markerId] = sample.marker
-        }
-
-        return markersById.keys.sorted().compactMap { markersById[$0] }
     }
 
-    private func pruneStaleOverlayMarkers(timestamp: Double) {
-        for markerId in Array(lastValidOverlayMarkersByMarkerId.keys) {
-            guard let sample = lastValidOverlayMarkersByMarkerId[markerId] else {
+    private func updateVisualTrackedMarkers(
+        with markers: [MarkerOverlayResult],
+        timestamp: Double
+    ) {
+        let currentMarkerIds = Set(markers.map(\.markerId))
+
+        for marker in markers {
+            let previousVisualMarker = visualTrackedMarkersByMarkerId[marker.markerId]
+            let source = marker.poseSource ?? previousVisualMarker?.lastMode ?? .dualTag
+            let lastDualSeenTimestamp = updatedLastDualSeenTimestamp(
+                previous: previousVisualMarker?.lastDualSeenTimestamp,
+                source: source,
+                timestamp: timestamp
+            )
+            let visualModeTitle = visualModeTitle(
+                source: source,
+                bottomRecentlySeen: marker.bottomTagRecentlySeen,
+                lastDualSeenTimestamp: lastDualSeenTimestamp,
+                timestamp: timestamp,
+                isPersisted: false
+            )
+            let visualMarker = marker.withVisualState(
+                modeTitle: visualModeTitle,
+                confidence: 1.0,
+                isPersistence: false
+            )
+
+            visualTrackedMarkersByMarkerId[marker.markerId] = VisualTrackedMarker(
+                markerId: marker.markerId,
+                marker: visualMarker,
+                lastSeenTimestamp: timestamp,
+                lastDualSeenTimestamp: lastDualSeenTimestamp,
+                lastMode: source,
+                confidence: 1.0
+            )
+        }
+
+        for markerId in Array(visualTrackedMarkersByMarkerId.keys) {
+            guard var trackedMarker = visualTrackedMarkersByMarkerId[markerId],
+                  !currentMarkerIds.contains(markerId)
+            else {
                 continue
             }
 
-            if timestamp - sample.timestamp > OverlayStabilization.timeout {
-                lastValidOverlayMarkersByMarkerId.removeValue(forKey: markerId)
+            let age = timestamp - trackedMarker.lastSeenTimestamp
+            guard age.isFinite,
+                  age <= OverlayStabilization.timeout
+            else {
+                visualTrackedMarkersByMarkerId.removeValue(forKey: markerId)
+                continue
             }
+
+            let confidence = visualPersistenceConfidence(forAge: age)
+            trackedMarker.confidence = confidence
+            trackedMarker.marker = trackedMarker.marker.withVisualState(
+                modeTitle: visualModeTitle(
+                    source: trackedMarker.lastMode,
+                    bottomRecentlySeen: trackedMarker.marker.bottomTagRecentlySeen,
+                    lastDualSeenTimestamp: trackedMarker.lastDualSeenTimestamp,
+                    timestamp: timestamp,
+                    isPersisted: true
+                ),
+                confidence: confidence,
+                isPersistence: true
+            )
+            visualTrackedMarkersByMarkerId[markerId] = trackedMarker
+        }
+    }
+
+    private func updatedLastDualSeenTimestamp(
+        previous: Double?,
+        source: MarkerPoseSource,
+        timestamp: Double
+    ) -> Double? {
+        if case .dualTag = source {
+            return timestamp
+        }
+
+        return previous
+    }
+
+    private func visualPersistenceConfidence(forAge age: Double) -> Double {
+        guard age.isFinite, OverlayStabilization.timeout > 0 else {
+            return OverlayStabilization.minimumPersistedConfidence
+        }
+
+        let progress = min(max(age / OverlayStabilization.timeout, 0), 1)
+        let confidence = 1.0 - progress * (1.0 - OverlayStabilization.minimumPersistedConfidence)
+
+        return min(max(confidence, OverlayStabilization.minimumPersistedConfidence), 1.0)
+    }
+
+    private func visualModeTitle(
+        source: MarkerPoseSource,
+        bottomRecentlySeen: Bool,
+        lastDualSeenTimestamp: Double?,
+        timestamp: Double,
+        isPersisted: Bool
+    ) -> String {
+        let dualRecentlySeen: Bool
+        if let lastDualSeenTimestamp,
+           timestamp.isFinite,
+           lastDualSeenTimestamp.isFinite {
+            dualRecentlySeen = timestamp - lastDualSeenTimestamp <=
+                OverlayStabilization.dualModeHysteresisSeconds
+        } else {
+            dualRecentlySeen = false
+        }
+
+        switch source {
+        case .dualTag:
+            return isPersisted ? "Dual recente" : "Dual"
+        case let .singleFallback(_, role):
+            if dualRecentlySeen {
+                return "Dual recente"
+            }
+
+            switch role {
+            case .top:
+                return bottomRecentlySeen ? "Top + bottom recente" : "Top"
+            case .bottom:
+                return "Bottom"
+            }
+        case .singleArucoV1:
+            return "Single"
         }
     }
 
@@ -2306,13 +2417,19 @@ final class ScannerViewModel: ObservableObject {
                 acceptedDetected: acceptedDetected,
                 areaPixels: rawDetection?.markerAreaPixels ?? acceptedDetection?.markerAreaPixels
             ))
-            pruneDualTagDetectionHistory(&history, currentTimestamp: timestamp, currentFrameIndex: frameIndex)
+            pruneDualTagDetectionHistory(
+                &history,
+                tagId: tagId,
+                currentTimestamp: timestamp,
+                currentFrameIndex: frameIndex
+            )
             dualRecentDetectionHistoryByTagId[tagId] = history
         }
     }
 
     private func pruneDualTagDetectionHistory(
         _ history: inout [DualTagDetectionObservation],
+        tagId: Int,
         currentTimestamp: Double,
         currentFrameIndex: Int
     ) {
@@ -2322,7 +2439,7 @@ final class ScannerViewModel: ObservableObject {
             let timeExpired: Bool
             if currentTimestamp.isFinite, observation.timestamp.isFinite {
                 timeExpired = currentTimestamp - observation.timestamp >
-                    DualMarkerDebugConfiguration.recentDetectionTimeoutSeconds
+                    recentDetectionTimeoutSeconds(forTagId: tagId)
             } else {
                 timeExpired = true
             }
@@ -2392,7 +2509,7 @@ final class ScannerViewModel: ObservableObject {
             let timeExpired: Bool
             if currentTimestamp.isFinite, observation.timestamp.isFinite {
                 timeExpired = currentTimestamp - observation.timestamp >
-                    DualMarkerDebugConfiguration.recentDetectionTimeoutSeconds
+                    DualMarkerDebugConfiguration.recentDualPoseTimeoutSeconds
             } else {
                 timeExpired = true
             }
@@ -2414,7 +2531,7 @@ final class ScannerViewModel: ObservableObject {
             let timeRecent = currentTimestamp.isFinite &&
                 observation.timestamp.isFinite &&
                 currentTimestamp - observation.timestamp <=
-                    DualMarkerDebugConfiguration.recentDetectionTimeoutSeconds
+                    DualMarkerDebugConfiguration.recentDualPoseTimeoutSeconds
 
             return frameRecent || timeRecent
         }
@@ -2438,7 +2555,7 @@ final class ScannerViewModel: ObservableObject {
             let timeRecent = currentTimestamp.isFinite &&
                 observation.timestamp.isFinite &&
                 currentTimestamp - observation.timestamp <=
-                    DualMarkerDebugConfiguration.recentDetectionTimeoutSeconds
+                    recentDetectionTimeoutSeconds(forTagId: tagId)
 
             return (observation.rawDetected || observation.acceptedDetected) &&
                 (frameRecent || timeRecent)
@@ -2450,6 +2567,15 @@ final class ScannerViewModel: ObservableObject {
             recentlySeen: recentlySeen,
             latestAreaPixels: history.last(where: { $0.areaPixels?.isFinite == true })?.areaPixels
         )
+    }
+
+    private func recentDetectionTimeoutSeconds(forTagId tagId: Int) -> Double {
+        let bottomTagIds = Set(MarkerConfiguration.dualMarkers.map(\.bottomTagId))
+        if bottomTagIds.contains(tagId) {
+            return DualMarkerDebugConfiguration.bottomRecentDetectionTimeoutSeconds
+        }
+
+        return DualMarkerDebugConfiguration.recentDetectionTimeoutSeconds
     }
 
     private func dualMarkerDetectionWarning(
@@ -2547,6 +2673,20 @@ final class ScannerViewModel: ObservableObject {
     ) -> String? {
         dominantDualTagRejectionReason(forPhysicalMarkerId: markerId) ??
             finalObservationDiagnosticsByMarkerId[markerId]?.dominantDiscardReason
+    }
+
+    private func visualAge(
+        timestamp: Double,
+        lastTimestamp: Double?
+    ) -> Double? {
+        guard let lastTimestamp,
+              timestamp.isFinite,
+              lastTimestamp.isFinite
+        else {
+            return nil
+        }
+
+        return max(timestamp - lastTimestamp, 0)
     }
 
     private func finalRefinementConfidence(
@@ -2660,6 +2800,17 @@ final class ScannerViewModel: ObservableObject {
             let dualAngularCoverage = dualAngularCoveragePercent(
                 forPhysicalMarkerId: definition.physicalMarkerId
             )
+            let visualTrackedMarker = visualTrackedMarkersByMarkerId[
+                definition.physicalMarkerId
+            ]
+            let visualLastSeenAge = visualAge(
+                timestamp: timestamp,
+                lastTimestamp: visualTrackedMarker?.lastSeenTimestamp
+            )
+            let visualLastDualAge = visualAge(
+                timestamp: timestamp,
+                lastTimestamp: visualTrackedMarker?.lastDualSeenTimestamp
+            )
 
             return DualArucoMarkerDebugState(
                 physicalMarkerId: definition.physicalMarkerId,
@@ -2692,6 +2843,12 @@ final class ScannerViewModel: ObservableObject {
                 poseSource: poseResult?.poseSource,
                 reprojectionError: poseResult?.reprojectionError,
                 usedPointCount: poseResult?.usedPointCount,
+                visualMarkerActive: visualLastSeenAge.map {
+                    $0 <= OverlayStabilization.timeout
+                } ?? false,
+                visualModeTitle: visualTrackedMarker?.marker.modeTitle,
+                visualLastSeenAgeSeconds: visualLastSeenAge,
+                visualLastDualSeenAgeSeconds: visualLastDualAge,
                 scanDualTagFrameCount: dualTagFrameCount,
                 scanTopFallbackFrameCount: topFallbackFrameCount,
                 scanBottomFallbackFrameCount: bottomFallbackFrameCount,
