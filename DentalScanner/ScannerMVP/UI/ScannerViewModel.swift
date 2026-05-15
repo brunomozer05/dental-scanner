@@ -26,6 +26,19 @@ final class ScannerViewModel: ObservableObject {
         static let minimumFramesForWarning: Int = 5
     }
 
+    private enum StaticPoseStabilityConfiguration {
+        static let windowSeconds: Double = 5.0
+        static let unstablePositionStdDevMm: Double = 0.35
+        static let unstablePositionPeakToPeakMm: Double = 1.0
+        static let unstableRotationStdDevDegrees: Double = 1.5
+        static let unstableDistancePeakToPeakMm: Double = 1.0
+        static let highEdgeFrameRatio: Double = 0.35
+        static let highBottomSmallRatio: Double = 0.30
+        static let lowDualTagRatio: Double = 0.45
+        static let highFallbackRatio: Double = 0.55
+        static let minimumBottomTagAreaForHighConfidenceDual: Double = 120.0
+    }
+
     private struct MarkerImagePositionDiagnostics {
         let normalizedX: Double
         let normalizedY: Double
@@ -168,6 +181,81 @@ final class ScannerViewModel: ObservableObject {
         }
     }
 
+    struct StaticPoseMarkerDiagnostics: Equatable, Identifiable {
+        let markerId: Int
+        let sampleCount: Int
+        let positionStdDevMm: Double?
+        let positionPeakToPeakMm: Double?
+        let rotationStdDevDegrees: Double?
+        let rotationPeakToPeakDegrees: Double?
+        let reprojectionMean: Double?
+        let reprojectionStdDev: Double?
+        let dualTagRatio: Double
+        let topFallbackRatio: Double
+        let bottomFallbackRatio: Double
+        let edgeFrameRatio: Double
+        let bottomSmallRatio: Double
+        let referencePositionDeltaMm: Double?
+        let referenceRotationDeltaDegrees: Double?
+
+        var id: Int {
+            markerId
+        }
+    }
+
+    struct StaticPosePairDistanceDiagnostics: Equatable, Identifiable {
+        let firstMarkerId: Int
+        let secondMarkerId: Int
+        let sampleCount: Int
+        let meanDistanceMm: Double?
+        let standardDeviationMm: Double?
+        let minimumDistanceMm: Double?
+        let maximumDistanceMm: Double?
+        let peakToPeakMm: Double?
+
+        var id: String {
+            "\(firstMarkerId)-\(secondMarkerId)"
+        }
+    }
+
+    struct StaticPosePlaneDiagnostics: Equatable {
+        let sampleCount: Int
+        let planeAverageErrorMeanMm: Double?
+        let planeAverageErrorStdDevMm: Double?
+        let planeMaximumErrorMeanMm: Double?
+        let planeMaximumErrorWorstMm: Double?
+    }
+
+    private struct StaticPoseSample {
+        let timestamp: Double
+        let markerId: Int
+        let poseSource: MarkerPoseSource
+        let translationVector: SIMD3<Double>
+        let rotationMatrix: simd_double3x3
+        let reprojectionError: Double
+        let nearImageEdge: Bool
+        let bottomSmall: Bool
+    }
+
+    private struct StaticPosePairDistanceSample {
+        let timestamp: Double
+        let firstMarkerId: Int
+        let secondMarkerId: Int
+        let distanceMm: Double
+    }
+
+    private struct StaticPosePlaneSample {
+        let timestamp: Double
+        let averageErrorMm: Double
+        let maximumErrorMm: Double
+    }
+
+    private struct StaticPoseReference {
+        let markerId: Int
+        let translationVector: SIMD3<Double>
+        let rotationMatrix: simd_double3x3
+    }
+
     private struct VisualTrackedMarker {
         let markerId: Int
         var marker: MarkerOverlayResult
@@ -290,6 +378,14 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var scanFinalConfidenceSummary: String = "-"
     @Published private(set) var scanFinalWorstMarkerSummary: String = "-"
     @Published private(set) var scanFinalMainIssueSummary: String = "-"
+    @Published private(set) var staticPoseStabilityMode: Bool = false
+    @Published private(set) var staticPoseStabilityWindowSeconds: Double =
+        StaticPoseStabilityConfiguration.windowSeconds
+    @Published private(set) var staticPoseMarkerDiagnostics: [StaticPoseMarkerDiagnostics] = []
+    @Published private(set) var staticPosePairDistanceDiagnostics: [StaticPosePairDistanceDiagnostics] = []
+    @Published private(set) var staticPosePlaneDiagnostics: StaticPosePlaneDiagnostics?
+    @Published private(set) var staticPoseGlobalDiagnosis: String = "Teste estatico desligado"
+    @Published private(set) var staticPoseReferenceCaptured: Bool = false
     @Published private(set) var stlExportURL: URL?
     @Published private(set) var stlExportedImplantCount: Int = 0
     @Published private(set) var stlExportErrorMessage: String?
@@ -353,6 +449,10 @@ final class ScannerViewModel: ObservableObject {
     private var precisionValidationErrorHistory: [Double] = []
     private var finalPoseObservations: [FinalPoseObservation] = []
     private var finalObservationDiagnosticsByMarkerId: [Int: FinalPoseObservationSelectionDiagnostics] = [:]
+    private var staticPoseSamples: [StaticPoseSample] = []
+    private var staticPosePairDistanceSamples: [StaticPosePairDistanceSample] = []
+    private var staticPosePlaneSamples: [StaticPosePlaneSample] = []
+    private var staticPoseReferencesByMarkerId: [Int: StaticPoseReference] = [:]
     private var didApplyFinalPoseRefinement = false
     private var stlExportGenerationID = UUID()
     private var dualRawDetectionCountsByTagId: [Int: Int] = [:]
@@ -748,6 +848,43 @@ final class ScannerViewModel: ObservableObject {
     }
 
     @MainActor
+    func setStaticPoseStabilityMode(_ staticPoseStabilityMode: Bool) {
+        guard self.staticPoseStabilityMode != staticPoseStabilityMode else {
+            return
+        }
+
+        self.staticPoseStabilityMode = staticPoseStabilityMode
+        resetStaticPoseStabilityDiagnostics(clearReference: true)
+        if staticPoseStabilityMode {
+            scanReadinessMessage = "Teste estatico coletando"
+            scanQualityStatus = "Teste estatico coletando"
+        }
+        updateExportDiagnostics()
+    }
+
+    @MainActor
+    func captureStaticPoseReference() {
+        let references = rawPoseResults.reduce(into: [Int: StaticPoseReference]()) { partialResult, poseResult in
+            guard markerProfile == .dualArucoV2,
+                  PoseMath.isFinite(poseResult.translationVector),
+                  PoseMath.isFinite(poseResult.rotationMatrix)
+            else {
+                return
+            }
+
+            partialResult[poseResult.markerId] = StaticPoseReference(
+                markerId: poseResult.markerId,
+                translationVector: poseResult.translationVector,
+                rotationMatrix: poseResult.rotationMatrix
+            )
+        }
+
+        staticPoseReferencesByMarkerId = references
+        staticPoseReferenceCaptured = !references.isEmpty
+        rebuildStaticPoseStabilityDiagnostics()
+    }
+
+    @MainActor
     func setPrecisionModeV2(_ precisionModeV2: Bool) {
         guard self.precisionModeV2 != precisionModeV2 else {
             return
@@ -995,6 +1132,8 @@ final class ScannerViewModel: ObservableObject {
         )
         let scanStateForFrame = scanState
         let shouldCollectScanFrame = scanStateForFrame.isCollectingFrames
+        let shouldCollectStaticPoseFrame = staticPoseStabilityMode &&
+            activeMarkerProfile == .dualArucoV2
         let fusedPoseResults = shouldCollectScanFrame
             ? multiFramePoseAccumulator.update(with: poseMetrics.rawPoseResults)
             : self.fusedPoseResults
@@ -1005,6 +1144,16 @@ final class ScannerViewModel: ObservableObject {
             ? estimateImplantPoses(from: consolidatedPoseResults)
             : ImplantMetrics(implantPoseResults: [])
         let frameFinalPoseObservations = shouldCollectScanFrame
+            ? makeFinalPoseObservations(
+                from: arucoMetrics.detections,
+                poseResults: poseMetrics.rawPoseResults,
+                in: frame,
+                markerSizeMillimeters: markerSizeMillimeters,
+                markerProfile: activeMarkerProfile,
+                dualMarkerDefinitions: dualMarkerDefinitions
+            )
+            : []
+        let staticPoseObservations = shouldCollectStaticPoseFrame
             ? makeFinalPoseObservations(
                 from: arucoMetrics.detections,
                 poseResults: poseMetrics.rawPoseResults,
@@ -1047,6 +1196,15 @@ final class ScannerViewModel: ObservableObject {
             self.poseReprojectionError = poseMetrics.rawPoseResult?.reprojectionError
             self.poseErrorMessage = poseMetrics.errorMessage
             self.dualMarkerDebugStates = dualMarkerDebugStates
+            if shouldCollectStaticPoseFrame {
+                self.recordStaticPoseStabilityFrame(
+                    poseResults: poseMetrics.rawPoseResults,
+                    finalPoseObservations: staticPoseObservations,
+                    timestamp: metrics.lastFrameTimestamp
+                )
+            } else if self.staticPoseStabilityMode {
+                self.staticPoseGlobalDiagnosis = "Use dualArucoV2 para o teste estatico"
+            }
 
             if shouldCollectScanFrame && self.scanState.isCollectingFrames {
                 self.fusedPoseResults = fusedPoseResults
@@ -1138,6 +1296,7 @@ final class ScannerViewModel: ObservableObject {
         resetPrecisionValidationHistory()
         finalPoseObservations = []
         finalObservationDiagnosticsByMarkerId = [:]
+        resetStaticPoseStabilityDiagnostics(clearReference: true)
         dualRawDetectionCountsByTagId = [:]
         dualAcceptedDetectionCountsByTagId = [:]
         dualRecentDetectionHistoryByTagId = [:]
@@ -1278,6 +1437,19 @@ final class ScannerViewModel: ObservableObject {
         )
 
         scanQualityScore = combinedQualityScore * 100.0
+
+        if staticPoseStabilityMode {
+            let nextScanState: ScanState = scanValidFrameCount >= minimumStabilizingFrameCount
+                ? .stabilizing
+                : .scanning
+            setScanState(nextScanState)
+            scanProgress = min(min(tagCoverageScore, frameScore) * 100.0, 99)
+            scanReadinessMessage = "Teste estatico coletando"
+            scanQualityStatus = scanReadinessMessage
+            scanReadinessBlockerSummary = "Teste estatico: export desativado"
+            updateExportDiagnostics()
+            return
+        }
 
         if isReady {
             setScanState(.ready)
@@ -1815,6 +1987,446 @@ final class ScannerViewModel: ObservableObject {
     }
 
     @MainActor
+    private func recordStaticPoseStabilityFrame(
+        poseResults: [PoseResult],
+        finalPoseObservations: [FinalPoseObservation],
+        timestamp: Double
+    ) {
+        guard staticPoseStabilityMode,
+              markerProfile == .dualArucoV2,
+              timestamp.isFinite
+        else {
+            return
+        }
+
+        let physicalMarkerIds = Set(MarkerConfiguration.dualMarkers.map(\.physicalMarkerId))
+        let observationsByMarkerId = finalPoseObservations.reduce(
+            into: [Int: FinalPoseObservation]()
+        ) { partialResult, observation in
+            partialResult[observation.markerId] = observation
+        }
+        let validPoseResults = poseResults
+            .filter { physicalMarkerIds.contains($0.markerId) }
+            .filter {
+                PoseMath.isFinite($0.translationVector) &&
+                    PoseMath.isFinite($0.rotationMatrix) &&
+                    $0.reprojectionError.isFinite
+            }
+            .sorted { $0.markerId < $1.markerId }
+
+        for poseResult in validPoseResults {
+            let observation = observationsByMarkerId[poseResult.markerId]
+            let edgeDiagnostics = observation.flatMap {
+                imagePositionDiagnostics(
+                    for: $0.imagePoints,
+                    frameSizePixels: $0.frameSizePixels
+                )
+            }
+            staticPoseSamples.append(
+                StaticPoseSample(
+                    timestamp: timestamp,
+                    markerId: poseResult.markerId,
+                    poseSource: poseResult.poseSource,
+                    translationVector: poseResult.translationVector,
+                    rotationMatrix: poseResult.rotationMatrix,
+                    reprojectionError: poseResult.reprojectionError,
+                    nearImageEdge: edgeDiagnostics?.isNearPreferredEdge ?? false,
+                    bottomSmall: staticPoseBottomSmall(
+                        poseSource: poseResult.poseSource,
+                        observation: observation
+                    )
+                )
+            )
+        }
+
+        recordStaticPosePairDistances(
+            from: validPoseResults,
+            timestamp: timestamp
+        )
+        recordStaticPosePlaneSample(
+            from: validPoseResults,
+            timestamp: timestamp
+        )
+        trimStaticPoseStabilitySamples(currentTimestamp: timestamp)
+        rebuildStaticPoseStabilityDiagnostics()
+    }
+
+    private func staticPoseBottomSmall(
+        poseSource: MarkerPoseSource,
+        observation: FinalPoseObservation?
+    ) -> Bool {
+        guard case .dualTag = poseSource else {
+            return false
+        }
+
+        guard let bottomArea = observation?.bottomTagAreaPixels,
+              bottomArea.isFinite
+        else {
+            return true
+        }
+
+        return bottomArea < StaticPoseStabilityConfiguration.minimumBottomTagAreaForHighConfidenceDual
+    }
+
+    private func recordStaticPosePairDistances(
+        from poseResults: [PoseResult],
+        timestamp: Double
+    ) {
+        guard poseResults.count >= 2 else {
+            return
+        }
+
+        for firstIndex in poseResults.indices.dropLast() {
+            for secondIndex in poseResults.indices where secondIndex > firstIndex {
+                let firstPose = poseResults[firstIndex]
+                let secondPose = poseResults[secondIndex]
+                let distance = simd_distance(
+                    firstPose.translationVector,
+                    secondPose.translationVector
+                )
+                guard distance.isFinite else {
+                    continue
+                }
+
+                staticPosePairDistanceSamples.append(
+                    StaticPosePairDistanceSample(
+                        timestamp: timestamp,
+                        firstMarkerId: firstPose.markerId,
+                        secondMarkerId: secondPose.markerId,
+                        distanceMm: distance
+                    )
+                )
+            }
+        }
+    }
+
+    private func recordStaticPosePlaneSample(
+        from poseResults: [PoseResult],
+        timestamp: Double
+    ) {
+        guard let diagnostics = planarDiagnostics(from: poseResults) else {
+            return
+        }
+
+        staticPosePlaneSamples.append(
+            StaticPosePlaneSample(
+                timestamp: timestamp,
+                averageErrorMm: diagnostics.averageErrorMm,
+                maximumErrorMm: diagnostics.maximumErrorMm
+            )
+        )
+    }
+
+    private func trimStaticPoseStabilitySamples(currentTimestamp: Double) {
+        let earliestTimestamp = currentTimestamp - StaticPoseStabilityConfiguration.windowSeconds
+        staticPoseSamples.removeAll { $0.timestamp < earliestTimestamp }
+        staticPosePairDistanceSamples.removeAll { $0.timestamp < earliestTimestamp }
+        staticPosePlaneSamples.removeAll { $0.timestamp < earliestTimestamp }
+    }
+
+    private func resetStaticPoseStabilityDiagnostics(clearReference: Bool) {
+        staticPoseSamples = []
+        staticPosePairDistanceSamples = []
+        staticPosePlaneSamples = []
+        staticPoseMarkerDiagnostics = []
+        staticPosePairDistanceDiagnostics = []
+        staticPosePlaneDiagnostics = nil
+        staticPoseGlobalDiagnosis = staticPoseStabilityMode
+            ? "Aguardando poses estaticas"
+            : "Teste estatico desligado"
+
+        if clearReference {
+            staticPoseReferencesByMarkerId = [:]
+            staticPoseReferenceCaptured = false
+        }
+    }
+
+    private func rebuildStaticPoseStabilityDiagnostics() {
+        let markerDiagnostics = makeStaticPoseMarkerDiagnostics(from: staticPoseSamples)
+        let pairDiagnostics = makeStaticPosePairDiagnostics(from: staticPosePairDistanceSamples)
+
+        staticPoseMarkerDiagnostics = markerDiagnostics
+        staticPosePairDistanceDiagnostics = pairDiagnostics
+        staticPosePlaneDiagnostics = makeStaticPosePlaneDiagnostics(from: staticPosePlaneSamples)
+        staticPoseGlobalDiagnosis = makeStaticPoseGlobalDiagnosis(
+            markerDiagnostics: markerDiagnostics,
+            pairDiagnostics: pairDiagnostics
+        )
+    }
+
+    private func makeStaticPoseMarkerDiagnostics(
+        from samples: [StaticPoseSample]
+    ) -> [StaticPoseMarkerDiagnostics] {
+        let samplesByMarkerId = Dictionary(grouping: samples, by: \.markerId)
+        let markerIds = Set(samplesByMarkerId.keys)
+            .union(MarkerConfiguration.dualMarkers.map(\.physicalMarkerId))
+
+        return markerIds.sorted().map { markerId in
+            let markerSamples = samplesByMarkerId[markerId] ?? []
+            let sampleCount = markerSamples.count
+            let reprojectionErrors = markerSamples.map(\.reprojectionError)
+            let sourceCounts = staticPoseSourceCounts(in: markerSamples)
+            let referenceDelta = staticPoseReferenceDelta(
+                markerId: markerId,
+                samples: markerSamples
+            )
+
+            return StaticPoseMarkerDiagnostics(
+                markerId: markerId,
+                sampleCount: sampleCount,
+                positionStdDevMm: staticPosePositionStdDevMm(in: markerSamples),
+                positionPeakToPeakMm: staticPosePositionPeakToPeakMm(in: markerSamples),
+                rotationStdDevDegrees: staticPoseRotationStdDevDegrees(in: markerSamples),
+                rotationPeakToPeakDegrees: staticPoseRotationPeakToPeakDegrees(in: markerSamples),
+                reprojectionMean: average(reprojectionErrors),
+                reprojectionStdDev: standardDeviation(reprojectionErrors),
+                dualTagRatio: ratio(sourceCounts.dualTag, sampleCount),
+                topFallbackRatio: ratio(sourceCounts.topFallback, sampleCount),
+                bottomFallbackRatio: ratio(sourceCounts.bottomFallback, sampleCount),
+                edgeFrameRatio: ratio(
+                    markerSamples.filter { $0.nearImageEdge }.count,
+                    sampleCount
+                ),
+                bottomSmallRatio: ratio(
+                    markerSamples.filter { $0.bottomSmall }.count,
+                    sampleCount
+                ),
+                referencePositionDeltaMm: referenceDelta.positionMm,
+                referenceRotationDeltaDegrees: referenceDelta.rotationDegrees
+            )
+        }
+    }
+
+    private func makeStaticPosePairDiagnostics(
+        from samples: [StaticPosePairDistanceSample]
+    ) -> [StaticPosePairDistanceDiagnostics] {
+        let samplesByPair = Dictionary(grouping: samples) {
+            "\($0.firstMarkerId)-\($0.secondMarkerId)"
+        }
+
+        return samplesByPair.values.compactMap { pairSamples -> StaticPosePairDistanceDiagnostics? in
+            guard let firstSample = pairSamples.first else {
+                return nil
+            }
+
+            let distances = pairSamples.map(\.distanceMm).filter { $0.isFinite }
+            return StaticPosePairDistanceDiagnostics(
+                firstMarkerId: firstSample.firstMarkerId,
+                secondMarkerId: firstSample.secondMarkerId,
+                sampleCount: distances.count,
+                meanDistanceMm: average(distances),
+                standardDeviationMm: standardDeviation(distances),
+                minimumDistanceMm: distances.min(),
+                maximumDistanceMm: distances.max(),
+                peakToPeakMm: peakToPeak(distances)
+            )
+        }
+        .sorted {
+            if $0.firstMarkerId == $1.firstMarkerId {
+                return $0.secondMarkerId < $1.secondMarkerId
+            }
+
+            return $0.firstMarkerId < $1.firstMarkerId
+        }
+    }
+
+    private func makeStaticPosePlaneDiagnostics(
+        from samples: [StaticPosePlaneSample]
+    ) -> StaticPosePlaneDiagnostics? {
+        let averageErrors = samples.map(\.averageErrorMm).filter { $0.isFinite }
+        let maximumErrors = samples.map(\.maximumErrorMm).filter { $0.isFinite }
+        guard !averageErrors.isEmpty,
+              !maximumErrors.isEmpty
+        else {
+            return nil
+        }
+
+        return StaticPosePlaneDiagnostics(
+            sampleCount: min(averageErrors.count, maximumErrors.count),
+            planeAverageErrorMeanMm: average(averageErrors),
+            planeAverageErrorStdDevMm: standardDeviation(averageErrors),
+            planeMaximumErrorMeanMm: average(maximumErrors),
+            planeMaximumErrorWorstMm: maximumErrors.max()
+        )
+    }
+
+    private func makeStaticPoseGlobalDiagnosis(
+        markerDiagnostics: [StaticPoseMarkerDiagnostics],
+        pairDiagnostics: [StaticPosePairDistanceDiagnostics]
+    ) -> String {
+        let populatedMarkers = markerDiagnostics.filter { $0.sampleCount >= 3 }
+        guard !populatedMarkers.isEmpty else {
+            return staticPoseStabilityMode
+                ? "Aguardando poses estaticas"
+                : "Teste estatico desligado"
+        }
+
+        let maximumEdgeRatio = populatedMarkers.map(\.edgeFrameRatio).max() ?? 0
+        let maximumBottomSmallRatio = populatedMarkers.map(\.bottomSmallRatio).max() ?? 0
+        let minimumDualRatio = populatedMarkers.map(\.dualTagRatio).min() ?? 0
+        let maximumFallbackRatio = populatedMarkers.map {
+            $0.topFallbackRatio + $0.bottomFallbackRatio
+        }.max() ?? 0
+        let maximumPositionStdDev = populatedMarkers.compactMap(\.positionStdDevMm).max() ?? 0
+        let maximumPositionPeakToPeak = populatedMarkers.compactMap(\.positionPeakToPeakMm).max() ?? 0
+        let maximumRotationStdDev = populatedMarkers.compactMap(\.rotationStdDevDegrees).max() ?? 0
+        let maximumPairPeakToPeak = pairDiagnostics.compactMap(\.peakToPeakMm).max() ?? 0
+
+        if maximumEdgeRatio >= StaticPoseStabilityConfiguration.highEdgeFrameRatio {
+            return "Instabilidade vem da captura: muitos frames de borda"
+        }
+
+        if maximumBottomSmallRatio >= StaticPoseStabilityConfiguration.highBottomSmallRatio ||
+            minimumDualRatio < StaticPoseStabilityConfiguration.lowDualTagRatio {
+            return "Instabilidade vem da bottom tag: dual % baixo / bottom small alto"
+        }
+
+        if maximumFallbackRatio >= StaticPoseStabilityConfiguration.highFallbackRatio {
+            return "Instabilidade vem de fallback: fallback domina"
+        }
+
+        let markerPoseUnstable = maximumPositionStdDev >=
+            StaticPoseStabilityConfiguration.unstablePositionStdDevMm ||
+            maximumPositionPeakToPeak >=
+                StaticPoseStabilityConfiguration.unstablePositionPeakToPeakMm ||
+            maximumRotationStdDev >=
+                StaticPoseStabilityConfiguration.unstableRotationStdDevDegrees
+        let markerDistancesUnstable = maximumPairPeakToPeak >=
+            StaticPoseStabilityConfiguration.unstableDistancePeakToPeakMm
+
+        if markerPoseUnstable && markerDistancesUnstable {
+            return "Instabilidade vem da deteccao: pose varia mesmo com camera parada"
+        }
+
+        if markerPoseUnstable {
+            return "Instabilidade vem do movimento/captura: poses movem mas distancias ficam mais estaveis"
+        }
+
+        return "Estavel parado: problema provavel e selecao de frames durante movimento"
+    }
+
+    private func staticPoseSourceCounts(
+        in samples: [StaticPoseSample]
+    ) -> (dualTag: Int, topFallback: Int, bottomFallback: Int) {
+        samples.reduce(into: (dualTag: 0, topFallback: 0, bottomFallback: 0)) { partialResult, sample in
+            switch sample.poseSource {
+            case .dualTag:
+                partialResult.dualTag += 1
+            case let .singleFallback(_, role):
+                switch role {
+                case .top:
+                    partialResult.topFallback += 1
+                case .bottom:
+                    partialResult.bottomFallback += 1
+                }
+            case .singleArucoV1:
+                break
+            }
+        }
+    }
+
+    private func staticPoseReferenceDelta(
+        markerId: Int,
+        samples: [StaticPoseSample]
+    ) -> (positionMm: Double?, rotationDegrees: Double?) {
+        guard let reference = staticPoseReferencesByMarkerId[markerId],
+              let latestSample = samples.last
+        else {
+            return (nil, nil)
+        }
+
+        return (
+            positionMm: simd_distance(
+                latestSample.translationVector,
+                reference.translationVector
+            ),
+            rotationDegrees: rotationAngularDistanceDegrees(
+                latestSample.rotationMatrix,
+                reference.rotationMatrix
+            )
+        )
+    }
+
+    private func staticPosePositionStdDevMm(in samples: [StaticPoseSample]) -> Double? {
+        guard samples.count >= 2 else {
+            return nil
+        }
+
+        let mean = samples.reduce(SIMD3<Double>.zero) {
+            $0 + $1.translationVector
+        } / Double(samples.count)
+        let distances = samples.map {
+            simd_distance($0.translationVector, mean)
+        }
+
+        return standardDeviation(distances)
+    }
+
+    private func staticPosePositionPeakToPeakMm(in samples: [StaticPoseSample]) -> Double? {
+        guard samples.count >= 2,
+              let minX = samples.map(\.translationVector.x).min(),
+              let maxX = samples.map(\.translationVector.x).max(),
+              let minY = samples.map(\.translationVector.y).min(),
+              let maxY = samples.map(\.translationVector.y).max(),
+              let minZ = samples.map(\.translationVector.z).min(),
+              let maxZ = samples.map(\.translationVector.z).max()
+        else {
+            return nil
+        }
+
+        return simd_length(
+            SIMD3(
+                maxX - minX,
+                maxY - minY,
+                maxZ - minZ
+            )
+        )
+    }
+
+    private func staticPoseRotationStdDevDegrees(in samples: [StaticPoseSample]) -> Double? {
+        guard samples.count >= 2,
+              let latestRotation = samples.last?.rotationMatrix
+        else {
+            return nil
+        }
+
+        let distances = samples.map {
+            rotationAngularDistanceDegrees($0.rotationMatrix, latestRotation)
+        }
+
+        return standardDeviation(distances)
+    }
+
+    private func staticPoseRotationPeakToPeakDegrees(in samples: [StaticPoseSample]) -> Double? {
+        guard samples.count >= 2 else {
+            return nil
+        }
+
+        var maximumDistance = 0.0
+        for firstIndex in samples.indices.dropLast() {
+            for secondIndex in samples.indices where secondIndex > firstIndex {
+                let distance = rotationAngularDistanceDegrees(
+                    samples[firstIndex].rotationMatrix,
+                    samples[secondIndex].rotationMatrix
+                )
+                if distance.isFinite {
+                    maximumDistance = max(maximumDistance, distance)
+                }
+            }
+        }
+
+        return maximumDistance
+    }
+
+    private func ratio(_ count: Int, _ totalCount: Int) -> Double {
+        guard totalCount > 0 else {
+            return 0
+        }
+
+        return Double(count) / Double(totalCount)
+    }
+
+    @MainActor
     private func recordDualArucoV2RejectionReasons(_ reasonsByMarkerId: [Int: String]) {
         guard markerProfile == .dualArucoV2 else {
             return
@@ -1955,11 +2567,39 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private func average(_ values: [Double]) -> Double? {
-        guard !values.isEmpty else {
+        let finiteValues = values.filter { $0.isFinite }
+        guard !finiteValues.isEmpty else {
             return nil
         }
 
-        return values.reduce(0.0, +) / Double(values.count)
+        return finiteValues.reduce(0.0, +) / Double(finiteValues.count)
+    }
+
+    private func standardDeviation(_ values: [Double]) -> Double? {
+        let finiteValues = values.filter { $0.isFinite }
+        guard finiteValues.count >= 2,
+              let mean = average(finiteValues)
+        else {
+            return nil
+        }
+
+        let variance = finiteValues.reduce(0.0) {
+            let delta = $1 - mean
+            return $0 + delta * delta
+        } / Double(finiteValues.count)
+
+        return sqrt(variance)
+    }
+
+    private func peakToPeak(_ values: [Double]) -> Double? {
+        let finiteValues = values.filter { $0.isFinite }
+        guard let minimum = finiteValues.min(),
+              let maximum = finiteValues.max()
+        else {
+            return nil
+        }
+
+        return maximum - minimum
     }
 
     private func trimRecentValues<T>(_ values: inout [T], to limit: Int) {
@@ -2145,6 +2785,30 @@ final class ScannerViewModel: ObservableObject {
                 firstVector.w * secondVector.w
         ) / (firstLength * secondLength))
         let radians = 2.0 * acos(min(max(dot, 0.0), 1.0))
+
+        return radians * 180.0 / Double.pi
+    }
+
+    private func rotationAngularDistanceDegrees(
+        _ lhs: simd_double3x3,
+        _ rhs: simd_double3x3
+    ) -> Double {
+        guard PoseMath.isFinite(lhs),
+              PoseMath.isFinite(rhs)
+        else {
+            return .infinity
+        }
+
+        let delta = simd_transpose(lhs) * rhs
+        let trace = PoseMath.matrixElement(delta, row: 0, column: 0) +
+            PoseMath.matrixElement(delta, row: 1, column: 1) +
+            PoseMath.matrixElement(delta, row: 2, column: 2)
+        let cosineTheta = min(max((trace - 1.0) / 2.0, -1.0), 1.0)
+        let radians = acos(cosineTheta)
+
+        guard radians.isFinite else {
+            return .infinity
+        }
 
         return radians * 180.0 / Double.pi
     }
@@ -3568,7 +4232,8 @@ final class ScannerViewModel: ObservableObject {
             hasSTLExportFile = false
         }
 
-        canExportSTL = scanState == .ready &&
+        canExportSTL = !staticPoseStabilityMode &&
+            scanState == .ready &&
             (hasSTLExportURL || !tagPoses.isEmpty)
     }
 

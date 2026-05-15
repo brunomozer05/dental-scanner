@@ -435,6 +435,7 @@ struct ScannerView: View {
                     debugSummarySection
                     poseDebugSection
                     scanDebugControl
+                    staticPoseStabilitySection
                     dualMarkerDebugSection
                     scanQualitySection
                     errorDebugSection
@@ -475,6 +476,68 @@ struct ScannerView: View {
             metricRow(title: "Status", value: viewModel.poseStabilityStatus)
             metricRow(title: "Implante", value: formattedImplantDistance)
             metricRow(title: "Implantes x/y/z", value: formattedImplantPositions)
+        }
+    }
+
+    @ViewBuilder
+    private var staticPoseStabilitySection: some View {
+        if viewModel.markerProfile == .dualArucoV2 {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Static Pose Stability")
+                    .font(.subheadline.weight(.semibold))
+
+                metricRow(title: "Modo", value: formattedBool(viewModel.staticPoseStabilityMode))
+                metricRow(
+                    title: "Janela",
+                    value: String(format: "%.1f s", viewModel.staticPoseStabilityWindowSeconds)
+                )
+                metricRow(title: "Referencia", value: formattedBool(viewModel.staticPoseReferenceCaptured))
+                metricRow(title: "Diagnostico", value: viewModel.staticPoseGlobalDiagnosis)
+
+                ForEach(viewModel.staticPoseMarkerDiagnostics) { state in
+                    VStack(alignment: .leading, spacing: 4) {
+                        metricRow(title: "Marker estatico", value: "M\(state.markerId)")
+                        metricRow(title: "Samples", value: "\(state.sampleCount)")
+                        metricRow(title: "Pos std", value: formattedStaticMillimeters(state.positionStdDevMm))
+                        metricRow(title: "Pos peak", value: formattedStaticMillimeters(state.positionPeakToPeakMm))
+                        metricRow(title: "Rot std", value: formattedStaticDegrees(state.rotationStdDevDegrees))
+                        metricRow(title: "Rot peak", value: formattedStaticDegrees(state.rotationPeakToPeakDegrees))
+                        metricRow(title: "Reproj mean", value: formattedStaticPixels(state.reprojectionMean))
+                        metricRow(title: "Reproj std", value: formattedStaticPixels(state.reprojectionStdDev))
+                        metricRow(title: "Dual ratio", value: formattedStaticRatio(state.dualTagRatio))
+                        metricRow(title: "Top fallback", value: formattedStaticRatio(state.topFallbackRatio))
+                        metricRow(title: "Bottom fallback", value: formattedStaticRatio(state.bottomFallbackRatio))
+                        metricRow(title: "Edge frames", value: formattedStaticRatio(state.edgeFrameRatio))
+                        metricRow(title: "Bottom small", value: formattedStaticRatio(state.bottomSmallRatio))
+                        metricRow(title: "Delta pos ref", value: formattedStaticMillimeters(state.referencePositionDeltaMm))
+                        metricRow(title: "Delta rot ref", value: formattedStaticDegrees(state.referenceRotationDeltaDegrees))
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                if !viewModel.staticPosePairDistanceDiagnostics.isEmpty {
+                    Text("Distancias estaticas")
+                        .font(.caption.weight(.semibold))
+
+                    ForEach(viewModel.staticPosePairDistanceDiagnostics) { state in
+                        metricRow(
+                            title: "M\(state.firstMarkerId)-M\(state.secondMarkerId)",
+                            value: formattedStaticPairDistance(state)
+                        )
+                    }
+                }
+
+                if let plane = viewModel.staticPosePlaneDiagnostics {
+                    Text("Plano estatico")
+                        .font(.caption.weight(.semibold))
+
+                    metricRow(title: "Plane samples", value: "\(plane.sampleCount)")
+                    metricRow(title: "Plane avg mean", value: formattedStaticMillimeters(plane.planeAverageErrorMeanMm))
+                    metricRow(title: "Plane avg std", value: formattedStaticMillimeters(plane.planeAverageErrorStdDevMm))
+                    metricRow(title: "Plane max mean", value: formattedStaticMillimeters(plane.planeMaximumErrorMeanMm))
+                    metricRow(title: "Plane max worst", value: formattedStaticMillimeters(plane.planeMaximumErrorWorstMm))
+                }
+            }
         }
     }
 
@@ -1121,6 +1184,13 @@ struct ScannerView: View {
         )
     }
 
+    private var staticPoseStabilityModeBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.staticPoseStabilityMode },
+            set: { viewModel.setStaticPoseStabilityMode($0) }
+        )
+    }
+
     private var showDistanceGuideBinding: Binding<Bool> {
         Binding(
             get: { viewModel.showDistanceGuide },
@@ -1186,6 +1256,50 @@ struct ScannerView: View {
         }
 
         return String(format: "%.2f s", ageSeconds)
+    }
+
+    private func formattedStaticMillimeters(_ value: Double?) -> String {
+        guard let value, value.isFinite else {
+            return "-"
+        }
+
+        return String(format: "%.3f mm", value)
+    }
+
+    private func formattedStaticDegrees(_ value: Double?) -> String {
+        guard let value, value.isFinite else {
+            return "-"
+        }
+
+        return String(format: "%.3f deg", value)
+    }
+
+    private func formattedStaticPixels(_ value: Double?) -> String {
+        guard let value, value.isFinite else {
+            return "-"
+        }
+
+        return String(format: "%.3f px", value)
+    }
+
+    private func formattedStaticRatio(_ ratio: Double) -> String {
+        guard ratio.isFinite else {
+            return "-"
+        }
+
+        return String(format: "%.0f%%", ratio * 100.0)
+    }
+
+    private func formattedStaticPairDistance(
+        _ state: ScannerViewModel.StaticPosePairDistanceDiagnostics
+    ) -> String {
+        let mean = formattedStaticMillimeters(state.meanDistanceMm)
+        let std = formattedStaticMillimeters(state.standardDeviationMm)
+        let peak = formattedStaticMillimeters(state.peakToPeakMm)
+        let minimum = formattedStaticMillimeters(state.minimumDistanceMm)
+        let maximum = formattedStaticMillimeters(state.maximumDistanceMm)
+
+        return "mean \(mean), std \(std), min \(minimum), max \(maximum), p2p \(peak)"
     }
 
     private func formattedDualTagDetection(
@@ -1749,6 +1863,7 @@ struct ScannerView: View {
                 metricRow(title: "dualTagReady", value: formattedBool(viewModel.scanDualTagReady))
                 metricRow(title: "dualAngularReady", value: formattedBool(viewModel.scanDualAngularCoverageReady))
                 metricRow(title: "precisionModeV2", value: formattedBool(viewModel.precisionModeV2))
+                metricRow(title: "staticPoseMode", value: formattedBool(viewModel.staticPoseStabilityMode))
                 metricRow(title: "Plane avg error", value: formattedPlanarAverageError)
                 metricRow(title: "Plane max error", value: formattedPlanarMaximumError)
                 metricRow(title: "Plane markers", value: formattedPlanarMarkerDistances)
@@ -1860,6 +1975,16 @@ struct ScannerView: View {
                 }
 
                 Toggle("Modo precisao v2", isOn: precisionModeV2Binding)
+                Toggle("Static Pose Stability Test", isOn: staticPoseStabilityModeBinding)
+
+                Button {
+                    viewModel.captureStaticPoseReference()
+                } label: {
+                    Label("Capturar referencia estatica", systemImage: "camera.metering.center.weighted")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .disabled(!viewModel.staticPoseStabilityMode)
             }
         }
         .font(.caption)
