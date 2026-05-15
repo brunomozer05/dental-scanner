@@ -1494,14 +1494,6 @@ struct ScannerView: View {
         return realDistanceMm / measuredDistanceMm
     }
 
-    private func formattedMillimeterValue(_ value: Double?) -> String {
-        guard let value else {
-            return "-"
-        }
-
-        return String(format: "%.2f mm", value)
-    }
-
     private func formattedPercentValue(_ value: Double?) -> String {
         guard let value else {
             return "-"
