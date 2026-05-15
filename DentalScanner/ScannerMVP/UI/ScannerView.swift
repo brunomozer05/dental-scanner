@@ -494,27 +494,31 @@ struct ScannerView: View {
                 metricRow(title: "Referencia", value: formattedBool(viewModel.staticPoseReferenceCaptured))
                 metricRow(title: "Diagnostico", value: viewModel.staticPoseGlobalDiagnosis)
 
-                ForEach(viewModel.staticPoseMarkerDiagnostics) { state in
-                    VStack(alignment: .leading, spacing: 4) {
-                        metricRow(title: "Marker estatico", value: "M\(state.markerId)")
-                        metricRow(title: "Samples", value: "\(state.sampleCount)")
-                        metricRow(title: "Pos std", value: formattedStaticMillimeters(state.positionStdDevMm))
-                        metricRow(title: "Pos peak", value: formattedStaticMillimeters(state.positionPeakToPeakMm))
-                        metricRow(title: "Rot std", value: formattedStaticDegrees(state.rotationStdDevDegrees))
-                        metricRow(title: "Rot peak", value: formattedStaticDegrees(state.rotationPeakToPeakDegrees))
-                        metricRow(title: "Normal std", value: formattedStaticDegrees(state.normalStdDevDegrees))
-                        metricRow(title: "Normal peak", value: formattedStaticDegrees(state.normalPeakToPeakDegrees))
-                        metricRow(title: "Reproj mean", value: formattedStaticPixels(state.reprojectionMean))
-                        metricRow(title: "Reproj std", value: formattedStaticPixels(state.reprojectionStdDev))
-                        metricRow(title: "Dual ratio", value: formattedStaticRatio(state.dualTagRatio))
-                        metricRow(title: "Top fallback", value: formattedStaticRatio(state.topFallbackRatio))
-                        metricRow(title: "Bottom fallback", value: formattedStaticRatio(state.bottomFallbackRatio))
-                        metricRow(title: "Edge frames", value: formattedStaticRatio(state.edgeFrameRatio))
-                        metricRow(title: "Bottom small", value: formattedStaticRatio(state.bottomSmallRatio))
-                        metricRow(title: "Delta pos ref", value: formattedStaticMillimeters(state.referencePositionDeltaMm))
-                        metricRow(title: "Delta rot ref", value: formattedStaticDegrees(state.referenceRotationDeltaDegrees))
+                if viewModel.staticPoseMarkerDiagnostics.isEmpty {
+                    metricRow(title: "Static markers", value: missingDebugValue)
+                } else {
+                    ForEach(viewModel.staticPoseMarkerDiagnostics) { state in
+                        VStack(alignment: .leading, spacing: 4) {
+                            metricRow(title: "Marker estatico", value: "M\(state.markerId)")
+                            metricRow(title: "Samples", value: "\(state.sampleCount)")
+                            metricRow(title: "Pos std", value: formattedStaticMillimeters(state.positionStdDevMm))
+                            metricRow(title: "Pos peak", value: formattedStaticMillimeters(state.positionPeakToPeakMm))
+                            metricRow(title: "Rot std", value: formattedStaticDegrees(state.rotationStdDevDegrees))
+                            metricRow(title: "Rot peak", value: formattedStaticDegrees(state.rotationPeakToPeakDegrees))
+                            metricRow(title: "Normal std", value: formattedStaticDegrees(state.normalStdDevDegrees))
+                            metricRow(title: "Normal peak", value: formattedStaticDegrees(state.normalPeakToPeakDegrees))
+                            metricRow(title: "Reproj mean", value: formattedStaticPixels(state.reprojectionMean))
+                            metricRow(title: "Reproj std", value: formattedStaticPixels(state.reprojectionStdDev))
+                            metricRow(title: "Dual ratio", value: formattedStaticRatio(state.dualTagRatio))
+                            metricRow(title: "Top fallback", value: formattedStaticRatio(state.topFallbackRatio))
+                            metricRow(title: "Bottom fallback", value: formattedStaticRatio(state.bottomFallbackRatio))
+                            metricRow(title: "Edge frames", value: formattedStaticRatio(state.edgeFrameRatio))
+                            metricRow(title: "Bottom small", value: formattedStaticRatio(state.bottomSmallRatio))
+                            metricRow(title: "Delta pos ref", value: formattedStaticMillimeters(state.referencePositionDeltaMm))
+                            metricRow(title: "Delta rot ref", value: formattedStaticDegrees(state.referenceRotationDeltaDegrees))
+                        }
+                        .padding(.vertical, 4)
                     }
-                    .padding(.vertical, 4)
                 }
 
                 if !viewModel.staticPosePairDistanceDiagnostics.isEmpty {
@@ -550,8 +554,11 @@ struct ScannerView: View {
                 Text("Markers v2")
                     .font(.subheadline.weight(.semibold))
 
-                ForEach(viewModel.dualMarkerDebugStates) { state in
-                    VStack(alignment: .leading, spacing: 4) {
+                if viewModel.dualMarkerDebugStates.isEmpty {
+                    metricRow(title: "Markers v2", value: "Sem dados v2 ainda")
+                } else {
+                    ForEach(viewModel.dualMarkerDebugStates) { state in
+                        VStack(alignment: .leading, spacing: 4) {
                         metricRow(title: "Marker fisico", value: "ID \(state.physicalMarkerId)")
                         metricRow(title: "Top agora \(state.topTagId)", value: formattedBool(state.topTagRawDetected))
                         metricRow(title: "Bottom agora \(state.bottomTagId)", value: formattedBool(state.bottomTagRawDetected))
@@ -699,8 +706,9 @@ struct ScannerView: View {
                         metricRow(title: "Erro reproj.", value: formattedDualMarkerReprojectionError(state))
                         metricRow(title: "Pontos", value: formattedDualMarkerPointCount(state))
                         metricRow(title: "Aviso", value: formattedDualMarkerDetectionWarning(state))
+                        }
+                        .padding(.vertical, 4)
                     }
-                    .padding(.vertical, 4)
                 }
             }
         }
@@ -858,17 +866,67 @@ struct ScannerView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
+    private var missingDebugValue: String {
+        "—"
+    }
+
+    private func safeDouble(_ value: Double?, decimals: Int = 2) -> String {
+        guard let value, value.isFinite else {
+            return missingDebugValue
+        }
+
+        let safeDecimals = min(max(decimals, 0), 6)
+        return String(format: "%.\(safeDecimals)f", value)
+    }
+
+    private func safeSignedDouble(_ value: Double?, decimals: Int = 2) -> String {
+        guard let value, value.isFinite else {
+            return missingDebugValue
+        }
+
+        let safeDecimals = min(max(decimals, 0), 6)
+        let magnitude = String(format: "%.\(safeDecimals)f", abs(value))
+        return "\(value >= 0 ? "+" : "-")\(magnitude)"
+    }
+
+    private func safeUnit(_ value: Double?, decimals: Int = 2, unit: String) -> String {
+        let number = safeDouble(value, decimals: decimals)
+        guard number != missingDebugValue else {
+            return missingDebugValue
+        }
+
+        return "\(number) \(unit)"
+    }
+
+    private func safeSignedUnit(_ value: Double?, decimals: Int = 2, unit: String) -> String {
+        let number = safeSignedDouble(value, decimals: decimals)
+        guard number != missingDebugValue else {
+            return missingDebugValue
+        }
+
+        return "\(number) \(unit)"
+    }
+
+    private func safePercent(_ value: Double?, decimals: Int = 0) -> String {
+        let number = safeDouble(value, decimals: decimals)
+        guard number != missingDebugValue else {
+            return missingDebugValue
+        }
+
+        return "\(number)%"
+    }
+
     private func formattedCoveragePercent(_ percent: Double) -> String {
         "\(roundedCoveragePercent(percent))%"
     }
 
     private func formattedPreciseCoveragePercent(_ percent: Double) -> String {
         guard percent.isFinite else {
-            return "0.0%"
+            return missingDebugValue
         }
 
         let clampedPercent = min(max(percent, 0.0), 100.0)
-        return String(format: "%.1f%%", clampedPercent)
+        return safePercent(clampedPercent, decimals: 1)
     }
 
     private func roundedCoveragePercent(_ percent: Double) -> Int {
@@ -967,35 +1025,19 @@ struct ScannerView: View {
     }
 
     private var formattedScanAverageDistance: String {
-        guard let scanAverageDistanceMm = viewModel.scanAverageDistanceMm else {
-            return "-"
-        }
-
-        return String(format: "%.1f mm", scanAverageDistanceMm)
+        safeUnit(viewModel.scanAverageDistanceMm, decimals: 1, unit: "mm")
     }
 
     private var formattedScanAverageReprojectionError: String {
-        guard let scanAverageReprojectionError = viewModel.scanAverageReprojectionError else {
-            return "-"
-        }
-
-        return String(format: "%.2f px", scanAverageReprojectionError)
+        safeUnit(viewModel.scanAverageReprojectionError, decimals: 2, unit: "px")
     }
 
     private var formattedScanPoseJitter: String {
-        guard let scanPositionJitterMm = viewModel.scanPositionJitterMm else {
-            return "-"
-        }
-
-        return String(format: "%.2f mm", scanPositionJitterMm)
+        safeUnit(viewModel.scanPositionJitterMm, decimals: 2, unit: "mm")
     }
 
     private var formattedScanRotationJitter: String {
-        guard let scanRotationJitterDegrees = viewModel.scanRotationJitterDegrees else {
-            return "-"
-        }
-
-        return String(format: "%.2f deg", scanRotationJitterDegrees)
+        safeUnit(viewModel.scanRotationJitterDegrees, decimals: 2, unit: "deg")
     }
 
     private var formattedScanStableReadinessDuration: String {
@@ -1016,7 +1058,7 @@ struct ScannerView: View {
 
     private var formattedLastSTLExportMarkerIds: String {
         guard !viewModel.lastSTLExportMarkerIds.isEmpty else {
-            return "-"
+            return missingDebugValue
         }
 
         return viewModel.lastSTLExportMarkerIds.map(String.init).joined(separator: ", ")
@@ -1024,12 +1066,14 @@ struct ScannerView: View {
 
     private var formattedLastSTLExportBottomGeometry: String {
         guard let bottomTagSize = viewModel.lastSTLExportBottomTagSizeMillimeters,
-              let bottomCenterY = viewModel.lastSTLExportBottomCenterYMillimeters
+              let bottomCenterY = viewModel.lastSTLExportBottomCenterYMillimeters,
+              bottomTagSize.isFinite,
+              bottomCenterY.isFinite
         else {
-            return "-"
+            return missingDebugValue
         }
 
-        return String(format: "%.1f mm / y %.2f mm", bottomTagSize, bottomCenterY)
+        return "\(safeUnit(bottomTagSize, decimals: 1, unit: "mm")) / y \(safeUnit(bottomCenterY, decimals: 2, unit: "mm"))"
     }
 
     private var formattedCurrentExportableTagPoseCount: String {
@@ -1047,7 +1091,7 @@ struct ScannerView: View {
     private var formattedScanCoverageMarkerIds: String {
         let markerIds = viewModel.scanCoverageMarkerIds
         guard !markerIds.isEmpty else {
-            return "-"
+            return missingDebugValue
         }
 
         return markerIds.map(String.init).joined(separator: ", ")
@@ -1055,7 +1099,7 @@ struct ScannerView: View {
 
     private var formattedScanTagCoverageSummary: String {
         guard !viewModel.scanTagCoverages.isEmpty else {
-            return "-"
+            return missingDebugValue
         }
 
         return viewModel.scanTagCoverages.values
@@ -1083,7 +1127,7 @@ struct ScannerView: View {
 
     private var formattedPlanarMarkerDistances: String {
         guard !viewModel.scanMarkerPlanarDistancesMm.isEmpty else {
-            return "-"
+            return missingDebugValue
         }
 
         return viewModel.scanMarkerPlanarDistancesMm.keys
@@ -1095,60 +1139,59 @@ struct ScannerView: View {
                     return nil
                 }
 
-                return String(format: "M%d: %+.2f mm", markerId, distanceMm)
+                return "M\(markerId): \(safeSignedUnit(distanceMm, decimals: 2, unit: "mm"))"
             }
             .joined(separator: "\n")
     }
 
     private var formattedMarkerPairDistances: String {
         guard !viewModel.scanMarkerPairDistances.isEmpty else {
-            return "-"
+            return missingDebugValue
         }
 
         return viewModel.scanMarkerPairDistances
             .map { pairDistance in
-                String(
-                    format: "M%d-M%d: %.2f mm",
-                    pairDistance.firstMarkerId,
-                    pairDistance.secondMarkerId,
-                    pairDistance.distanceMm
-                )
+                "M\(pairDistance.firstMarkerId)-M\(pairDistance.secondMarkerId): \(safeUnit(pairDistance.distanceMm, decimals: 2, unit: "mm"))"
             }
             .joined(separator: "\n")
     }
 
     private var formattedMotionAngularVelocity: String {
-        let value = viewModel.currentMotionFrameQuality.angularVelocityRadPerSec
-        guard value.isFinite else {
-            return "-"
+        guard viewModel.currentMotionFrameQuality.isRecent else {
+            return missingDebugValue
         }
 
-        return String(format: "%.3f rad/s", value)
+        let value = viewModel.currentMotionFrameQuality.angularVelocityRadPerSec
+        return safeUnit(value, decimals: 3, unit: "rad/s")
     }
 
     private var formattedMotionAcceleration: String {
-        let value = viewModel.currentMotionFrameQuality.accelerationMagnitude
-        guard value.isFinite else {
-            return "-"
+        guard viewModel.currentMotionFrameQuality.isRecent else {
+            return missingDebugValue
         }
 
-        return String(format: "%.3f g", value)
+        let value = viewModel.currentMotionFrameQuality.accelerationMagnitude
+        return safeUnit(value, decimals: 3, unit: "g")
     }
 
     private var formattedMotionStability: String {
+        guard viewModel.currentMotionFrameQuality.isRecent else {
+            return missingDebugValue
+        }
+
         let value = viewModel.currentMotionFrameQuality.stabilityScore
         guard value.isFinite else {
-            return "-"
+            return missingDebugValue
         }
 
         let recency = viewModel.currentMotionFrameQuality.isRecent ? "recente" : "neutro"
-        return String(format: "%.0f%% %@", value * 100.0, recency)
+        return "\(safePercent(value * 100.0)) \(recency)"
     }
 
     private var formattedMotionWarning: String {
         let quality = viewModel.currentMotionFrameQuality
         guard quality.isRecent else {
-            return "IMU neutro"
+            return missingDebugValue
         }
 
         if quality.stabilityScore < 0.45 {
@@ -1159,20 +1202,16 @@ struct ScannerView: View {
             return "Movimento moderado: menor confianca"
         }
 
-        return "-"
+        return missingDebugValue
     }
 
     private func formattedMillimeterValue(_ value: Double?) -> String {
-        guard let value, value.isFinite else {
-            return "-"
-        }
-
-        return String(format: "%.2f mm", value)
+        safeUnit(value, decimals: 2, unit: "mm")
     }
 
     private var formattedResolution: String {
         guard let resolution = viewModel.frameResolution else {
-            return "-"
+            return missingDebugValue
         }
 
         return "\(resolution.width) x \(resolution.height)"
@@ -1188,7 +1227,7 @@ struct ScannerView: View {
 
     private var formattedArucoFrameResolution: String {
         guard let resolution = viewModel.arucoFrameResolution else {
-            return "-"
+            return missingDebugValue
         }
 
         return "\(resolution.width) x \(resolution.height)"
@@ -1196,7 +1235,7 @@ struct ScannerView: View {
 
     private var formattedDetectedMarkerIds: String {
         guard !viewModel.detectedMarkerIds.isEmpty else {
-            return "-"
+            return missingDebugValue
         }
 
         return viewModel.detectedMarkerIds.map(String.init).joined(separator: ", ")
@@ -1204,7 +1243,7 @@ struct ScannerView: View {
 
     private var formattedArucoBytesPerRow: String {
         guard let bytesPerRow = viewModel.arucoBytesPerRow else {
-            return "-"
+            return missingDebugValue
         }
 
         return "\(bytesPerRow)"
@@ -1212,7 +1251,7 @@ struct ScannerView: View {
 
     private var formattedRejectedCandidates: String {
         guard let rejectedCandidateCount = viewModel.arucoRejectedCandidateCount else {
-            return "-"
+            return missingDebugValue
         }
 
         return "\(rejectedCandidateCount)"
@@ -1220,7 +1259,7 @@ struct ScannerView: View {
 
     private var formattedPoseMarkerId: String {
         guard let poseMarkerId = viewModel.rawPoseResult?.markerId ?? viewModel.stablePoseResult?.markerId else {
-            return "-"
+            return missingDebugValue
         }
 
         return "\(poseMarkerId)"
@@ -1297,36 +1336,24 @@ struct ScannerView: View {
     }
 
     private var formattedRawPoseDistance: String {
-        guard let distanceMm = viewModel.rawPoseResult?.distanceMm else {
-            return "-"
-        }
-
-        return String(format: "%.1f mm", distanceMm)
+        safeUnit(viewModel.rawPoseResult?.distanceMm, decimals: 1, unit: "mm")
     }
 
     private var formattedStablePoseDistance: String {
-        guard let distanceMm = viewModel.stablePoseResult?.distanceMm else {
-            return "-"
-        }
-
-        return String(format: "%.1f mm", distanceMm)
+        safeUnit(viewModel.stablePoseResult?.distanceMm, decimals: 1, unit: "mm")
     }
 
     private var formattedPoseReprojectionError: String {
-        guard let poseReprojectionError = viewModel.rawPoseResult?.reprojectionError else {
-            return "-"
-        }
-
-        return String(format: "%.2f px", poseReprojectionError)
+        safeUnit(viewModel.rawPoseResult?.reprojectionError, decimals: 2, unit: "px")
     }
 
     private var formattedPoseMode: String {
-        viewModel.rawPoseResult?.poseSource.debugTitle ?? "-"
+        viewModel.rawPoseResult?.poseSource.debugTitle ?? missingDebugValue
     }
 
     private var formattedPosePointCount: String {
         guard let usedPointCount = viewModel.rawPoseResult?.usedPointCount else {
-            return "-"
+            return missingDebugValue
         }
 
         return "\(usedPointCount)"
@@ -1337,7 +1364,7 @@ struct ScannerView: View {
     }
 
     private func formattedDualMarkerVisualMode(_ state: DualArucoMarkerDebugState) -> String {
-        state.visualModeTitle ?? "-"
+        state.visualModeTitle ?? missingDebugValue
     }
 
     private func formattedDualMarkerVisualAge(_ state: DualArucoMarkerDebugState) -> String {
@@ -1349,51 +1376,27 @@ struct ScannerView: View {
     }
 
     private func formattedVisualAge(_ ageSeconds: Double?) -> String {
-        guard let ageSeconds, ageSeconds.isFinite else {
-            return "-"
-        }
-
-        return String(format: "%.2f s", ageSeconds)
+        safeUnit(ageSeconds, decimals: 2, unit: "s")
     }
 
     private func formattedStaticMillimeters(_ value: Double?) -> String {
-        guard let value, value.isFinite else {
-            return "-"
-        }
-
-        return String(format: "%.3f mm", value)
+        safeUnit(value, decimals: 3, unit: "mm")
     }
 
     private func formattedStaticDegrees(_ value: Double?) -> String {
-        guard let value, value.isFinite else {
-            return "-"
-        }
-
-        return String(format: "%.3f deg", value)
+        safeUnit(value, decimals: 3, unit: "deg")
     }
 
     private func formattedDegreesValue(_ value: Double?) -> String {
-        guard let value, value.isFinite else {
-            return "-"
-        }
-
-        return String(format: "%.1f deg", value)
+        safeUnit(value, decimals: 1, unit: "deg")
     }
 
     private func formattedStaticPixels(_ value: Double?) -> String {
-        guard let value, value.isFinite else {
-            return "-"
-        }
-
-        return String(format: "%.3f px", value)
+        safeUnit(value, decimals: 3, unit: "px")
     }
 
     private func formattedStaticRatio(_ ratio: Double) -> String {
-        guard ratio.isFinite else {
-            return "-"
-        }
-
-        return String(format: "%.0f%%", ratio * 100.0)
+        safePercent(ratio.isFinite ? ratio * 100.0 : nil)
     }
 
     private func formattedStaticPairDistance(
@@ -1462,10 +1465,10 @@ struct ScannerView: View {
         }
 
         guard let area, area.isFinite else {
-            return "-"
+            return missingDebugValue
         }
 
-        return String(format: "%.0f px2", area)
+        return safeUnit(area, decimals: 0, unit: "px2")
     }
 
     private func formattedDualTagCounts(
@@ -1508,15 +1511,15 @@ struct ScannerView: View {
         guard let reprojectionError = state.reprojectionError,
               reprojectionError.isFinite
         else {
-            return "-"
+            return missingDebugValue
         }
 
-        return String(format: "%.2f px", reprojectionError)
+        return safeUnit(reprojectionError, decimals: 2, unit: "px")
     }
 
     private func formattedDualMarkerPointCount(_ state: DualArucoMarkerDebugState) -> String {
         guard let usedPointCount = state.usedPointCount else {
-            return "-"
+            return missingDebugValue
         }
 
         return "\(usedPointCount)"
@@ -1526,26 +1529,26 @@ struct ScannerView: View {
         guard let normalizedImageX = state.normalizedImageX,
               normalizedImageX.isFinite
         else {
-            return "-"
+            return missingDebugValue
         }
 
-        return String(format: "%.2f", normalizedImageX)
+        return safeDouble(normalizedImageX, decimals: 2)
     }
 
     private func formattedDualMarkerImageY(_ state: DualArucoMarkerDebugState) -> String {
         guard let normalizedImageY = state.normalizedImageY,
               normalizedImageY.isFinite
         else {
-            return "-"
+            return missingDebugValue
         }
 
-        return String(format: "%.2f", normalizedImageY)
+        return safeDouble(normalizedImageY, decimals: 2)
     }
 
     private func formattedDualMarkerNearestImageEdge(
         _ state: DualArucoMarkerDebugState
     ) -> String {
-        state.nearestImageEdge ?? "-"
+        state.nearestImageEdge ?? missingDebugValue
     }
 
     private func formattedDualMarkerNearImageEdge(
@@ -1554,7 +1557,7 @@ struct ScannerView: View {
         guard state.normalizedImageX != nil,
               state.normalizedImageY != nil
         else {
-            return "-"
+            return missingDebugValue
         }
 
         return formattedBool(state.nearImageEdge)
@@ -1566,10 +1569,10 @@ struct ScannerView: View {
         guard let imageEdgeDistancePercent = state.imageEdgeDistancePercent,
               imageEdgeDistancePercent.isFinite
         else {
-            return "-"
+            return missingDebugValue
         }
 
-        return String(format: "%.0f%%", imageEdgeDistancePercent)
+        return safePercent(imageEdgeDistancePercent)
     }
 
     private func formattedDualMarkerNearImageEdgeFrames(
@@ -1589,37 +1592,37 @@ struct ScannerView: View {
     private func formattedDualMarkerNearImageEdgeMode(
         _ state: DualArucoMarkerDebugState
     ) -> String {
-        state.scanNearImageEdgeDominantPoseSource?.debugTitle ?? "-"
+        state.scanNearImageEdgeDominantPoseSource?.debugTitle ?? missingDebugValue
     }
 
     private func formattedDualMarkerScanDualPercent(_ state: DualArucoMarkerDebugState) -> String {
         guard state.scanDualTagPosePercent.isFinite else {
-            return "-"
+            return missingDebugValue
         }
 
-        return String(format: "%.0f%%", state.scanDualTagPosePercent)
+        return safePercent(state.scanDualTagPosePercent)
     }
 
     private func formattedDualMarkerAngularCoverage(_ state: DualArucoMarkerDebugState) -> String {
         guard state.scanDualAngularCoveragePercent.isFinite else {
-            return "-"
+            return missingDebugValue
         }
 
-        return String(format: "%.1f%%", state.scanDualAngularCoveragePercent)
+        return safePercent(state.scanDualAngularCoveragePercent, decimals: 1)
     }
 
     private func formattedDualMarkerDominantMode(_ state: DualArucoMarkerDebugState) -> String {
-        state.scanDominantPoseSource?.debugTitle ?? "-"
+        state.scanDominantPoseSource?.debugTitle ?? missingDebugValue
     }
 
     private func formattedDualMarkerPlanarDistance(_ state: DualArucoMarkerDebugState) -> String {
         guard let distanceMm = state.finalPlanarDistanceMm,
               distanceMm.isFinite
         else {
-            return "-"
+            return missingDebugValue
         }
 
-        return String(format: "%+.2f mm", distanceMm)
+        return safeSignedUnit(distanceMm, decimals: 2, unit: "mm")
     }
 
     private func formattedDualMarkerDetectionWarning(_ state: DualArucoMarkerDebugState) -> String {
@@ -1629,7 +1632,7 @@ struct ScannerView: View {
                 ? "Bottom pequena / baixa confianca"
                 : nil) ??
             state.detectionWarning ??
-            "-"
+            missingDebugValue
     }
 
     private func formattedDualMarkerFinalAverageReprojectionError(
@@ -1638,10 +1641,10 @@ struct ScannerView: View {
         guard let error = state.finalRefinementAverageReprojectionError,
               error.isFinite
         else {
-            return "-"
+            return missingDebugValue
         }
 
-        return String(format: "%.2f px", error)
+        return safeUnit(error, decimals: 2, unit: "px")
     }
 
     private func formattedDualMarkerFinalAverageQualityScore(
@@ -1650,10 +1653,10 @@ struct ScannerView: View {
         guard let score = state.finalRefinementAverageQualityScore,
               score.isFinite
         else {
-            return "-"
+            return missingDebugValue
         }
 
-        return String(format: "%.2f", score)
+        return safeDouble(score, decimals: 2)
     }
 
     private func formattedDualMarkerFinalAverageImageX(
@@ -1662,10 +1665,10 @@ struct ScannerView: View {
         guard let normalizedImageX = state.finalRefinementAverageNormalizedImageX,
               normalizedImageX.isFinite
         else {
-            return "-"
+            return missingDebugValue
         }
 
-        return String(format: "%.2f", normalizedImageX)
+        return safeDouble(normalizedImageX, decimals: 2)
     }
 
     private func formattedDualMarkerFinalAverageImageY(
@@ -1674,10 +1677,10 @@ struct ScannerView: View {
         guard let normalizedImageY = state.finalRefinementAverageNormalizedImageY,
               normalizedImageY.isFinite
         else {
-            return "-"
+            return missingDebugValue
         }
 
-        return String(format: "%.2f", normalizedImageY)
+        return safeDouble(normalizedImageY, decimals: 2)
     }
 
     private func formattedDualMarkerFinalAverageImageEdgeMargin(
@@ -1686,10 +1689,10 @@ struct ScannerView: View {
         guard let edgeMargin = state.finalRefinementAverageImageEdgeMargin,
               edgeMargin.isFinite
         else {
-            return "-"
+            return missingDebugValue
         }
 
-        return String(format: "%.0f%%", edgeMargin * 100.0)
+        return safePercent(edgeMargin * 100.0)
     }
 
     private func formattedDualMarkerFinalPositionVariation(
@@ -1698,10 +1701,10 @@ struct ScannerView: View {
         guard let positionVariation = state.finalRefinementPositionVariationMm,
               positionVariation.isFinite
         else {
-            return "-"
+            return missingDebugValue
         }
 
-        return String(format: "%.2f mm", positionVariation)
+        return safeUnit(positionVariation, decimals: 2, unit: "mm")
     }
 
     private func formattedDualMarkerFinalRotationVariation(
@@ -1710,10 +1713,10 @@ struct ScannerView: View {
         guard let rotationVariation = state.finalRefinementRotationVariationDegrees,
               rotationVariation.isFinite
         else {
-            return "-"
+            return missingDebugValue
         }
 
-        return String(format: "%.2f deg", rotationVariation)
+        return safeUnit(rotationVariation, decimals: 2, unit: "deg")
     }
 
     private func formattedDualMarkerFinalAverageNormal(
@@ -1724,10 +1727,10 @@ struct ScannerView: View {
               normal.y.isFinite,
               normal.z.isFinite
         else {
-            return "-"
+            return missingDebugValue
         }
 
-        return String(format: "x %.2f y %.2f z %.2f", normal.x, normal.y, normal.z)
+        return "x \(safeDouble(normal.x, decimals: 2)) y \(safeDouble(normal.y, decimals: 2)) z \(safeDouble(normal.z, decimals: 2))"
     }
 
     private func formattedDualMarkerNormalStdDev(_ state: DualArucoMarkerDebugState) -> String {
@@ -1760,13 +1763,13 @@ struct ScannerView: View {
         guard let value = state.finalRefinementDualFallbackNormalDifferenceDegrees,
               value.isFinite
         else {
-            return "-"
+            return missingDebugValue
         }
 
         let warning = value > viewModel.scanMaximumFinalNormalOutlierDegrees
             ? " fallback alterando inclinacao"
             : ""
-        return String(format: "%.1f deg%@", value, warning)
+        return "\(safeUnit(value, decimals: 1, unit: "deg"))\(warning)"
     }
 
     private func formattedDualMarkerAverageMotionScore(
@@ -1775,14 +1778,14 @@ struct ScannerView: View {
         guard let score = state.finalRefinementAverageMotionStabilityScore,
               score.isFinite
         else {
-            return "-"
+            return missingDebugValue
         }
 
-        return String(format: "%.0f%%", score * 100.0)
+        return safePercent(score * 100.0)
     }
 
     private func formattedDualMarkerFinalDominantMode(_ state: DualArucoMarkerDebugState) -> String {
-        state.finalRefinementDominantPoseSource?.debugTitle ?? "-"
+        state.finalRefinementDominantPoseSource?.debugTitle ?? missingDebugValue
     }
 
     private func formattedDualMarkerFinalConfidence(_ state: DualArucoMarkerDebugState) -> String {
@@ -1792,60 +1795,46 @@ struct ScannerView: View {
     private func formattedDualMarkerFinalConfidenceReason(
         _ state: DualArucoMarkerDebugState
     ) -> String {
-        state.finalRefinementConfidenceReason ?? "-"
+        state.finalRefinementConfidenceReason ?? missingDebugValue
     }
 
     private func formattedDualMarkerDiscardReason(_ state: DualArucoMarkerDebugState) -> String {
-        state.finalRefinementDiscardReason ?? state.scanDualTagRejectionReason ?? "-"
+        state.finalRefinementDiscardReason ?? state.scanDualTagRejectionReason ?? missingDebugValue
     }
 
     private var formattedImplantPositions: String {
         guard !viewModel.implantPoseResults.isEmpty else {
-            return "-"
+            return missingDebugValue
         }
 
         return viewModel.implantPoseResults.map { implantPose in
-            String(
-                format: "ID %d: x %.1f, y %.1f, z %.1f mm",
-                implantPose.markerId,
-                implantPose.translationVector.x,
-                implantPose.translationVector.y,
-                implantPose.translationVector.z
-            )
+            "ID \(implantPose.markerId): x \(safeDouble(implantPose.translationVector.x, decimals: 1)), y \(safeDouble(implantPose.translationVector.y, decimals: 1)), z \(safeUnit(implantPose.translationVector.z, decimals: 1, unit: "mm"))"
         }
         .joined(separator: "\n")
     }
 
     private var formattedImplantDistance: String {
         guard let implantPose = viewModel.implantPoseResult else {
-            return "-"
+            return missingDebugValue
         }
 
-        return String(format: "ID %d: %.1f mm", implantPose.markerId, implantPose.distanceMm)
+        return "ID \(implantPose.markerId): \(safeUnit(implantPose.distanceMm, decimals: 1, unit: "mm"))"
     }
 
     private var formattedSelectedImplantMarkers: String {
         guard !viewModel.selectedImplantMarkerIds.isEmpty else {
-            return "-"
+            return missingDebugValue
         }
 
         return viewModel.selectedImplantMarkerIds.map { "ID \($0)" }.joined(separator: " x ")
     }
 
     private var formattedSelectedTagDistance: String {
-        guard let selectedTagDistanceMm = viewModel.selectedTagDistanceMm else {
-            return "-"
-        }
-
-        return String(format: "%.1f mm", selectedTagDistanceMm)
+        safeUnit(viewModel.selectedTagDistanceMm, decimals: 1, unit: "mm")
     }
 
     private var formattedSelectedImplantDistance: String {
-        guard let selectedImplantDistanceMm = viewModel.selectedImplantDistanceMm else {
-            return "-"
-        }
-
-        return String(format: "%.1f mm", selectedImplantDistanceMm)
+        safeUnit(viewModel.selectedImplantDistanceMm, decimals: 1, unit: "mm")
     }
 
     private var parsedScaleValidationRealDistanceMm: Double? {
@@ -1865,14 +1854,14 @@ struct ScannerView: View {
 
     private var formattedScaleValidationRealDistance: String {
         if scaleValidationRealDistanceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "-"
+            return missingDebugValue
         }
 
         guard let distanceMm = parsedScaleValidationRealDistanceMm else {
             return "Valor invalido"
         }
 
-        return String(format: "%.2f mm", distanceMm)
+        return safeUnit(distanceMm, decimals: 2, unit: "mm")
     }
 
     private var formattedScaleValidationAppDistance: String {
@@ -1881,14 +1870,14 @@ struct ScannerView: View {
 
     private var formattedSTLExportedImplantCount: String {
         guard viewModel.stlExportedImplantCount > 0 else {
-            return "-"
+            return missingDebugValue
         }
 
         return "\(viewModel.stlExportedImplantCount)"
     }
 
     private var formattedSTLExportFileName: String {
-        viewModel.stlExportURL?.lastPathComponent ?? "-"
+        viewModel.stlExportURL?.lastPathComponent ?? missingDebugValue
     }
 
     private var formattedSTLExportStatus: String {
@@ -1987,16 +1976,12 @@ struct ScannerView: View {
     }
 
     private func formattedPercentValue(_ value: Double?) -> String {
-        guard let value else {
-            return "-"
-        }
-
-        return String(format: "%.2f%%", value)
+        safePercent(value, decimals: 2)
     }
 
     private func formattedCorrectionFactor(_ value: Double?) -> String {
-        guard let value else {
-            return "-"
+        guard let value, value.isFinite else {
+            return missingDebugValue
         }
 
         return String(format: "%.4fx", value)

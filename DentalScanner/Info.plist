@@ -30,6 +30,8 @@
     <true/>
     <key>NSCameraUsageDescription</key>
     <string>O app precisa acessar a camera para detectar marcadores ArUco e validar a pose do escaneamento.</string>
+    <key>NSMotionUsageDescription</key>
+    <string>O app usa sensores de movimento para reduzir a confianca de frames capturados com tremor durante o escaneamento.</string>
     <key>UIRequiresFullScreen</key>
     <true/>
     <key>UILaunchStoryboardName</key>
