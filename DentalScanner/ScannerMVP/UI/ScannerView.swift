@@ -502,6 +502,8 @@ struct ScannerView: View {
                         metricRow(title: "Pos peak", value: formattedStaticMillimeters(state.positionPeakToPeakMm))
                         metricRow(title: "Rot std", value: formattedStaticDegrees(state.rotationStdDevDegrees))
                         metricRow(title: "Rot peak", value: formattedStaticDegrees(state.rotationPeakToPeakDegrees))
+                        metricRow(title: "Normal std", value: formattedStaticDegrees(state.normalStdDevDegrees))
+                        metricRow(title: "Normal peak", value: formattedStaticDegrees(state.normalPeakToPeakDegrees))
                         metricRow(title: "Reproj mean", value: formattedStaticPixels(state.reprojectionMean))
                         metricRow(title: "Reproj std", value: formattedStaticPixels(state.reprojectionStdDev))
                         metricRow(title: "Dual ratio", value: formattedStaticRatio(state.dualTagRatio))
@@ -617,6 +619,38 @@ struct ScannerView: View {
                             value: formattedDualMarkerFinalRotationVariation(state)
                         )
                         metricRow(
+                            title: "Normal media",
+                            value: formattedDualMarkerFinalAverageNormal(state)
+                        )
+                        metricRow(
+                            title: "Normal std",
+                            value: formattedDualMarkerNormalStdDev(state)
+                        )
+                        metricRow(
+                            title: "Normal peak",
+                            value: formattedDualMarkerNormalPeak(state)
+                        )
+                        metricRow(
+                            title: "Normal pior",
+                            value: formattedDualMarkerWorstNormalDifference(state)
+                        )
+                        metricRow(
+                            title: "Dual normal std",
+                            value: formattedDualMarkerDualNormalStdDev(state)
+                        )
+                        metricRow(
+                            title: "Fallback normal std",
+                            value: formattedDualMarkerFallbackNormalStdDev(state)
+                        )
+                        metricRow(
+                            title: "Dual vs fallback",
+                            value: formattedDualMarkerDualFallbackNormalDifference(state)
+                        )
+                        metricRow(
+                            title: "Motion score final",
+                            value: formattedDualMarkerAverageMotionScore(state)
+                        )
+                        metricRow(
                             title: "Modo final",
                             value: formattedDualMarkerFinalDominantMode(state)
                         )
@@ -635,6 +669,18 @@ struct ScannerView: View {
                         metricRow(
                             title: "Desc fallback",
                             value: "\(state.finalRefinementLowPriorityFallbackDiscardedObservationCount)"
+                        )
+                        metricRow(
+                            title: "Desc normal",
+                            value: "\(state.finalRefinementNormalOutlierDiscardedObservationCount)"
+                        )
+                        metricRow(
+                            title: "Desc motion",
+                            value: "\(state.finalRefinementMotionDiscardedObservationCount)"
+                        )
+                        metricRow(
+                            title: "Motion penal.",
+                            value: "\(state.finalRefinementMotionPenalizedObservationCount)"
                         )
                         metricRow(title: "Outliers removidos", value: "\(state.finalRefinementOutlierRemovedCount)")
                         metricRow(
@@ -1071,6 +1117,51 @@ struct ScannerView: View {
             .joined(separator: "\n")
     }
 
+    private var formattedMotionAngularVelocity: String {
+        let value = viewModel.currentMotionFrameQuality.angularVelocityRadPerSec
+        guard value.isFinite else {
+            return "-"
+        }
+
+        return String(format: "%.3f rad/s", value)
+    }
+
+    private var formattedMotionAcceleration: String {
+        let value = viewModel.currentMotionFrameQuality.accelerationMagnitude
+        guard value.isFinite else {
+            return "-"
+        }
+
+        return String(format: "%.3f g", value)
+    }
+
+    private var formattedMotionStability: String {
+        let value = viewModel.currentMotionFrameQuality.stabilityScore
+        guard value.isFinite else {
+            return "-"
+        }
+
+        let recency = viewModel.currentMotionFrameQuality.isRecent ? "recente" : "neutro"
+        return String(format: "%.0f%% %@", value * 100.0, recency)
+    }
+
+    private var formattedMotionWarning: String {
+        let quality = viewModel.currentMotionFrameQuality
+        guard quality.isRecent else {
+            return "IMU neutro"
+        }
+
+        if quality.stabilityScore < 0.45 {
+            return "Mantenha o celular estavel"
+        }
+
+        if !quality.isStable {
+            return "Movimento moderado: menor confianca"
+        }
+
+        return "-"
+    }
+
     private func formattedMillimeterValue(_ value: Double?) -> String {
         guard let value, value.isFinite else {
             return "-"
@@ -1177,6 +1268,13 @@ struct ScannerView: View {
         )
     }
 
+    private var scanMaximumFinalNormalOutlierBinding: Binding<Double> {
+        Binding(
+            get: { viewModel.scanMaximumFinalNormalOutlierDegrees },
+            set: { viewModel.setScanMaximumFinalNormalOutlierDegrees($0) }
+        )
+    }
+
     private var precisionModeV2Binding: Binding<Bool> {
         Binding(
             get: { viewModel.precisionModeV2 },
@@ -1272,6 +1370,14 @@ struct ScannerView: View {
         }
 
         return String(format: "%.3f deg", value)
+    }
+
+    private func formattedDegreesValue(_ value: Double?) -> String {
+        guard let value, value.isFinite else {
+            return "-"
+        }
+
+        return String(format: "%.1f deg", value)
     }
 
     private func formattedStaticPixels(_ value: Double?) -> String {
@@ -1610,6 +1716,71 @@ struct ScannerView: View {
         return String(format: "%.2f deg", rotationVariation)
     }
 
+    private func formattedDualMarkerFinalAverageNormal(
+        _ state: DualArucoMarkerDebugState
+    ) -> String {
+        guard let normal = state.finalRefinementAverageNormal,
+              normal.x.isFinite,
+              normal.y.isFinite,
+              normal.z.isFinite
+        else {
+            return "-"
+        }
+
+        return String(format: "x %.2f y %.2f z %.2f", normal.x, normal.y, normal.z)
+    }
+
+    private func formattedDualMarkerNormalStdDev(_ state: DualArucoMarkerDebugState) -> String {
+        formattedDegreesValue(state.finalRefinementNormalStdDevDegrees)
+    }
+
+    private func formattedDualMarkerNormalPeak(_ state: DualArucoMarkerDebugState) -> String {
+        formattedDegreesValue(state.finalRefinementNormalPeakToPeakDegrees)
+    }
+
+    private func formattedDualMarkerWorstNormalDifference(
+        _ state: DualArucoMarkerDebugState
+    ) -> String {
+        formattedDegreesValue(state.finalRefinementWorstNormalDifferenceDegrees)
+    }
+
+    private func formattedDualMarkerDualNormalStdDev(_ state: DualArucoMarkerDebugState) -> String {
+        formattedDegreesValue(state.finalRefinementDualTagNormalStdDevDegrees)
+    }
+
+    private func formattedDualMarkerFallbackNormalStdDev(
+        _ state: DualArucoMarkerDebugState
+    ) -> String {
+        formattedDegreesValue(state.finalRefinementFallbackNormalStdDevDegrees)
+    }
+
+    private func formattedDualMarkerDualFallbackNormalDifference(
+        _ state: DualArucoMarkerDebugState
+    ) -> String {
+        guard let value = state.finalRefinementDualFallbackNormalDifferenceDegrees,
+              value.isFinite
+        else {
+            return "-"
+        }
+
+        let warning = value > viewModel.scanMaximumFinalNormalOutlierDegrees
+            ? " fallback alterando inclinacao"
+            : ""
+        return String(format: "%.1f deg%@", value, warning)
+    }
+
+    private func formattedDualMarkerAverageMotionScore(
+        _ state: DualArucoMarkerDebugState
+    ) -> String {
+        guard let score = state.finalRefinementAverageMotionStabilityScore,
+              score.isFinite
+        else {
+            return "-"
+        }
+
+        return String(format: "%.0f%%", score * 100.0)
+    }
+
     private func formattedDualMarkerFinalDominantMode(_ state: DualArucoMarkerDebugState) -> String {
         state.finalRefinementDominantPoseSource?.debugTitle ?? "-"
     }
@@ -1864,6 +2035,12 @@ struct ScannerView: View {
                 metricRow(title: "dualAngularReady", value: formattedBool(viewModel.scanDualAngularCoverageReady))
                 metricRow(title: "precisionModeV2", value: formattedBool(viewModel.precisionModeV2))
                 metricRow(title: "staticPoseMode", value: formattedBool(viewModel.staticPoseStabilityMode))
+                metricRow(title: "IMU angular", value: formattedMotionAngularVelocity)
+                metricRow(title: "IMU accel", value: formattedMotionAcceleration)
+                metricRow(title: "IMU stability", value: formattedMotionStability)
+                metricRow(title: "Frames motion pen.", value: "\(viewModel.scanMotionPenalizedFrameCount)")
+                metricRow(title: "Obs motion desc.", value: "\(viewModel.scanMotionDiscardedObservationCount)")
+                metricRow(title: "Aviso IMU", value: formattedMotionWarning)
                 metricRow(title: "Plane avg error", value: formattedPlanarAverageError)
                 metricRow(title: "Plane max error", value: formattedPlanarMaximumError)
                 metricRow(title: "Plane markers", value: formattedPlanarMarkerDistances)
@@ -1975,6 +2152,23 @@ struct ScannerView: View {
                 }
 
                 Toggle("Modo precisao v2", isOn: precisionModeV2Binding)
+
+                Stepper(
+                    value: scanMaximumFinalNormalOutlierBinding,
+                    in: viewModel.scanMaximumFinalNormalOutlierDegreesRange,
+                    step: viewModel.scanMaximumFinalNormalOutlierDegreesStep
+                ) {
+                    HStack(alignment: .center) {
+                        Text("Outlier normal final")
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        Text(formattedDegreesValue(viewModel.scanMaximumFinalNormalOutlierDegrees))
+                            .monospacedDigit()
+                    }
+                }
+
                 Toggle("Static Pose Stability Test", isOn: staticPoseStabilityModeBinding)
 
                 Button {

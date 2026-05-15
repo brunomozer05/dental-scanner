@@ -21,6 +21,7 @@ private enum OpenCV {
         .sdk(name: "AVFoundation", type: .framework, status: .required),
         .sdk(name: "CoreGraphics", type: .framework, status: .required),
         .sdk(name: "CoreMedia", type: .framework, status: .required),
+        .sdk(name: "CoreMotion", type: .framework, status: .required),
         .sdk(name: "CoreVideo", type: .framework, status: .required),
         .sdk(name: "UIKit", type: .framework, status: .required),
         .sdk(name: "c++", type: .library, status: .required)

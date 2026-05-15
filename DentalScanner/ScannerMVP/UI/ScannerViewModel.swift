@@ -31,6 +31,7 @@ final class ScannerViewModel: ObservableObject {
         static let unstablePositionStdDevMm: Double = 0.35
         static let unstablePositionPeakToPeakMm: Double = 1.0
         static let unstableRotationStdDevDegrees: Double = 1.5
+        static let unstableNormalStdDevDegrees: Double = 1.0
         static let unstableDistancePeakToPeakMm: Double = 1.0
         static let highEdgeFrameRatio: Double = 0.35
         static let highBottomSmallRatio: Double = 0.30
@@ -131,6 +132,9 @@ final class ScannerViewModel: ObservableObject {
         static let minimumDualTagFramesPerMarkerRange: ClosedRange<Int> = 0...30
         static let defaultMinimumDualAngularCoveragePercent: Double = 25.0
         static let minimumDualAngularCoveragePercentRange: ClosedRange<Double> = 0.0...80.0
+        static let defaultMaximumFinalNormalOutlierDegrees: Double = 3.0
+        static let maximumFinalNormalOutlierDegreesRange: ClosedRange<Double> = 1.0...10.0
+        static let maximumFinalNormalOutlierDegreesStep: Double = 0.5
     }
 
     enum CameraState: Equatable {
@@ -188,6 +192,8 @@ final class ScannerViewModel: ObservableObject {
         let positionPeakToPeakMm: Double?
         let rotationStdDevDegrees: Double?
         let rotationPeakToPeakDegrees: Double?
+        let normalStdDevDegrees: Double?
+        let normalPeakToPeakDegrees: Double?
         let reprojectionMean: Double?
         let reprojectionStdDev: Double?
         let dualTagRatio: Double
@@ -371,6 +377,8 @@ final class ScannerViewModel: ObservableObject {
         ScanConfiguration.defaultMinimumDualAngularCoveragePercent
     @Published private(set) var precisionModeV2: Bool = true
     @Published private(set) var preferDualTagForFinalExport: Bool = true
+    @Published private(set) var scanMaximumFinalNormalOutlierDegrees: Double =
+        ScanConfiguration.defaultMaximumFinalNormalOutlierDegrees
     @Published private(set) var scanPlanarAverageErrorMm: Double?
     @Published private(set) var scanPlanarMaximumErrorMm: Double?
     @Published private(set) var scanMarkerPlanarDistancesMm: [Int: Double] = [:]
@@ -378,6 +386,9 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var scanFinalConfidenceSummary: String = "-"
     @Published private(set) var scanFinalWorstMarkerSummary: String = "-"
     @Published private(set) var scanFinalMainIssueSummary: String = "-"
+    @Published private(set) var currentMotionFrameQuality: MotionFrameQuality = .neutral
+    @Published private(set) var scanMotionPenalizedFrameCount: Int = 0
+    @Published private(set) var scanMotionDiscardedObservationCount: Int = 0
     @Published private(set) var staticPoseStabilityMode: Bool = false
     @Published private(set) var staticPoseStabilityWindowSeconds: Double =
         StaticPoseStabilityConfiguration.windowSeconds
@@ -415,6 +426,7 @@ final class ScannerViewModel: ObservableObject {
     private let poseEstimator: PoseEstimator
     private let multiFramePoseAccumulator: MultiFramePoseAccumulator
     private let finalPoseRefiner: FinalPoseRefiner
+    private let motionFrameQualityService: MotionFrameQualityService
     private let poseSmoother = PoseSmoother()
     private let scanReadinessConfiguration = ScanReadinessConfiguration.default
     private let stlExporter: STLExporter
@@ -501,6 +513,14 @@ final class ScannerViewModel: ObservableObject {
         ScanConfiguration.minimumDualAngularCoveragePercentRange
     }
 
+    var scanMaximumFinalNormalOutlierDegreesRange: ClosedRange<Double> {
+        ScanConfiguration.maximumFinalNormalOutlierDegreesRange
+    }
+
+    var scanMaximumFinalNormalOutlierDegreesStep: Double {
+        ScanConfiguration.maximumFinalNormalOutlierDegreesStep
+    }
+
     var dualMarkerRecentDetectionWindowFrameCount: Int {
         DualMarkerDebugConfiguration.recentDetectionWindowFrameCount
     }
@@ -540,6 +560,7 @@ final class ScannerViewModel: ObservableObject {
         poseEstimator: PoseEstimator = PoseEstimator(),
         multiFramePoseAccumulator: MultiFramePoseAccumulator = MultiFramePoseAccumulator(),
         finalPoseRefiner: FinalPoseRefiner = FinalPoseRefiner(),
+        motionFrameQualityService: MotionFrameQualityService = MotionFrameQualityService(),
         stlExporter: STLExporter = STLExporter(),
         scanStorageManager: ScanStorageManager = ScanStorageManager()
     ) {
@@ -549,6 +570,7 @@ final class ScannerViewModel: ObservableObject {
         self.poseEstimator = poseEstimator
         self.multiFramePoseAccumulator = multiFramePoseAccumulator
         self.finalPoseRefiner = finalPoseRefiner
+        self.motionFrameQualityService = motionFrameQualityService
         self.stlExporter = stlExporter
         self.scanStorageManager = scanStorageManager
         self.isOpenCVAvailable = arUcoDetector.isOpenCVAvailable
@@ -610,6 +632,7 @@ final class ScannerViewModel: ObservableObject {
         }
 
         cameraService.startRunning()
+        motionFrameQualityService.start()
         await MainActor.run {
             cameraState = .running
         }
@@ -619,6 +642,8 @@ final class ScannerViewModel: ObservableObject {
     func stopCamera() {
         shouldRunCamera = false
         cameraService.stopRunning()
+        motionFrameQualityService.stop()
+        currentMotionFrameQuality = .neutral
         turnOffTorchForInactiveCamera()
         guard cameraState != .failed else { return }
         cameraState = .ready
@@ -843,6 +868,31 @@ final class ScannerViewModel: ObservableObject {
     }
 
     @MainActor
+    func setScanMaximumFinalNormalOutlierDegrees(_ maximumDegrees: Double) {
+        guard maximumDegrees.isFinite else {
+            return
+        }
+
+        scanMaximumFinalNormalOutlierDegrees = min(
+            max(
+                maximumDegrees,
+                ScanConfiguration.maximumFinalNormalOutlierDegreesRange.lowerBound
+            ),
+            ScanConfiguration.maximumFinalNormalOutlierDegreesRange.upperBound
+        )
+        didApplyFinalPoseRefinement = false
+        stlExportURL = nil
+        stlExportedImplantCount = 0
+        stlExportErrorMessage = nil
+        finalObservationDiagnosticsByMarkerId = finalPoseRefiner.selectionDiagnostics(
+            observations: finalPoseObservations,
+            preferDualTagForFinalExport: preferDualTagForFinalExport,
+            maximumFinalNormalOutlierDegrees: scanMaximumFinalNormalOutlierDegrees
+        )
+        updateExportDiagnostics()
+    }
+
+    @MainActor
     func setPreferDualTagForFinalExport(_ preferDualTagForFinalExport: Bool) {
         setPrecisionModeV2(preferDualTagForFinalExport)
     }
@@ -898,7 +948,8 @@ final class ScannerViewModel: ObservableObject {
         stlExportErrorMessage = nil
         finalObservationDiagnosticsByMarkerId = finalPoseRefiner.selectionDiagnostics(
             observations: finalPoseObservations,
-            preferDualTagForFinalExport: precisionModeV2
+            preferDualTagForFinalExport: precisionModeV2,
+            maximumFinalNormalOutlierDegrees: scanMaximumFinalNormalOutlierDegrees
         )
         updateExportDiagnostics()
     }
@@ -1075,6 +1126,7 @@ final class ScannerViewModel: ObservableObject {
 
     private func handleFrame(_ frame: CameraFrame) {
         let metrics = buildFrameMetrics(from: frame)
+        let motionQuality = motionFrameQualityService.quality(near: metrics.lastFrameTimestamp)
         let rawArucoMetrics = detectArucoMarkers(in: frame)
         let validatedDetections = arUcoConsistencyFilter.filterDetections(rawArucoMetrics.detections)
         let arucoMetrics = arucoMetrics(
@@ -1150,7 +1202,8 @@ final class ScannerViewModel: ObservableObject {
                 in: frame,
                 markerSizeMillimeters: markerSizeMillimeters,
                 markerProfile: activeMarkerProfile,
-                dualMarkerDefinitions: dualMarkerDefinitions
+                dualMarkerDefinitions: dualMarkerDefinitions,
+                motionQuality: motionQuality
             )
             : []
         let staticPoseObservations = shouldCollectStaticPoseFrame
@@ -1160,7 +1213,8 @@ final class ScannerViewModel: ObservableObject {
                 in: frame,
                 markerSizeMillimeters: markerSizeMillimeters,
                 markerProfile: activeMarkerProfile,
-                dualMarkerDefinitions: dualMarkerDefinitions
+                dualMarkerDefinitions: dualMarkerDefinitions,
+                motionQuality: motionQuality
             )
             : []
 
@@ -1169,6 +1223,7 @@ final class ScannerViewModel: ObservableObject {
             self.totalFramesReceived = metrics.totalFramesReceived
             self.estimatedFPS = metrics.estimatedFPS
             self.lastFrameTimestamp = metrics.lastFrameTimestamp
+            self.currentMotionFrameQuality = motionQuality
             self.frameResolution = metrics.frameResolution
             self.isIntrinsicMatrixAvailable = metrics.isIntrinsicMatrixAvailable
             self.isOpenCVAvailable = arucoMetrics.isOpenCVAvailable
@@ -1275,6 +1330,8 @@ final class ScannerViewModel: ObservableObject {
         scanFinalConfidenceSummary = "-"
         scanFinalWorstMarkerSummary = "-"
         scanFinalMainIssueSummary = "-"
+        scanMotionPenalizedFrameCount = 0
+        scanMotionDiscardedObservationCount = 0
         scanTagCoverages = [:]
         scanReprojectionErrors = []
         scanPoseHistoryByMarkerId = [:]
@@ -1362,12 +1419,18 @@ final class ScannerViewModel: ObservableObject {
         let goodFinalPoseObservations = finalPoseObservations.filter {
             goodMarkerIds.contains($0.markerId)
         }
+        if goodFinalPoseObservations.contains(where: {
+            ($0.motionQuality?.stabilityScore ?? 1.0) < 0.999
+        }) {
+            scanMotionPenalizedFrameCount += 1
+        }
         scanValidFrameCount += 1
         self.finalPoseObservations.append(contentsOf: goodFinalPoseObservations)
         recordDualArucoV2RejectionReasons(dualTagRejectionReasons)
         finalObservationDiagnosticsByMarkerId = finalPoseRefiner.selectionDiagnostics(
             observations: self.finalPoseObservations,
-            preferDualTagForFinalExport: preferDualTagForFinalExport
+            preferDualTagForFinalExport: preferDualTagForFinalExport,
+            maximumFinalNormalOutlierDegrees: scanMaximumFinalNormalOutlierDegrees
         )
         scanReprojectionErrors.append(goodFrameReprojectionError)
         trimRecentValues(&scanReprojectionErrors, to: scanTargetValidFrameCount)
@@ -1498,13 +1561,15 @@ final class ScannerViewModel: ObservableObject {
 
         finalObservationDiagnosticsByMarkerId = finalPoseRefiner.selectionDiagnostics(
             observations: finalPoseObservations,
-            preferDualTagForFinalExport: preferDualTagForFinalExport
+            preferDualTagForFinalExport: preferDualTagForFinalExport,
+            maximumFinalNormalOutlierDegrees: scanMaximumFinalNormalOutlierDegrees
         )
         let currentPoseResults = consolidatedPoseResults()
         let refinedPoseResults = finalPoseRefiner.refine(
             observations: finalPoseObservations,
             currentPoseResults: currentPoseResults,
-            preferDualTagForFinalExport: preferDualTagForFinalExport
+            preferDualTagForFinalExport: preferDualTagForFinalExport,
+            maximumFinalNormalOutlierDegrees: scanMaximumFinalNormalOutlierDegrees
         )
         guard !refinedPoseResults.isEmpty,
               refinedPoseResults != currentPoseResults
@@ -2178,6 +2243,8 @@ final class ScannerViewModel: ObservableObject {
                 positionPeakToPeakMm: staticPosePositionPeakToPeakMm(in: markerSamples),
                 rotationStdDevDegrees: staticPoseRotationStdDevDegrees(in: markerSamples),
                 rotationPeakToPeakDegrees: staticPoseRotationPeakToPeakDegrees(in: markerSamples),
+                normalStdDevDegrees: staticPoseNormalStdDevDegrees(in: markerSamples),
+                normalPeakToPeakDegrees: staticPoseNormalPeakToPeakDegrees(in: markerSamples),
                 reprojectionMean: average(reprojectionErrors),
                 reprojectionStdDev: standardDeviation(reprojectionErrors),
                 dualTagRatio: ratio(sourceCounts.dualTag, sampleCount),
@@ -2270,6 +2337,7 @@ final class ScannerViewModel: ObservableObject {
         let maximumPositionStdDev = populatedMarkers.compactMap(\.positionStdDevMm).max() ?? 0
         let maximumPositionPeakToPeak = populatedMarkers.compactMap(\.positionPeakToPeakMm).max() ?? 0
         let maximumRotationStdDev = populatedMarkers.compactMap(\.rotationStdDevDegrees).max() ?? 0
+        let maximumNormalStdDev = populatedMarkers.compactMap(\.normalStdDevDegrees).max() ?? 0
         let maximumPairPeakToPeak = pairDiagnostics.compactMap(\.peakToPeakMm).max() ?? 0
 
         if maximumEdgeRatio >= StaticPoseStabilityConfiguration.highEdgeFrameRatio {
@@ -2290,12 +2358,18 @@ final class ScannerViewModel: ObservableObject {
             maximumPositionPeakToPeak >=
                 StaticPoseStabilityConfiguration.unstablePositionPeakToPeakMm ||
             maximumRotationStdDev >=
-                StaticPoseStabilityConfiguration.unstableRotationStdDevDegrees
+                StaticPoseStabilityConfiguration.unstableRotationStdDevDegrees ||
+            maximumNormalStdDev >=
+                StaticPoseStabilityConfiguration.unstableNormalStdDevDegrees
         let markerDistancesUnstable = maximumPairPeakToPeak >=
             StaticPoseStabilityConfiguration.unstableDistancePeakToPeakMm
 
         if markerPoseUnstable && markerDistancesUnstable {
             return "Instabilidade vem da deteccao: pose varia mesmo com camera parada"
+        }
+
+        if maximumNormalStdDev >= StaticPoseStabilityConfiguration.unstableNormalStdDevDegrees {
+            return "Instabilidade vem da inclinacao: normal varia com camera parada"
         }
 
         if markerPoseUnstable {
@@ -2408,6 +2482,43 @@ final class ScannerViewModel: ObservableObject {
                 let distance = rotationAngularDistanceDegrees(
                     samples[firstIndex].rotationMatrix,
                     samples[secondIndex].rotationMatrix
+                )
+                if distance.isFinite {
+                    maximumDistance = max(maximumDistance, distance)
+                }
+            }
+        }
+
+        return maximumDistance
+    }
+
+    private func staticPoseNormalStdDevDegrees(in samples: [StaticPoseSample]) -> Double? {
+        let normals = samples.compactMap { markerNormal(for: $0.rotationMatrix) }
+        guard normals.count >= 2,
+              let averageNormal = averageNormal(normals)
+        else {
+            return nil
+        }
+
+        let distances = normals.map {
+            normalAngularDistanceDegrees($0, averageNormal)
+        }
+
+        return standardDeviation(distances)
+    }
+
+    private func staticPoseNormalPeakToPeakDegrees(in samples: [StaticPoseSample]) -> Double? {
+        let normals = samples.compactMap { markerNormal(for: $0.rotationMatrix) }
+        guard normals.count >= 2 else {
+            return nil
+        }
+
+        var maximumDistance = 0.0
+        for firstIndex in normals.indices.dropLast() {
+            for secondIndex in normals.indices where secondIndex > firstIndex {
+                let distance = normalAngularDistanceDegrees(
+                    normals[firstIndex],
+                    normals[secondIndex]
                 )
                 if distance.isFinite {
                     maximumDistance = max(maximumDistance, distance)
@@ -2806,6 +2917,64 @@ final class ScannerViewModel: ObservableObject {
         let cosineTheta = min(max((trace - 1.0) / 2.0, -1.0), 1.0)
         let radians = acos(cosineTheta)
 
+        guard radians.isFinite else {
+            return .infinity
+        }
+
+        return radians * 180.0 / Double.pi
+    }
+
+    private func markerNormal(for rotationMatrix: simd_double3x3) -> SIMD3<Double>? {
+        guard PoseMath.isFinite(rotationMatrix) else {
+            return nil
+        }
+
+        let normal = rotationMatrix * SIMD3<Double>(0.0, 0.0, 1.0)
+        let length = simd_length(normal)
+        guard length.isFinite, length > 1e-9 else {
+            return nil
+        }
+
+        let normalized = normal / length
+        return PoseMath.isFinite(normalized) ? normalized : nil
+    }
+
+    private func averageNormal(_ normals: [SIMD3<Double>]) -> SIMD3<Double>? {
+        guard let firstNormal = normals.first else {
+            return nil
+        }
+
+        var sum = SIMD3<Double>(repeating: 0.0)
+        for normal in normals {
+            let alignedNormal = simd_dot(normal, firstNormal) < 0 ? -normal : normal
+            sum += alignedNormal
+        }
+
+        let length = simd_length(sum)
+        guard length.isFinite, length > 1e-9 else {
+            return nil
+        }
+
+        let normal = sum / length
+        return PoseMath.isFinite(normal) ? normal : nil
+    }
+
+    private func normalAngularDistanceDegrees(
+        _ lhs: SIMD3<Double>,
+        _ rhs: SIMD3<Double>
+    ) -> Double {
+        guard PoseMath.isFinite(lhs), PoseMath.isFinite(rhs) else {
+            return .infinity
+        }
+
+        let lhsLength = simd_length(lhs)
+        let rhsLength = simd_length(rhs)
+        guard lhsLength.isFinite, rhsLength.isFinite, lhsLength > 1e-9, rhsLength > 1e-9 else {
+            return .infinity
+        }
+
+        let cosineTheta = min(max(simd_dot(lhs / lhsLength, rhs / rhsLength), -1.0), 1.0)
+        let radians = acos(cosineTheta)
         guard radians.isFinite else {
             return .infinity
         }
@@ -3690,6 +3859,22 @@ final class ScannerViewModel: ObservableObject {
                     finalDiagnostics?.finalPositionVariationMm,
                 finalRefinementRotationVariationDegrees:
                     finalDiagnostics?.finalRotationVariationDegrees,
+                finalRefinementAverageNormal:
+                    finalDiagnostics?.finalAverageNormal,
+                finalRefinementNormalStdDevDegrees:
+                    finalDiagnostics?.finalNormalStdDevDegrees,
+                finalRefinementNormalPeakToPeakDegrees:
+                    finalDiagnostics?.finalNormalPeakToPeakDegrees,
+                finalRefinementWorstNormalDifferenceDegrees:
+                    finalDiagnostics?.finalWorstNormalDifferenceDegrees,
+                finalRefinementDualTagNormalStdDevDegrees:
+                    finalDiagnostics?.finalDualTagNormalStdDevDegrees,
+                finalRefinementFallbackNormalStdDevDegrees:
+                    finalDiagnostics?.finalFallbackNormalStdDevDegrees,
+                finalRefinementDualFallbackNormalDifferenceDegrees:
+                    finalDiagnostics?.finalDualFallbackNormalDifferenceDegrees,
+                finalRefinementAverageMotionStabilityScore:
+                    finalDiagnostics?.finalAverageMotionStabilityScore,
                 finalRefinementEdgeDiscardedObservationCount:
                     finalDiagnostics?.edgeDiscardedObservationCount ?? 0,
                 finalRefinementSmallBottomDiscardedObservationCount:
@@ -3698,6 +3883,12 @@ final class ScannerViewModel: ObservableObject {
                     finalDiagnostics?.reprojectionDiscardedObservationCount ?? 0,
                 finalRefinementLowPriorityFallbackDiscardedObservationCount:
                     finalDiagnostics?.lowPriorityFallbackDiscardedObservationCount ?? 0,
+                finalRefinementNormalOutlierDiscardedObservationCount:
+                    finalDiagnostics?.normalOutlierDiscardedObservationCount ?? 0,
+                finalRefinementMotionDiscardedObservationCount:
+                    finalDiagnostics?.motionDiscardedObservationCount ?? 0,
+                finalRefinementMotionPenalizedObservationCount:
+                    finalDiagnostics?.motionPenalizedObservationCount ?? 0,
                 finalRefinementDominantPoseSource: finalDiagnostics?.finalDominantPoseSource,
                 finalRefinementConfidence: finalRefinementConfidence(
                     finalDiagnostics: finalDiagnostics,
@@ -4001,7 +4192,8 @@ final class ScannerViewModel: ObservableObject {
         in frame: CameraFrame,
         markerSizeMillimeters: Double,
         markerProfile: MarkerProfile,
-        dualMarkerDefinitions: [DualArucoMarkerDefinition]
+        dualMarkerDefinitions: [DualArucoMarkerDefinition],
+        motionQuality: MotionFrameQuality
     ) -> [FinalPoseObservation] {
         guard let cameraMatrix = frame.metadata.intrinsicMatrix else {
             return []
@@ -4049,7 +4241,8 @@ final class ScannerViewModel: ObservableObject {
                     markerAreaPixels: poseResult.markerAreaPixels,
                     topTagAreaPixels: detection.markerAreaPixels,
                     bottomTagAreaPixels: nil,
-                    distanceMm: poseResult.distanceMm
+                    distanceMm: poseResult.distanceMm,
+                    motionQuality: motionQuality
                 )
             }
         case .dualArucoV2:
@@ -4089,7 +4282,8 @@ final class ScannerViewModel: ObservableObject {
                     markerAreaPixels: poseResult.markerAreaPixels,
                     topTagAreaPixels: observationPoints.topTagAreaPixels,
                     bottomTagAreaPixels: observationPoints.bottomTagAreaPixels,
-                    distanceMm: poseResult.distanceMm
+                    distanceMm: poseResult.distanceMm,
+                    motionQuality: motionQuality
                 )
             }
         }
@@ -4244,11 +4438,15 @@ final class ScannerViewModel: ObservableObject {
             scanFinalConfidenceSummary = "-"
             scanFinalWorstMarkerSummary = "-"
             scanFinalMainIssueSummary = "-"
+            scanMotionDiscardedObservationCount = 0
             return
         }
 
         let diagnostics = finalObservationDiagnosticsByMarkerId.values.sorted {
             $0.markerId < $1.markerId
+        }
+        scanMotionDiscardedObservationCount = diagnostics.reduce(0) {
+            $0 + $1.motionDiscardedObservationCount
         }
         let confidence = diagnostics.reduce(FinalPoseMarkerConfidence.high) { partialResult, item in
             if confidenceRank(item.finalConfidence) > confidenceRank(partialResult) {
@@ -4292,6 +4490,8 @@ final class ScannerViewModel: ObservableObject {
             diagnostics.smallBottomDiscardedObservationCount +
             diagnostics.reprojectionDiscardedObservationCount +
             diagnostics.lowPriorityFallbackDiscardedObservationCount +
+            diagnostics.normalOutlierDiscardedObservationCount +
+            diagnostics.motionDiscardedObservationCount +
             edgeFrameCount
     }
 
@@ -4323,6 +4523,16 @@ final class ScannerViewModel: ObservableObject {
 
         if diagnostics.outlierRemovedCount > 0 {
             return "outliers"
+        }
+
+        if diagnostics.normalOutlierDiscardedObservationCount > 0 ||
+            (diagnostics.finalNormalStdDevDegrees ?? 0) > scanMaximumFinalNormalOutlierDegrees {
+            return "normal"
+        }
+
+        if diagnostics.motionDiscardedObservationCount > 0 ||
+            (diagnostics.finalAverageMotionStabilityScore ?? 1.0) < 0.45 {
+            return "motion"
         }
 
         if diagnostics.lowPriorityFallbackDiscardedObservationCount > 0 {

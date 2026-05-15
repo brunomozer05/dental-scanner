@@ -16,6 +16,7 @@ struct FinalPoseObservation {
     let topTagAreaPixels: Double?
     let bottomTagAreaPixels: Double?
     let distanceMm: Double
+    let motionQuality: MotionFrameQuality?
 
     static func markerObjectPoints(markerSizeMillimeters: Double) -> [SIMD3<Double>] {
         let halfSize = markerSizeMillimeters / 2.0
@@ -39,9 +40,13 @@ struct PoseObservationQuality: Equatable {
     let normalizedImageX: Double?
     let normalizedImageY: Double?
     let edgeMargin: Double?
+    let markerNormal: SIMD3<Double>?
+    let motionStabilityScore: Double
+    let motionRotationStabilityScore: Double
     let wasNearImageEdge: Bool
     let wasHardRejectedByEdge: Bool
     let wasRejectedByBottomArea: Bool
+    let wasRejectedByMotion: Bool
     let rejectionReason: String?
 }
 
@@ -65,12 +70,23 @@ struct FinalPoseObservationSelectionDiagnostics: Equatable {
     let averageImageEdgeMargin: Double?
     let finalPositionVariationMm: Double?
     let finalRotationVariationDegrees: Double?
+    let finalAverageNormal: SIMD3<Double>?
+    let finalNormalStdDevDegrees: Double?
+    let finalNormalPeakToPeakDegrees: Double?
+    let finalWorstNormalDifferenceDegrees: Double?
+    let finalDualTagNormalStdDevDegrees: Double?
+    let finalFallbackNormalStdDevDegrees: Double?
+    let finalDualFallbackNormalDifferenceDegrees: Double?
+    let finalAverageMotionStabilityScore: Double?
     let finalConfidence: FinalPoseMarkerConfidence
     let finalConfidenceReason: String?
     let edgeDiscardedObservationCount: Int
     let smallBottomDiscardedObservationCount: Int
     let reprojectionDiscardedObservationCount: Int
     let lowPriorityFallbackDiscardedObservationCount: Int
+    let normalOutlierDiscardedObservationCount: Int
+    let motionDiscardedObservationCount: Int
+    let motionPenalizedObservationCount: Int
     let finalDominantPoseSource: MarkerPoseSource?
     let dominantDiscardReason: String?
 }
@@ -94,6 +110,8 @@ final class FinalPoseRefiner {
         let maximumDistanceMm: Double
         let maximumFinalPositionOutlierMm: Double
         let maximumFinalRotationOutlierDegrees: Double
+        let maximumFinalNormalOutlierDegrees: Double
+        let minimumMotionStabilityScoreForFinalUse: Double
         let minimumFinalObservationsAfterOutlierRejection: Int
         let minimumRobustReferenceObservations: Int
 
@@ -115,6 +133,8 @@ final class FinalPoseRefiner {
             maximumDistanceMm: 250.0,
             maximumFinalPositionOutlierMm: 1.0,
             maximumFinalRotationOutlierDegrees: 5.0,
+            maximumFinalNormalOutlierDegrees: 3.0,
+            minimumMotionStabilityScoreForFinalUse: 0.20,
             minimumFinalObservationsAfterOutlierRejection: 5,
             minimumRobustReferenceObservations: 3
         )
@@ -146,7 +166,8 @@ final class FinalPoseRefiner {
     func refine(
         observations: [FinalPoseObservation],
         currentPoseResults: [PoseResult],
-        preferDualTagForFinalExport: Bool = true
+        preferDualTagForFinalExport: Bool = true,
+        maximumFinalNormalOutlierDegrees: Double? = nil
     ) -> [PoseResult] {
         let currentPoseResults = currentPoseResults.sorted { $0.markerId < $1.markerId }
         guard let anchorMarkerId = currentPoseResults.first?.markerId else {
@@ -159,7 +180,8 @@ final class FinalPoseRefiner {
         let refinedCameraPosesByMarkerId = refinedCameraPoses(
             observations: observations,
             currentPosesByMarkerId: currentPosesByMarkerId,
-            preferDualTagForFinalExport: preferDualTagForFinalExport
+            preferDualTagForFinalExport: preferDualTagForFinalExport,
+            maximumFinalNormalOutlierDegrees: maximumFinalNormalOutlierDegrees
         )
 
         guard let refinedAnchorPose = refinedCameraPosesByMarkerId[anchorMarkerId] else {
@@ -183,7 +205,8 @@ final class FinalPoseRefiner {
 
     func selectionDiagnostics(
         observations: [FinalPoseObservation],
-        preferDualTagForFinalExport: Bool = true
+        preferDualTagForFinalExport: Bool = true,
+        maximumFinalNormalOutlierDegrees: Double? = nil
     ) -> [Int: FinalPoseObservationSelectionDiagnostics] {
         let observationsByMarkerId = Dictionary(grouping: observations, by: \.markerId)
 
@@ -191,7 +214,8 @@ final class FinalPoseRefiner {
             partialResult[item.key] = selectedObservationSelection(
                 markerId: item.key,
                 observations: item.value,
-                preferDualTagForFinalExport: preferDualTagForFinalExport
+                preferDualTagForFinalExport: preferDualTagForFinalExport,
+                maximumFinalNormalOutlierDegrees: maximumFinalNormalOutlierDegrees
             ).diagnostics
         }
     }
@@ -199,7 +223,8 @@ final class FinalPoseRefiner {
     private func refinedCameraPoses(
         observations: [FinalPoseObservation],
         currentPosesByMarkerId: [Int: PoseResult],
-        preferDualTagForFinalExport: Bool
+        preferDualTagForFinalExport: Bool,
+        maximumFinalNormalOutlierDegrees: Double?
     ) -> [Int: PoseResult] {
         let observationsByMarkerId = Dictionary(grouping: observations, by: \.markerId)
         var refinedPosesByMarkerId: [Int: PoseResult] = [:]
@@ -210,7 +235,8 @@ final class FinalPoseRefiner {
                     markerId: markerId,
                     observations: markerObservations,
                     currentPose: currentPose,
-                    preferDualTagForFinalExport: preferDualTagForFinalExport
+                    preferDualTagForFinalExport: preferDualTagForFinalExport,
+                    maximumFinalNormalOutlierDegrees: maximumFinalNormalOutlierDegrees
                   )
             else {
                 continue
@@ -226,12 +252,14 @@ final class FinalPoseRefiner {
         markerId: Int,
         observations: [FinalPoseObservation],
         currentPose: PoseResult,
-        preferDualTagForFinalExport: Bool
+        preferDualTagForFinalExport: Bool,
+        maximumFinalNormalOutlierDegrees: Double?
     ) -> PoseResult? {
         let selection = selectedObservationSelection(
             markerId: markerId,
             observations: observations,
-            preferDualTagForFinalExport: preferDualTagForFinalExport
+            preferDualTagForFinalExport: preferDualTagForFinalExport,
+            maximumFinalNormalOutlierDegrees: maximumFinalNormalOutlierDegrees
         )
         let preferredObservations = selection.observations
 
@@ -277,9 +305,17 @@ final class FinalPoseRefiner {
         )
         guard bridgeResult.reprojectionError.isFinite,
               bridgeResult.reprojectionError <= acceptedReprojectionError,
-              let rotationVector = Self.vector3(from: bridgeResult.rotationVector),
               let rotationMatrix = Self.matrix3x3(from: bridgeResult.rotationMatrix),
               let translationVector = Self.vector3(from: bridgeResult.translationVector)
+        else {
+            return nil
+        }
+        let finalRotationMatrix = weightedRotationMatrix(
+            from: compatibleObservations,
+            fallbackRotationMatrix: rotationMatrix
+        )
+        guard let finalRotationVector = PoseMath.rotationVector(from: finalRotationMatrix),
+              PoseMath.isFinite(finalRotationVector)
         else {
             return nil
         }
@@ -288,8 +324,8 @@ final class FinalPoseRefiner {
             markerId: markerId,
             markerProfile: currentPose.markerProfile,
             poseSource: currentPose.poseSource,
-            rotationVector: rotationVector,
-            rotationMatrix: rotationMatrix,
+            rotationVector: finalRotationVector,
+            rotationMatrix: finalRotationMatrix,
             translationVector: translationVector,
             distanceMm: bridgeResult.distanceMm,
             reprojectionError: bridgeResult.reprojectionError,
@@ -347,7 +383,8 @@ final class FinalPoseRefiner {
     private func selectedObservationSelection(
         markerId: Int,
         observations: [FinalPoseObservation],
-        preferDualTagForFinalExport: Bool
+        preferDualTagForFinalExport: Bool,
+        maximumFinalNormalOutlierDegrees: Double?
     ) -> ObservationSelection {
         if observations.allSatisfy({ observation in
             if case .singleArucoV1 = observation.poseSource {
@@ -385,11 +422,18 @@ final class FinalPoseRefiner {
                 shouldReject: { $0.wasHardRejectedByEdge },
                 discardReasonCounts: &discardReasonCounts
             )
-            validIndexedObservations = indexedObservationsAfterConditionalRejection(
+            let bottomFilteredIndexedObservations = indexedObservationsAfterConditionalRejection(
                 from: edgeFilteredIndexedObservations,
                 qualitiesByOffset: qualitiesByOffset,
                 reason: "bottom pequena",
                 shouldReject: { $0.wasRejectedByBottomArea },
+                discardReasonCounts: &discardReasonCounts
+            )
+            validIndexedObservations = indexedObservationsAfterConditionalRejection(
+                from: bottomFilteredIndexedObservations,
+                qualitiesByOffset: qualitiesByOffset,
+                reason: "movimento alto",
+                shouldReject: { $0.wasRejectedByMotion },
                 discardReasonCounts: &discardReasonCounts
             )
         } else {
@@ -416,7 +460,8 @@ final class FinalPoseRefiner {
         }
 
         let outlierResult = selectedIndexedObservationsAfterOutlierRejection(
-            from: selectedIndexedObservations
+            from: selectedIndexedObservations,
+            maximumFinalNormalOutlierDegrees: maximumFinalNormalOutlierDegrees
         )
         for (reason, count) in outlierResult.discardReasonCounts {
             discardReasonCounts[reason, default: 0] += count
@@ -434,12 +479,22 @@ final class FinalPoseRefiner {
         let averageEdgeMargin = averageImageEdgeMargin(in: selectedQualities)
         let positionVariation = averagePositionVariationMm(in: selectedObservations)
         let rotationVariation = averageRotationVariationDegrees(in: selectedObservations)
+        let normalDiagnostics = normalDiagnostics(in: selectedObservations)
+        let motionPenalizedObservationCount = qualitiesByOffset.values.filter {
+            $0.motionStabilityScore.isFinite && $0.motionStabilityScore < 0.999
+        }.count
+        let normalOutlierThresholdDegrees = resolvedMaximumFinalNormalOutlierDegrees(
+            maximumFinalNormalOutlierDegrees
+        )
         let confidence = finalConfidence(
             selectedObservations: selectedObservations,
             observationsBeforeOutlierRejectionCount: selectedIndexedObservations.count,
             outlierRemovedCount: outlierResult.removedCount,
             averageReprojectionError: averageReprojectionError,
             averageImageEdgeMargin: averageEdgeMargin,
+            normalStdDevDegrees: normalDiagnostics.stdDevDegrees,
+            maximumFinalNormalOutlierDegrees: normalOutlierThresholdDegrees,
+            averageMotionStabilityScore: averageMotionStabilityScore(in: selectedQualities),
             wasOutlierFilterRelaxed: outlierResult.wasRelaxed
         )
 
@@ -459,6 +514,17 @@ final class FinalPoseRefiner {
                 averageImageEdgeMargin: averageEdgeMargin,
                 finalPositionVariationMm: positionVariation,
                 finalRotationVariationDegrees: rotationVariation,
+                finalAverageNormal: normalDiagnostics.averageNormal,
+                finalNormalStdDevDegrees: normalDiagnostics.stdDevDegrees,
+                finalNormalPeakToPeakDegrees: normalDiagnostics.peakToPeakDegrees,
+                finalWorstNormalDifferenceDegrees: normalDiagnostics.worstDifferenceDegrees,
+                finalDualTagNormalStdDevDegrees: normalDiagnostics.dualStdDevDegrees,
+                finalFallbackNormalStdDevDegrees: normalDiagnostics.fallbackStdDevDegrees,
+                finalDualFallbackNormalDifferenceDegrees:
+                    normalDiagnostics.dualFallbackDifferenceDegrees,
+                finalAverageMotionStabilityScore: averageMotionStabilityScore(
+                    in: selectedQualities
+                ),
                 finalConfidence: confidence.value,
                 finalConfidenceReason: confidence.reason,
                 edgeDiscardedObservationCount: discardReasonCounts["borda da imagem"] ?? 0,
@@ -467,6 +533,10 @@ final class FinalPoseRefiner {
                     discardReasonCounts["reprojection error alto"] ?? 0,
                 lowPriorityFallbackDiscardedObservationCount:
                     lowPriorityFallbackDiscardCount(in: discardReasonCounts),
+                normalOutlierDiscardedObservationCount:
+                    discardReasonCounts["outlier normal"] ?? 0,
+                motionDiscardedObservationCount: discardReasonCounts["movimento alto"] ?? 0,
+                motionPenalizedObservationCount: motionPenalizedObservationCount,
                 finalDominantPoseSource: dominantPoseSource(in: selectedObservations),
                 dominantDiscardReason: dominantReason(in: discardReasonCounts)
             )
@@ -484,6 +554,7 @@ final class FinalPoseRefiner {
         let discardedObservationCount = max(observations.count - selectedObservations.count, 0)
         let selectedQualities = selectedObservations.map { observationQuality(for: $0) }
         let averageImagePosition = averageImagePosition(in: selectedQualities)
+        let normalDiagnostics = normalDiagnostics(in: selectedObservations)
 
         return ObservationSelection(
             observations: selectedObservations,
@@ -501,12 +572,28 @@ final class FinalPoseRefiner {
                 averageImageEdgeMargin: averageImageEdgeMargin(in: selectedQualities),
                 finalPositionVariationMm: averagePositionVariationMm(in: selectedObservations),
                 finalRotationVariationDegrees: averageRotationVariationDegrees(in: selectedObservations),
+                finalAverageNormal: normalDiagnostics.averageNormal,
+                finalNormalStdDevDegrees: normalDiagnostics.stdDevDegrees,
+                finalNormalPeakToPeakDegrees: normalDiagnostics.peakToPeakDegrees,
+                finalWorstNormalDifferenceDegrees: normalDiagnostics.worstDifferenceDegrees,
+                finalDualTagNormalStdDevDegrees: normalDiagnostics.dualStdDevDegrees,
+                finalFallbackNormalStdDevDegrees: normalDiagnostics.fallbackStdDevDegrees,
+                finalDualFallbackNormalDifferenceDegrees:
+                    normalDiagnostics.dualFallbackDifferenceDegrees,
+                finalAverageMotionStabilityScore: averageMotionStabilityScore(
+                    in: selectedQualities
+                ),
                 finalConfidence: selectedObservations.isEmpty ? .low : .medium,
                 finalConfidenceReason: selectedObservations.isEmpty ? "sem observacoes finais" : nil,
                 edgeDiscardedObservationCount: 0,
                 smallBottomDiscardedObservationCount: 0,
                 reprojectionDiscardedObservationCount: discardedObservationCount,
                 lowPriorityFallbackDiscardedObservationCount: 0,
+                normalOutlierDiscardedObservationCount: 0,
+                motionDiscardedObservationCount: 0,
+                motionPenalizedObservationCount: selectedQualities.filter {
+                    $0.motionStabilityScore.isFinite && $0.motionStabilityScore < 0.999
+                }.count,
                 finalDominantPoseSource: dominantPoseSource(in: selectedObservations),
                 dominantDiscardReason: discardedObservationCount > 0
                     ? "reprojection error alto"
@@ -574,19 +661,20 @@ final class FinalPoseRefiner {
     }
 
     private func selectedIndexedObservationsAfterOutlierRejection(
-        from indexedObservations: [(offset: Int, element: FinalPoseObservation)]
+        from indexedObservations: [(offset: Int, element: FinalPoseObservation)],
+        maximumFinalNormalOutlierDegrees: Double?
     ) -> OutlierRejectionResult {
+        let normalOutlierThresholdDegrees = resolvedMaximumFinalNormalOutlierDegrees(
+            maximumFinalNormalOutlierDegrees
+        )
+        let robustReferenceObservations = robustReferenceIndexedObservations(from: indexedObservations)
         guard indexedObservations.count >= configuration.minimumFinalObservationsAfterOutlierRejection,
               configuration.maximumFinalPositionOutlierMm.isFinite,
               configuration.maximumFinalPositionOutlierMm > 0,
               configuration.maximumFinalRotationOutlierDegrees.isFinite,
               configuration.maximumFinalRotationOutlierDegrees > 0,
-              let referenceTranslation = medianTranslation(
-                from: robustReferenceIndexedObservations(from: indexedObservations)
-              ),
-              let referenceRotation = referenceRotationMatrix(
-                from: robustReferenceIndexedObservations(from: indexedObservations)
-              )
+              let referenceTranslation = medianTranslation(from: robustReferenceObservations),
+              let referenceRotation = referenceRotationMatrix(from: robustReferenceObservations)
         else {
             return OutlierRejectionResult(
                 indexedObservations: indexedObservations,
@@ -595,6 +683,7 @@ final class FinalPoseRefiner {
                 wasRelaxed: false
             )
         }
+        let referenceNormal = averageMarkerNormal(in: robustReferenceObservations.map(\.element))
 
         var keptObservations: [(offset: Int, element: FinalPoseObservation)] = []
         var discardReasonCounts: [String: Int] = [:]
@@ -608,12 +697,26 @@ final class FinalPoseRefiner {
                 item.element.rotationMatrix,
                 referenceRotation
             )
+            let normalDistanceDegrees: Double
+            if let referenceNormal,
+               let observationNormal = markerNormal(for: item.element.rotationMatrix) {
+                normalDistanceDegrees = Self.normalAngularDistanceDegrees(
+                    observationNormal,
+                    referenceNormal
+                )
+            } else {
+                normalDistanceDegrees = .infinity
+            }
             let isPositionOutlier = positionDistanceMm.isFinite &&
                 positionDistanceMm > configuration.maximumFinalPositionOutlierMm
             let isRotationOutlier = rotationDistanceDegrees.isFinite &&
                 rotationDistanceDegrees > configuration.maximumFinalRotationOutlierDegrees
+            let isNormalOutlier = normalDistanceDegrees.isFinite &&
+                normalDistanceDegrees > normalOutlierThresholdDegrees
 
-            if isPositionOutlier && isRotationOutlier {
+            if isNormalOutlier {
+                discardReasonCounts["outlier normal", default: 0] += 1
+            } else if isPositionOutlier && isRotationOutlier {
                 discardReasonCounts["outlier posicao/rotacao", default: 0] += 1
             } else if isPositionOutlier {
                 discardReasonCounts["outlier posicao", default: 0] += 1
@@ -897,6 +1000,169 @@ final class FinalPoseRefiner {
         return average(distances)
     }
 
+    private func averageMotionStabilityScore(in qualities: [PoseObservationQuality]) -> Double? {
+        average(qualities.map(\.motionStabilityScore))
+    }
+
+    private func normalDiagnostics(
+        in observations: [FinalPoseObservation]
+    ) -> (
+        averageNormal: SIMD3<Double>?,
+        stdDevDegrees: Double?,
+        peakToPeakDegrees: Double?,
+        worstDifferenceDegrees: Double?,
+        dualStdDevDegrees: Double?,
+        fallbackStdDevDegrees: Double?,
+        dualFallbackDifferenceDegrees: Double?
+    ) {
+        let averageNormal = averageMarkerNormal(in: observations)
+        let stdDev = normalStdDevDegrees(in: observations, referenceNormal: averageNormal)
+        let peakToPeak = normalPeakToPeakDegrees(in: observations)
+        let worstDifference = normalWorstDifferenceDegrees(
+            in: observations,
+            referenceNormal: averageNormal
+        )
+        let dualObservations = observations.filter { isDualTagObservation($0) }
+        let fallbackObservations = observations.filter { !isDualTagObservation($0) }
+        let dualAverageNormal = averageMarkerNormal(in: dualObservations)
+        let fallbackAverageNormal = averageMarkerNormal(in: fallbackObservations)
+        let dualFallbackDifference: Double?
+        if let dualAverageNormal,
+           let fallbackAverageNormal {
+            dualFallbackDifference = Self.normalAngularDistanceDegrees(
+                dualAverageNormal,
+                fallbackAverageNormal
+            )
+        } else {
+            dualFallbackDifference = nil
+        }
+
+        return (
+            averageNormal: averageNormal,
+            stdDevDegrees: stdDev,
+            peakToPeakDegrees: peakToPeak,
+            worstDifferenceDegrees: worstDifference,
+            dualStdDevDegrees: normalStdDevDegrees(
+                in: dualObservations,
+                referenceNormal: dualAverageNormal
+            ),
+            fallbackStdDevDegrees: normalStdDevDegrees(
+                in: fallbackObservations,
+                referenceNormal: fallbackAverageNormal
+            ),
+            dualFallbackDifferenceDegrees: dualFallbackDifference
+        )
+    }
+
+    private func averageMarkerNormal(in observations: [FinalPoseObservation]) -> SIMD3<Double>? {
+        let normals = observations.compactMap { markerNormal(for: $0.rotationMatrix) }
+        return averageNormal(normals)
+    }
+
+    private func averageNormal(_ normals: [SIMD3<Double>]) -> SIMD3<Double>? {
+        guard let firstNormal = normals.first else {
+            return nil
+        }
+
+        var sum = SIMD3<Double>(repeating: 0.0)
+        for normal in normals {
+            guard PoseMath.isFinite(normal) else {
+                continue
+            }
+
+            let alignedNormal = simd_dot(normal, firstNormal) < 0 ? -normal : normal
+            sum += alignedNormal
+        }
+
+        let length = simd_length(sum)
+        guard length.isFinite, length > 1e-9 else {
+            return nil
+        }
+
+        let normal = sum / length
+        return PoseMath.isFinite(normal) ? normal : nil
+    }
+
+    private func markerNormal(for rotationMatrix: simd_double3x3) -> SIMD3<Double>? {
+        guard PoseMath.isFinite(rotationMatrix) else {
+            return nil
+        }
+
+        // The ArUco object points lie on z = 0, so local +Z is the marker plane normal.
+        let normal = rotationMatrix * SIMD3<Double>(0.0, 0.0, 1.0)
+        let length = simd_length(normal)
+        guard length.isFinite, length > 1e-9 else {
+            return nil
+        }
+
+        let normalized = normal / length
+        return PoseMath.isFinite(normalized) ? normalized : nil
+    }
+
+    private func normalStdDevDegrees(
+        in observations: [FinalPoseObservation],
+        referenceNormal: SIMD3<Double>?
+    ) -> Double? {
+        guard let referenceNormal else {
+            return nil
+        }
+
+        let values = observations
+            .compactMap { markerNormal(for: $0.rotationMatrix) }
+            .map { Self.normalAngularDistanceDegrees($0, referenceNormal) }
+            .filter { $0.isFinite }
+        guard values.count >= 2,
+              let mean = average(values)
+        else {
+            return nil
+        }
+
+        let variance = values.reduce(0.0) {
+            let delta = $1 - mean
+            return $0 + delta * delta
+        } / Double(values.count)
+
+        let stdDev = sqrt(variance)
+        return stdDev.isFinite ? stdDev : nil
+    }
+
+    private func normalPeakToPeakDegrees(in observations: [FinalPoseObservation]) -> Double? {
+        let normals = observations.compactMap { markerNormal(for: $0.rotationMatrix) }
+        guard normals.count >= 2 else {
+            return nil
+        }
+
+        var maximumDistance = 0.0
+        for firstIndex in normals.indices.dropLast() {
+            for secondIndex in normals.indices where secondIndex > firstIndex {
+                let distance = Self.normalAngularDistanceDegrees(
+                    normals[firstIndex],
+                    normals[secondIndex]
+                )
+                if distance.isFinite {
+                    maximumDistance = max(maximumDistance, distance)
+                }
+            }
+        }
+
+        return maximumDistance.isFinite ? maximumDistance : nil
+    }
+
+    private func normalWorstDifferenceDegrees(
+        in observations: [FinalPoseObservation],
+        referenceNormal: SIMD3<Double>?
+    ) -> Double? {
+        guard let referenceNormal else {
+            return nil
+        }
+
+        let distances = observations
+            .compactMap { markerNormal(for: $0.rotationMatrix) }
+            .map { Self.normalAngularDistanceDegrees($0, referenceNormal) }
+            .filter { $0.isFinite }
+        return distances.max()
+    }
+
     private func dominantPoseSource(in observations: [FinalPoseObservation]) -> MarkerPoseSource? {
         var weightedSources: [(source: MarkerPoseSource, weight: Double)] = []
         for observation in observations {
@@ -928,6 +1194,9 @@ final class FinalPoseRefiner {
         outlierRemovedCount: Int,
         averageReprojectionError: Double?,
         averageImageEdgeMargin: Double?,
+        normalStdDevDegrees: Double?,
+        maximumFinalNormalOutlierDegrees: Double,
+        averageMotionStabilityScore: Double?,
         wasOutlierFilterRelaxed: Bool
     ) -> (value: FinalPoseMarkerConfidence, reason: String?) {
         guard !selectedObservations.isEmpty else {
@@ -959,6 +1228,16 @@ final class FinalPoseRefiner {
             return (.low, "muitos frames de borda")
         }
 
+        if let normalStdDevDegrees,
+           normalStdDevDegrees > maximumFinalNormalOutlierDegrees {
+            return (.low, "normal instavel")
+        }
+
+        if let averageMotionStabilityScore,
+           averageMotionStabilityScore < 0.45 {
+            return (.low, "movimento alto")
+        }
+
         let dualTagObservationCount = selectedObservations.filter {
             isDualTagObservation($0)
         }.count
@@ -966,6 +1245,8 @@ final class FinalPoseRefiner {
            dualTagObservationCount >= configuration.minimumFinalObservationsPerMarker,
            (averageReprojectionError ?? .infinity) <= 1.2,
            (averageImageEdgeMargin ?? 1.0) >= configuration.minimumPreferredImageEdgeMargin,
+           (normalStdDevDegrees ?? 0.0) <= maximumFinalNormalOutlierDegrees * 0.60,
+           (averageMotionStabilityScore ?? 1.0) >= 0.75,
            outlierRatio <= 0.20 {
             return (.high, nil)
         }
@@ -1016,6 +1297,102 @@ final class FinalPoseRefiner {
         observationQuality(for: observation).qualityScore
     }
 
+    private func positionWeightMultiplier(for source: MarkerPoseSource) -> Double {
+        switch source {
+        case .dualTag:
+            return 1.0
+        case let .singleFallback(_, role):
+            return role == .top ? 0.35 : 0.15
+        case .singleArucoV1:
+            return 1.0
+        }
+    }
+
+    private func rotationWeightMultiplier(for source: MarkerPoseSource) -> Double {
+        switch source {
+        case .dualTag:
+            return 1.0
+        case let .singleFallback(_, role):
+            return role == .top ? 0.15 : 0.05
+        case .singleArucoV1:
+            return 1.0
+        }
+    }
+
+    private func rotationWeight(for observation: FinalPoseObservation) -> Double {
+        let quality = observationQuality(for: observation)
+        let positionSourceWeight = max(positionWeightMultiplier(for: observation.poseSource), 0.001)
+        let rotationSourceWeight = rotationWeightMultiplier(for: observation.poseSource)
+        let bottomRotationConfidence = quality.wasRejectedByBottomArea ? 0.35 : 1.0
+        let motionAdjustment = quality.motionStabilityScore > 0
+            ? quality.motionRotationStabilityScore / quality.motionStabilityScore
+            : quality.motionRotationStabilityScore
+        let weight = quality.qualityScore /
+            positionSourceWeight *
+            rotationSourceWeight *
+            bottomRotationConfidence *
+            min(max(motionAdjustment, 0.05), 1.0)
+
+        return weight.isFinite ? max(weight, 0.0) : 0.0
+    }
+
+    private func weightedRotationMatrix(
+        from observations: [FinalPoseObservation],
+        fallbackRotationMatrix: simd_double3x3
+    ) -> simd_double3x3 {
+        guard observations.count >= 2,
+              let referenceObservation = observations.max(by: {
+                rotationWeight(for: $0) < rotationWeight(for: $1)
+              }),
+              let referenceQuaternion = PoseMath.quaternion(
+                fromRotationMatrix: referenceObservation.rotationMatrix
+              )
+        else {
+            return fallbackRotationMatrix
+        }
+
+        var accumulated = SIMD4<Double>(repeating: 0.0)
+        var totalWeight = 0.0
+        for observation in observations {
+            let weight = rotationWeight(for: observation)
+            guard weight > 0,
+                  let quaternion = PoseMath.quaternion(fromRotationMatrix: observation.rotationMatrix)
+            else {
+                continue
+            }
+
+            var vector = quaternion.vector
+            if simd_dot(vector, referenceQuaternion.vector) < 0 {
+                vector = -vector
+            }
+            accumulated += vector * weight
+            totalWeight += weight
+        }
+
+        guard totalWeight > 0 else {
+            return fallbackRotationMatrix
+        }
+
+        let length = simd_length(accumulated)
+        guard length.isFinite, length > 1e-9 else {
+            return fallbackRotationMatrix
+        }
+
+        let normalizedQuaternion = accumulated / length
+        let quaternion = simd_quatd(
+            ix: normalizedQuaternion.x,
+            iy: normalizedQuaternion.y,
+            iz: normalizedQuaternion.z,
+            r: normalizedQuaternion.w
+        )
+        guard PoseMath.isFinite(quaternion) else {
+            return fallbackRotationMatrix
+        }
+
+        let matrix = simd_double3x3(quaternion)
+        return PoseMath.isFinite(matrix) ? matrix : fallbackRotationMatrix
+    }
+
     private func observationQuality(for observation: FinalPoseObservation) -> PoseObservationQuality {
         guard isValidObservationPose(observation) else {
             return PoseObservationQuality(
@@ -1028,9 +1405,14 @@ final class FinalPoseRefiner {
                 normalizedImageX: nil,
                 normalizedImageY: nil,
                 edgeMargin: nil,
+                markerNormal: nil,
+                motionStabilityScore: observation.motionQuality?.stabilityScore ?? 1.0,
+                motionRotationStabilityScore:
+                    observation.motionQuality?.rotationStabilityScore ?? 1.0,
                 wasNearImageEdge: false,
                 wasHardRejectedByEdge: false,
                 wasRejectedByBottomArea: false,
+                wasRejectedByMotion: false,
                 rejectionReason: "pose invalida"
             )
         }
@@ -1044,22 +1426,20 @@ final class FinalPoseRefiner {
         let wasNearImageEdge = edgeMargin < configuration.minimumPreferredImageEdgeMargin
         let wasHardRejectedByEdge = edgeMargin < configuration.hardRejectImageEdgeMargin
         let wasRejectedByBottomArea = isLowConfidenceBottomArea(observation)
-        let sourceScore: Double
-        switch observation.poseSource {
-        case .dualTag:
-            sourceScore = 1.0
-        case let .singleFallback(_, role):
-            sourceScore = role == .top ? 0.35 : 0.15
-        case .singleArucoV1:
-            sourceScore = 1.0
-        }
+        let sourceScore = positionWeightMultiplier(for: observation.poseSource)
         let bottomConfidenceScore = wasRejectedByBottomArea ? 0.25 : 1.0
+        let motionStabilityScore = observation.motionQuality?.stabilityScore ?? 1.0
+        let motionRotationStabilityScore =
+            observation.motionQuality?.rotationStabilityScore ?? motionStabilityScore
+        let wasRejectedByMotion = motionStabilityScore <
+            configuration.minimumMotionStabilityScoreForFinalUse
         let rawScore = sourceScore *
             reprojectionScore *
             areaScore *
             distanceScore *
             imageCenterScore *
-            bottomConfidenceScore
+            bottomConfidenceScore *
+            motionStabilityScore
         let rejectionReason: String?
         if reprojectionScore <= 0 {
             rejectionReason = "reprojection error alto"
@@ -1069,6 +1449,8 @@ final class FinalPoseRefiner {
             rejectionReason = "borda da imagem"
         } else if wasRejectedByBottomArea {
             rejectionReason = "bottom pequena"
+        } else if wasRejectedByMotion {
+            rejectionReason = "movimento alto"
         } else {
             rejectionReason = nil
         }
@@ -1083,9 +1465,15 @@ final class FinalPoseRefiner {
             normalizedImageX: normalizedCenter.map { Double($0.x) },
             normalizedImageY: normalizedCenter.map { Double($0.y) },
             edgeMargin: edgeMargin.isFinite ? edgeMargin : nil,
+            markerNormal: markerNormal(for: observation.rotationMatrix),
+            motionStabilityScore: motionStabilityScore.isFinite ? motionStabilityScore : 1.0,
+            motionRotationStabilityScore: motionRotationStabilityScore.isFinite
+                ? motionRotationStabilityScore
+                : 1.0,
             wasNearImageEdge: wasNearImageEdge,
             wasHardRejectedByEdge: wasHardRejectedByEdge,
             wasRejectedByBottomArea: wasRejectedByBottomArea,
+            wasRejectedByMotion: wasRejectedByMotion,
             rejectionReason: rejectionReason
         )
     }
@@ -1274,6 +1662,40 @@ final class FinalPoseRefiner {
         }
 
         return sortedValues[middleIndex]
+    }
+
+    private func resolvedMaximumFinalNormalOutlierDegrees(_ override: Double?) -> Double {
+        guard let override,
+              override.isFinite,
+              override > 0
+        else {
+            return configuration.maximumFinalNormalOutlierDegrees
+        }
+
+        return override
+    }
+
+    private static func normalAngularDistanceDegrees(
+        _ lhs: SIMD3<Double>,
+        _ rhs: SIMD3<Double>
+    ) -> Double {
+        guard PoseMath.isFinite(lhs), PoseMath.isFinite(rhs) else {
+            return .infinity
+        }
+
+        let lhsLength = simd_length(lhs)
+        let rhsLength = simd_length(rhs)
+        guard lhsLength.isFinite, rhsLength.isFinite, lhsLength > 1e-9, rhsLength > 1e-9 else {
+            return .infinity
+        }
+
+        let cosineTheta = min(max(simd_dot(lhs / lhsLength, rhs / rhsLength), -1.0), 1.0)
+        let radians = acos(cosineTheta)
+        guard radians.isFinite else {
+            return .infinity
+        }
+
+        return radians * 180.0 / Double.pi
     }
 
     private static func rotationAngularDistanceDegrees(

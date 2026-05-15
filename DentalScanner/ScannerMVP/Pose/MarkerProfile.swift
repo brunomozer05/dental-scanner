@@ -280,10 +280,21 @@ struct DualArucoMarkerDebugState: Equatable, Identifiable {
     let finalRefinementAverageImageEdgeMargin: Double?
     let finalRefinementPositionVariationMm: Double?
     let finalRefinementRotationVariationDegrees: Double?
+    let finalRefinementAverageNormal: SIMD3<Double>?
+    let finalRefinementNormalStdDevDegrees: Double?
+    let finalRefinementNormalPeakToPeakDegrees: Double?
+    let finalRefinementWorstNormalDifferenceDegrees: Double?
+    let finalRefinementDualTagNormalStdDevDegrees: Double?
+    let finalRefinementFallbackNormalStdDevDegrees: Double?
+    let finalRefinementDualFallbackNormalDifferenceDegrees: Double?
+    let finalRefinementAverageMotionStabilityScore: Double?
     let finalRefinementEdgeDiscardedObservationCount: Int
     let finalRefinementSmallBottomDiscardedObservationCount: Int
     let finalRefinementReprojectionDiscardedObservationCount: Int
     let finalRefinementLowPriorityFallbackDiscardedObservationCount: Int
+    let finalRefinementNormalOutlierDiscardedObservationCount: Int
+    let finalRefinementMotionDiscardedObservationCount: Int
+    let finalRefinementMotionPenalizedObservationCount: Int
     let finalRefinementDominantPoseSource: MarkerPoseSource?
     let finalRefinementConfidence: FinalPoseMarkerConfidence
     let finalRefinementConfidenceReason: String?
