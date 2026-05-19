@@ -14,6 +14,7 @@ struct ScannerView: View {
     private let panelBackgroundColor = Color(red: 0.11, green: 0.11, blue: 0.12)
     private let chipBackgroundColor = Color(red: 0.16, green: 0.16, blue: 0.18)
     private let scannerAccentColor = Color(red: 0.23, green: 0.51, blue: 0.96)
+    private let useSafeDebugPanelOnly = true
     private let showAdvancedPoseDebug = false
     private let showMotionDebug = false
     private let showStaticStabilityDebug = false
@@ -100,12 +101,20 @@ struct ScannerView: View {
                     HStack {
                         Spacer()
 
-                        debugPanel(isLandscape: true)
-                            .frame(width: 320)
+                        if useSafeDebugPanelOnly {
+                            EmergencyScannerDebugPanelView {
+                                isDebugPanelExpanded = false
+                            }
+                            .frame(width: 260)
                             .padding(12)
+                        } else {
+                            debugPanel(isLandscape: true)
+                                .frame(width: 320)
+                                .padding(12)
+                        }
                     }
                 }
-                .zIndex(2)
+                .zIndex(4)
             }
         }
         .background(Color.black)
@@ -230,11 +239,11 @@ struct ScannerView: View {
             }
 
             ScannerCircleButton(
-                systemImage: isDebugPanelExpanded ? "gearshape.fill" : "gearshape",
-                accessibilityLabel: isDebugPanelExpanded ? "Fechar debug" : "Abrir debug",
+                systemImage: "gearshape",
+                accessibilityLabel: "Abrir debug",
                 accentColor: scannerAccentColor,
                 isEnabled: true,
-                isActive: isDebugPanelExpanded
+                isActive: false
             ) {
                 isDebugPanelExpanded.toggle()
             }
@@ -2353,6 +2362,41 @@ private struct ScannerCircleButton: View {
 
     private var borderColor: Color {
         isActive ? accentColor.opacity(0.50) : Color.white.opacity(0.10)
+    }
+}
+
+private struct EmergencyScannerDebugPanelView: View {
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Debug")
+                    .font(.headline)
+
+                Spacer()
+
+                Button("Fechar") {
+                    onClose()
+                }
+                .buttonStyle(.plain)
+                .font(.caption.weight(.semibold))
+            }
+
+            Text("Painel debug carregado")
+                .font(.caption.weight(.semibold))
+
+            Text("Modo seguro ativo")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.72))
+        }
+        .padding(12)
+        .foregroundStyle(.white)
+        .background(Color.black.opacity(0.85))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onAppear {
+            print("Scanner debug panel opened in safe mode")
+        }
     }
 }
 
