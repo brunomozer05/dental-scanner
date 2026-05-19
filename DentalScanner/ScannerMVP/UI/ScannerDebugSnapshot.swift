@@ -8,6 +8,8 @@ struct ScannerDebugSnapshot: Equatable {
         let markerProfile: String
         let readinessMessage: String
         let currentMarkerCount: String
+        let detectedMarkerIds: String
+        let exportablePoseCount: String
     }
 
     struct ExportSection: Equatable {
@@ -27,6 +29,8 @@ struct ScannerDebugSnapshot: Equatable {
         let jitterReady: String
         let stableReady: String
         let currentFrameGood: String
+        let dualTagReady: String
+        let dualAngularReady: String
     }
 
     struct ConfigurationSection: Equatable {
@@ -36,6 +40,7 @@ struct ScannerDebugSnapshot: Equatable {
         let minimumDualTagFrames: String
         let minimumDualAngularCoverage: String
         let precisionModeV2: String
+        let targetValidFrames: String
     }
 
     struct MarkerV2Row: Equatable, Identifiable {
@@ -44,6 +49,7 @@ struct ScannerDebugSnapshot: Equatable {
         let topFallbackFrames: String
         let bottomFallbackFrames: String
         let dualPercent: String
+        let dominantMode: String
 
         var id: Int {
             markerId
@@ -65,7 +71,9 @@ extension ScannerViewModel {
                 scanState: Self.debugScanStateTitle(scanState),
                 markerProfile: markerProfile.debugTitle,
                 readinessMessage: debugString(scanReadinessMessage),
-                currentMarkerCount: "\(detectedMarkerCount)"
+                currentMarkerCount: "\(detectedMarkerCount)",
+                detectedMarkerIds: Self.debugIntList(detectedMarkerIds),
+                exportablePoseCount: "\(currentExportableTagPoseCount)"
             ),
             export: ScannerDebugSnapshot.ExportSection(
                 isGeneratingSTL: debugBool(isGeneratingSTL),
@@ -82,7 +90,9 @@ extension ScannerViewModel {
                 distanceReady: debugBool(scanDistanceReady),
                 jitterReady: debugBool(scanJitterReady),
                 stableReady: debugBool(scanStableReady),
-                currentFrameGood: debugBool(scanCurrentFrameGood)
+                currentFrameGood: debugBool(scanCurrentFrameGood),
+                dualTagReady: debugBool(scanDualTagReady),
+                dualAngularReady: debugBool(scanDualAngularCoverageReady)
             ),
             configuration: ScannerDebugSnapshot.ConfigurationSection(
                 markerProfile: markerProfile.debugTitle,
@@ -90,7 +100,8 @@ extension ScannerViewModel {
                 requiredAngularCoverage: Self.debugPercent(scanRequiredAngularCoveragePercent),
                 minimumDualTagFrames: "\(scanMinimumDualTagFrameCount)",
                 minimumDualAngularCoverage: Self.debugPercent(scanRequiredDualAngularCoveragePercent),
-                precisionModeV2: debugBool(precisionModeV2)
+                precisionModeV2: debugBool(precisionModeV2),
+                targetValidFrames: "\(scanTargetValidFrameCount)"
             ),
             isDualArucoV2: markerProfile == .dualArucoV2,
             markerV2Rows: markerProfile == .dualArucoV2
@@ -107,7 +118,8 @@ extension ScannerViewModel {
             dualFrames: "\(state.scanDualTagFrameCount)",
             topFallbackFrames: "\(state.scanTopFallbackFrameCount)",
             bottomFallbackFrames: "\(state.scanBottomFallbackFrameCount)",
-            dualPercent: debugPercent(state.scanDualTagPosePercent)
+            dualPercent: debugPercent(state.scanDualTagPosePercent),
+            dominantMode: state.scanDominantPoseSource?.debugTitle ?? ScannerDebugSnapshot.missingValue
         )
     }
 
@@ -142,5 +154,13 @@ extension ScannerViewModel {
         }
 
         return "\(String(format: "%.1f", value))%"
+    }
+
+    private static func debugIntList(_ values: [Int]) -> String {
+        guard !values.isEmpty else {
+            return ScannerDebugSnapshot.missingValue
+        }
+
+        return values.sorted().map(String.init).joined(separator: ", ")
     }
 }
