@@ -8,7 +8,7 @@ struct ScannerView: View {
     @StateObject private var viewModel = ScannerViewModel()
     @State private var scaleValidationRealDistanceText = ""
     @State private var previewOrientation: CameraPreviewOrientation = .landscapeRight
-    @State private var isDebugPanelExpanded = false
+    @State private var emergencyDebugPanelVisible = false
     @State private var stlViewerPresentation: STLViewerPresentation?
 
     private let panelBackgroundColor = Color(red: 0.11, green: 0.11, blue: 0.12)
@@ -94,24 +94,19 @@ struct ScannerView: View {
             }
             .zIndex(3)
 
-            if isDebugPanelExpanded {
+            if emergencyDebugPanelVisible && useSafeDebugPanelOnly {
                 VStack {
                     Spacer()
 
                     HStack {
                         Spacer()
 
-                        if useSafeDebugPanelOnly {
-                            EmergencyScannerDebugPanelView {
-                                isDebugPanelExpanded = false
-                            }
-                            .frame(width: 260)
-                            .padding(12)
-                        } else {
-                            debugPanel(isLandscape: true)
-                                .frame(width: 320)
-                                .padding(12)
+                        EmergencyScannerDebugPanelView {
+                            print("[DEBUG_GEAR] emergency panel close tapped")
+                            emergencyDebugPanelVisible = false
                         }
+                        .frame(width: 260)
+                        .padding(12)
                     }
                 }
                 .zIndex(4)
@@ -238,15 +233,18 @@ struct ScannerView: View {
                 viewModel.toggleTorch()
             }
 
-            ScannerCircleButton(
-                systemImage: "gearshape",
-                accessibilityLabel: "Abrir debug",
-                accentColor: scannerAccentColor,
-                isEnabled: true,
-                isActive: false
-            ) {
-                isDebugPanelExpanded.toggle()
+            Button("DBG") {
+                print("[DEBUG_GEAR] tapped")
+                emergencyDebugPanelVisible.toggle()
+                print("[DEBUG_GEAR] emergency state toggled: \(emergencyDebugPanelVisible)")
             }
+            .buttonStyle(.plain)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(.white)
+            .frame(width: 46, height: 46)
+            .background(Color.black.opacity(0.72))
+            .clipShape(Circle())
+            .accessibilityLabel("Abrir debug seguro")
         }
     }
 
@@ -389,42 +387,6 @@ struct ScannerView: View {
             GridItem(.flexible(), spacing: 6),
             GridItem(.flexible(), spacing: 6)
         ]
-    }
-
-    private var topControlBar: some View {
-        HStack(spacing: 8) {
-            statusChip(
-                title: "OpenCV",
-                value: viewModel.isOpenCVAvailable ? "on" : "off",
-                isActive: viewModel.isOpenCVAvailable
-            )
-
-            statusChip(
-                title: "Tags",
-                value: "\(viewModel.detectedMarkerCount)",
-                isActive: viewModel.detectedMarkerCount > 0
-            )
-
-            statusChip(
-                title: "Pose",
-                value: viewModel.rawPoseResult == nil ? "-" : formattedRawPoseDistance,
-                isActive: viewModel.rawPoseResult != nil
-            )
-
-            statusChip(
-                title: "Scan",
-                value: formattedScanProgress,
-                isActive: viewModel.scanState == .ready || viewModel.scanState.isCollectingFrames
-            )
-
-            Spacer(minLength: 4)
-
-            compactTorchButton
-            debugPanelToggleButton
-        }
-        .padding(8)
-        .background(panelBackgroundColor.opacity(0.88))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private func debugPanel(isLandscape _: Bool) -> some View {
@@ -623,21 +585,6 @@ struct ScannerView: View {
                     .foregroundStyle(.red)
             }
         }
-    }
-
-    private var debugPanelToggleButton: some View {
-        Button {
-            isDebugPanelExpanded.toggle()
-        } label: {
-            Image(systemName: isDebugPanelExpanded ? "gearshape.fill" : "gearshape")
-                .font(.body.weight(.semibold))
-                .frame(width: 34, height: 34)
-                .foregroundStyle(Color.white.opacity(isDebugPanelExpanded ? 1.0 : 0.72))
-                .background(chipBackgroundColor.opacity(0.82))
-                .clipShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(isDebugPanelExpanded ? "Fechar debug" : "Abrir debug")
     }
 
     private var compactTorchButton: some View {
@@ -2383,10 +2330,13 @@ private struct EmergencyScannerDebugPanelView: View {
                 .font(.caption.weight(.semibold))
             }
 
-            Text("Painel debug carregado")
+            Text("SAFE DEBUG PANEL 88dae22")
+                .font(.caption.weight(.bold))
+
+            Text("Painel carregado")
                 .font(.caption.weight(.semibold))
 
-            Text("Modo seguro ativo")
+            Text("Sem ViewModel")
                 .font(.caption2)
                 .foregroundStyle(.white.opacity(0.72))
         }
@@ -2395,7 +2345,7 @@ private struct EmergencyScannerDebugPanelView: View {
         .background(Color.black.opacity(0.85))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onAppear {
-            print("Scanner debug panel opened in safe mode")
+            print("[DEBUG_GEAR] rendering emergency panel")
         }
     }
 }
