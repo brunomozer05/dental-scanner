@@ -3,6 +3,26 @@ import UIKit
 
 struct ScannerDebugPanelView: View {
     let snapshot: ScannerDebugSnapshot
+    let markerProfiles: [MarkerProfile]
+    let requiredCoverageRange: ClosedRange<Double>
+    let requiredCoverageStep: Double
+    let minimumGoodFrameRange: ClosedRange<Int>
+    let minimumGoodFrameStep: Int
+    let targetGoodFrameRange: ClosedRange<Int>
+    let targetGoodFrameStep: Int
+    let minimumDualTagFrameRange: ClosedRange<Int>
+    let dualAngularCoverageRange: ClosedRange<Double>
+    let dualAngularCoverageStep: Double
+    @Binding var markerProfile: MarkerProfile
+    @Binding var requiredCoveragePercent: Double
+    @Binding var minimumGoodFrames: Int
+    @Binding var targetGoodFrames: Int
+    @Binding var minimumDualTagFramesPerMarker: Int
+    @Binding var minimumDualAngularCoveragePercentPerMarker: Double
+    @Binding var precisionModeV2: Bool
+    @Binding var preferDualTagForFinalExport: Bool
+    @Binding var showDistanceGuide: Bool
+    @Binding var staticPoseStabilityMode: Bool
     let onClose: () -> Void
 
     private let enableMotionDebugSection = false
@@ -53,11 +73,66 @@ struct ScannerDebugPanelView: View {
                     debugSection(title: "Config") {
                         debugRow(title: "Perfil marker", value: snapshot.configuration.markerProfile)
                         debugRow(title: "Barra distancia", value: snapshot.configuration.showDistanceGuide)
+                        debugRow(title: "Frames min", value: snapshot.configuration.minimumGoodFrames)
                         debugRow(title: "Frames alvo", value: snapshot.configuration.targetValidFrames)
                         debugRow(title: "Cobertura angular", value: snapshot.configuration.requiredAngularCoverage)
                         debugRow(title: "Frames dual min", value: snapshot.configuration.minimumDualTagFrames)
                         debugRow(title: "Cobertura dual", value: snapshot.configuration.minimumDualAngularCoverage)
                         debugRow(title: "Precision v2", value: snapshot.configuration.precisionModeV2)
+                        debugRow(title: "Dual export", value: snapshot.configuration.preferDualTagForFinalExport)
+                    }
+
+                    debugSection(title: "Config scan") {
+                        Picker("Perfil marker", selection: $markerProfile) {
+                            ForEach(markerProfiles) { profile in
+                                Text(profile.debugTitle)
+                                    .tag(profile)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        Toggle("Mostrar barra de distancia", isOn: $showDistanceGuide)
+
+                        debugIntStepper(
+                            title: "Minimum good frames",
+                            value: $minimumGoodFrames,
+                            range: minimumGoodFrameRange,
+                            step: minimumGoodFrameStep
+                        )
+
+                        debugIntStepper(
+                            title: "Target good frames",
+                            value: $targetGoodFrames,
+                            range: targetGoodFrameRange,
+                            step: targetGoodFrameStep
+                        )
+
+                        debugPercentStepper(
+                            title: "Cobertura angular minima",
+                            value: $requiredCoveragePercent,
+                            range: requiredCoverageRange,
+                            step: requiredCoverageStep
+                        )
+
+                        if markerProfile == .dualArucoV2 {
+                            debugIntStepper(
+                                title: "Dual-tag frames por marker",
+                                value: $minimumDualTagFramesPerMarker,
+                                range: minimumDualTagFrameRange,
+                                step: 1
+                            )
+
+                            debugPercentStepper(
+                                title: "Cobertura angular dual",
+                                value: $minimumDualAngularCoveragePercentPerMarker,
+                                range: dualAngularCoverageRange,
+                                step: dualAngularCoverageStep
+                            )
+
+                            Toggle("Precision mode v2", isOn: $precisionModeV2)
+                            Toggle("Preferir dual-tag no export", isOn: $preferDualTagForFinalExport)
+                            Toggle("Static Pose Stability Test", isOn: $staticPoseStabilityMode)
+                        }
                     }
 
                     if snapshot.isDualArucoV2 {
@@ -150,5 +225,53 @@ struct ScannerDebugPanelView: View {
                 .monospacedDigit()
         }
         .font(.caption2.weight(.semibold))
+    }
+
+    private func debugIntStepper(
+        title: String,
+        value: Binding<Int>,
+        range: ClosedRange<Int>,
+        step: Int
+    ) -> some View {
+        Stepper(value: value, in: range, step: step) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title)
+                    .foregroundStyle(.white.opacity(0.58))
+
+                Spacer(minLength: 8)
+
+                Text("\(value.wrappedValue)")
+                    .monospacedDigit()
+            }
+        }
+        .font(.caption2.weight(.semibold))
+    }
+
+    private func debugPercentStepper(
+        title: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        step: Double
+    ) -> some View {
+        Stepper(value: value, in: range, step: step) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title)
+                    .foregroundStyle(.white.opacity(0.58))
+
+                Spacer(minLength: 8)
+
+                Text(percentText(value.wrappedValue))
+                    .monospacedDigit()
+            }
+        }
+        .font(.caption2.weight(.semibold))
+    }
+
+    private func percentText(_ value: Double) -> String {
+        guard value.isFinite else {
+            return ScannerDebugSnapshot.missingValue
+        }
+
+        return "\(Int(round(value)))%"
     }
 }

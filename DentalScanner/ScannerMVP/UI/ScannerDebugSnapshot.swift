@@ -40,6 +40,8 @@ struct ScannerDebugSnapshot: Equatable {
         let minimumDualTagFrames: String
         let minimumDualAngularCoverage: String
         let precisionModeV2: String
+        let preferDualTagForFinalExport: String
+        let minimumGoodFrames: String
         let targetValidFrames: String
     }
 
@@ -101,6 +103,8 @@ extension ScannerViewModel {
                 minimumDualTagFrames: "\(scanMinimumDualTagFrameCount)",
                 minimumDualAngularCoverage: Self.debugPercent(scanRequiredDualAngularCoveragePercent),
                 precisionModeV2: debugBool(precisionModeV2),
+                preferDualTagForFinalExport: debugBool(preferDualTagForFinalExport),
+                minimumGoodFrames: "\(scanMinimumGoodFrameCount)",
                 targetValidFrames: "\(scanTargetValidFrameCount)"
             ),
             isDualArucoV2: markerProfile == .dualArucoV2,

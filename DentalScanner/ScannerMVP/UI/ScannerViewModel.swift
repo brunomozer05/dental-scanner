@@ -110,8 +110,11 @@ final class ScannerViewModel: ObservableObject {
         static let readiness = ScanReadinessConfiguration.default
         static let completedCoverageThreshold: Double = 0.995
         static let defaultTargetValidFrameCount: Int = readiness.targetGoodFrames
-        static let minimumTargetValidFrameCount: Int = readiness.minimumGoodFrames
+        static let minimumGoodFrameCountRange: ClosedRange<Int> = 30...180
+        static let minimumGoodFrameStep: Int = 5
+        static let minimumTargetValidFrameCount: Int = 45
         static let maximumTargetValidFrameCount: Int = readiness.targetGoodFrames * 2
+        static let targetValidFrameStep: Int = 5
         static let poseStabilityWindowCount: Int = 12
         static let targetAverageReprojectionError: Double =
             readiness.maximumAverageReprojectionError * 0.60
@@ -124,12 +127,12 @@ final class ScannerViewModel: ObservableObject {
         static let elevationBinCount: Int = 2
         static let defaultRequiredAngularCoveragePercent: Double =
             readiness.minimumCoveragePercentPerTag * 100.0
-        static let minimumRequiredAngularCoveragePercent: Double = 30.0
-        static let maximumRequiredAngularCoveragePercent: Double = 95.0
+        static let minimumRequiredAngularCoveragePercent: Double = 20.0
+        static let maximumRequiredAngularCoveragePercent: Double = 100.0
         static let angularCoverageStepPercent: Double = 5.0
         static let precisionErrorHistoryLimit: Int = 30
         static let defaultMinimumDualTagFramesPerMarker: Int = 10
-        static let minimumDualTagFramesPerMarkerRange: ClosedRange<Int> = 0...30
+        static let minimumDualTagFramesPerMarkerRange: ClosedRange<Int> = 0...40
         static let defaultMinimumDualAngularCoveragePercent: Double = 25.0
         static let minimumDualAngularCoveragePercentRange: ClosedRange<Double> = 0.0...80.0
         static let defaultMaximumFinalNormalOutlierDegrees: Double = 3.0
@@ -366,6 +369,8 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var scanStableReady: Bool = false
     @Published private(set) var scanCurrentFrameGood: Bool = false
     @Published private(set) var scanTagCoverages: [Int: ScanTagCoverage] = [:]
+    @Published private(set) var scanMinimumGoodFrameCount: Int =
+        ScanConfiguration.readiness.minimumGoodFrames
     @Published private(set) var scanTargetValidFrameCount: Int = ScanConfiguration.defaultTargetValidFrameCount
     @Published private(set) var scanRequiredAngularCoveragePercent: Double =
         ScanConfiguration.defaultRequiredAngularCoveragePercent
@@ -525,8 +530,16 @@ final class ScannerViewModel: ObservableObject {
         DualMarkerDebugConfiguration.recentDetectionWindowFrameCount
     }
 
-    var scanMinimumGoodFrameCount: Int {
-        scanReadinessConfiguration.minimumGoodFrames
+    var scanMinimumGoodFrameRange: ClosedRange<Int> {
+        ScanConfiguration.minimumGoodFrameCountRange
+    }
+
+    var scanMinimumGoodFrameStep: Int {
+        ScanConfiguration.minimumGoodFrameStep
+    }
+
+    var scanTargetValidFrameStep: Int {
+        ScanConfiguration.targetValidFrameStep
     }
 
     var scanTargetGoodFrameCount: Int {
@@ -794,6 +807,27 @@ final class ScannerViewModel: ObservableObject {
     }
 
     @MainActor
+    func setScanMinimumGoodFrameCount(_ minimumGoodFrameCount: Int) {
+        scanMinimumGoodFrameCount = min(
+            max(
+                minimumGoodFrameCount,
+                ScanConfiguration.minimumGoodFrameCountRange.lowerBound
+            ),
+            ScanConfiguration.minimumGoodFrameCountRange.upperBound
+        )
+
+        if scanTargetValidFrameCount < scanMinimumGoodFrameCount {
+            scanTargetValidFrameCount = scanMinimumGoodFrameCount
+        }
+
+        if scanState != .idle {
+            updateScanProgressAndState(
+                timestamp: lastFrameTimestamp ?? Date().timeIntervalSinceReferenceDate
+            )
+        }
+    }
+
+    @MainActor
     func setScanTargetValidFrameCount(_ targetValidFrameCount: Int) {
         scanTargetValidFrameCount = min(
             max(targetValidFrameCount, ScanConfiguration.minimumTargetValidFrameCount),
@@ -894,7 +928,21 @@ final class ScannerViewModel: ObservableObject {
 
     @MainActor
     func setPreferDualTagForFinalExport(_ preferDualTagForFinalExport: Bool) {
-        setPrecisionModeV2(preferDualTagForFinalExport)
+        guard self.preferDualTagForFinalExport != preferDualTagForFinalExport else {
+            return
+        }
+
+        self.preferDualTagForFinalExport = preferDualTagForFinalExport
+        didApplyFinalPoseRefinement = false
+        stlExportURL = nil
+        stlExportedImplantCount = 0
+        stlExportErrorMessage = nil
+        finalObservationDiagnosticsByMarkerId = finalPoseRefiner.selectionDiagnostics(
+            observations: finalPoseObservations,
+            preferDualTagForFinalExport: preferDualTagForFinalExport,
+            maximumFinalNormalOutlierDegrees: scanMaximumFinalNormalOutlierDegrees
+        )
+        updateExportDiagnostics()
     }
 
     @MainActor
@@ -1633,7 +1681,7 @@ final class ScannerViewModel: ObservableObject {
             .map {
                 normalizedCoverage(
                     Double($0.observedFrameCount) /
-                        Double(scanReadinessConfiguration.minimumGoodFrames)
+                        Double(scanMinimumGoodFrameCount)
                 )
             }
             .min() ?? 0
@@ -1671,9 +1719,9 @@ final class ScannerViewModel: ObservableObject {
 
     private func scanReadinessEvaluation() -> ScanReadinessEvaluation {
         let hasTags = !observedTagCoverages.isEmpty
-        let hasEnoughGoodFrames = scanValidFrameCount >= scanReadinessConfiguration.minimumGoodFrames
+        let hasEnoughGoodFrames = scanValidFrameCount >= scanMinimumGoodFrameCount
         let hasPerTagGoodFrames = hasTags && activeTagCoverages.allSatisfy {
-            $0.observedFrameCount >= scanReadinessConfiguration.minimumGoodFrames
+            $0.observedFrameCount >= scanMinimumGoodFrameCount
         }
         let hasAcceptableDistance = isAcceptableScanDistance(scanAverageDistanceMm)
         let hasAcceptableReprojectionError = (scanAverageReprojectionError ?? .infinity) <=

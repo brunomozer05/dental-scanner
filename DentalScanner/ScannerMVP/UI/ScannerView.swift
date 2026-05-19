@@ -95,7 +95,29 @@ struct ScannerView: View {
                     HStack {
                         Spacer()
 
-                        ScannerDebugPanelView(snapshot: viewModel.scannerDebugSnapshot) {
+                        ScannerDebugPanelView(
+                            snapshot: viewModel.scannerDebugSnapshot,
+                            markerProfiles: viewModel.markerProfiles,
+                            requiredCoverageRange: viewModel.scanRequiredAngularCoverageRange,
+                            requiredCoverageStep: viewModel.scanAngularCoverageStepPercent,
+                            minimumGoodFrameRange: viewModel.scanMinimumGoodFrameRange,
+                            minimumGoodFrameStep: viewModel.scanMinimumGoodFrameStep,
+                            targetGoodFrameRange: viewModel.scanTargetValidFrameRange,
+                            targetGoodFrameStep: viewModel.scanTargetValidFrameStep,
+                            minimumDualTagFrameRange: viewModel.scanMinimumDualTagFrameRange,
+                            dualAngularCoverageRange: viewModel.scanRequiredDualAngularCoverageRange,
+                            dualAngularCoverageStep: viewModel.scanAngularCoverageStepPercent,
+                            markerProfile: markerProfileBinding,
+                            requiredCoveragePercent: scanRequiredCoverageBinding,
+                            minimumGoodFrames: scanMinimumGoodFrameBinding,
+                            targetGoodFrames: scanTargetFrameBinding,
+                            minimumDualTagFramesPerMarker: scanMinimumDualTagFrameBinding,
+                            minimumDualAngularCoveragePercentPerMarker: scanRequiredDualAngularCoverageBinding,
+                            precisionModeV2: precisionModeV2Binding,
+                            preferDualTagForFinalExport: preferDualTagForFinalExportBinding,
+                            showDistanceGuide: showDistanceGuideBinding,
+                            staticPoseStabilityMode: staticPoseStabilityModeBinding
+                        ) {
                             print("[DEBUG_GEAR] scanner debug panel close tapped")
                             scannerDebugPanelVisible = false
                         }
@@ -381,6 +403,76 @@ struct ScannerView: View {
             GridItem(.flexible(), spacing: 6),
             GridItem(.flexible(), spacing: 6)
         ]
+    }
+
+    private var markerProfileBinding: Binding<MarkerProfile> {
+        Binding(
+            get: { viewModel.markerProfile },
+            set: { viewModel.setMarkerProfile($0) }
+        )
+    }
+
+    private var scanRequiredCoverageBinding: Binding<Double> {
+        Binding(
+            get: { viewModel.scanRequiredAngularCoveragePercent },
+            set: { viewModel.setScanRequiredAngularCoveragePercent($0) }
+        )
+    }
+
+    private var scanMinimumGoodFrameBinding: Binding<Int> {
+        Binding(
+            get: { viewModel.scanMinimumGoodFrameCount },
+            set: { viewModel.setScanMinimumGoodFrameCount($0) }
+        )
+    }
+
+    private var scanTargetFrameBinding: Binding<Int> {
+        Binding(
+            get: { viewModel.scanTargetValidFrameCount },
+            set: { viewModel.setScanTargetValidFrameCount($0) }
+        )
+    }
+
+    private var scanMinimumDualTagFrameBinding: Binding<Int> {
+        Binding(
+            get: { viewModel.scanMinimumDualTagFrameCount },
+            set: { viewModel.setScanMinimumDualTagFrameCount($0) }
+        )
+    }
+
+    private var scanRequiredDualAngularCoverageBinding: Binding<Double> {
+        Binding(
+            get: { viewModel.scanRequiredDualAngularCoveragePercent },
+            set: { viewModel.setScanRequiredDualAngularCoveragePercent($0) }
+        )
+    }
+
+    private var precisionModeV2Binding: Binding<Bool> {
+        Binding(
+            get: { viewModel.precisionModeV2 },
+            set: { viewModel.setPrecisionModeV2($0) }
+        )
+    }
+
+    private var preferDualTagForFinalExportBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.preferDualTagForFinalExport },
+            set: { viewModel.setPreferDualTagForFinalExport($0) }
+        )
+    }
+
+    private var showDistanceGuideBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.showDistanceGuide },
+            set: { viewModel.setShowDistanceGuide($0) }
+        )
+    }
+
+    private var staticPoseStabilityModeBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.staticPoseStabilityMode },
+            set: { viewModel.setStaticPoseStabilityMode($0) }
+        )
     }
 
     private var compactTorchButton: some View {
