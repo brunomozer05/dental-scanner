@@ -453,12 +453,12 @@ struct ScannerView: View {
     private var debugSummarySection: some View {
         VStack(alignment: .leading, spacing: 6) {
             metricRow(title: "Lanterna", value: formattedTorchState)
-            metricRow(title: "FPS", value: String(format: "%.1f", viewModel.estimatedFPS))
+            metricRow(title: "FPS", value: safeDouble(viewModel.estimatedFPS, decimals: 1))
             metricRow(title: "Resolucao", value: formattedResolution)
             metricRow(title: "Intrinseca", value: viewModel.isIntrinsicMatrixAvailable ? "Disponivel" : "Indisponivel")
             metricRow(title: "IDs", value: formattedDetectedMarkerIds)
             metricRow(title: "Perfil marker", value: viewModel.markerProfile.debugTitle)
-            metricRow(title: "Marker size", value: String(format: "%.1f mm", viewModel.poseMarkerSizeMillimeters))
+            metricRow(title: "Marker size", value: safeUnit(viewModel.poseMarkerSizeMillimeters, decimals: 1, unit: "mm"))
         }
     }
 
@@ -489,12 +489,14 @@ struct ScannerView: View {
                 metricRow(title: "Modo", value: formattedBool(viewModel.staticPoseStabilityMode))
                 metricRow(
                     title: "Janela",
-                    value: String(format: "%.1f s", viewModel.staticPoseStabilityWindowSeconds)
+                    value: safeUnit(viewModel.staticPoseStabilityWindowSeconds, decimals: 1, unit: "s")
                 )
                 metricRow(title: "Referencia", value: formattedBool(viewModel.staticPoseReferenceCaptured))
                 metricRow(title: "Diagnostico", value: viewModel.staticPoseGlobalDiagnosis)
 
-                if viewModel.staticPoseMarkerDiagnostics.isEmpty {
+                if !viewModel.staticPoseStabilityMode {
+                    metricRow(title: "Static markers", value: missingDebugValue)
+                } else if viewModel.staticPoseMarkerDiagnostics.isEmpty {
                     metricRow(title: "Static markers", value: missingDebugValue)
                 } else {
                     ForEach(viewModel.staticPoseMarkerDiagnostics) { state in
@@ -502,45 +504,23 @@ struct ScannerView: View {
                             metricRow(title: "Marker estatico", value: "M\(state.markerId)")
                             metricRow(title: "Samples", value: "\(state.sampleCount)")
                             metricRow(title: "Pos std", value: formattedStaticMillimeters(state.positionStdDevMm))
-                            metricRow(title: "Pos peak", value: formattedStaticMillimeters(state.positionPeakToPeakMm))
                             metricRow(title: "Rot std", value: formattedStaticDegrees(state.rotationStdDevDegrees))
-                            metricRow(title: "Rot peak", value: formattedStaticDegrees(state.rotationPeakToPeakDegrees))
                             metricRow(title: "Normal std", value: formattedStaticDegrees(state.normalStdDevDegrees))
-                            metricRow(title: "Normal peak", value: formattedStaticDegrees(state.normalPeakToPeakDegrees))
-                            metricRow(title: "Reproj mean", value: formattedStaticPixels(state.reprojectionMean))
-                            metricRow(title: "Reproj std", value: formattedStaticPixels(state.reprojectionStdDev))
                             metricRow(title: "Dual ratio", value: formattedStaticRatio(state.dualTagRatio))
                             metricRow(title: "Top fallback", value: formattedStaticRatio(state.topFallbackRatio))
                             metricRow(title: "Bottom fallback", value: formattedStaticRatio(state.bottomFallbackRatio))
-                            metricRow(title: "Edge frames", value: formattedStaticRatio(state.edgeFrameRatio))
-                            metricRow(title: "Bottom small", value: formattedStaticRatio(state.bottomSmallRatio))
-                            metricRow(title: "Delta pos ref", value: formattedStaticMillimeters(state.referencePositionDeltaMm))
-                            metricRow(title: "Delta rot ref", value: formattedStaticDegrees(state.referenceRotationDeltaDegrees))
                         }
                         .padding(.vertical, 4)
                     }
                 }
 
-                if !viewModel.staticPosePairDistanceDiagnostics.isEmpty {
-                    Text("Distancias estaticas")
-                        .font(.caption.weight(.semibold))
-
-                    ForEach(viewModel.staticPosePairDistanceDiagnostics) { state in
-                        metricRow(
-                            title: "M\(state.firstMarkerId)-M\(state.secondMarkerId)",
-                            value: formattedStaticPairDistance(state)
-                        )
-                    }
-                }
-
-                if let plane = viewModel.staticPosePlaneDiagnostics {
+                if viewModel.staticPoseStabilityMode,
+                   let plane = viewModel.staticPosePlaneDiagnostics {
                     Text("Plano estatico")
                         .font(.caption.weight(.semibold))
 
                     metricRow(title: "Plane samples", value: "\(plane.sampleCount)")
                     metricRow(title: "Plane avg mean", value: formattedStaticMillimeters(plane.planeAverageErrorMeanMm))
-                    metricRow(title: "Plane avg std", value: formattedStaticMillimeters(plane.planeAverageErrorStdDevMm))
-                    metricRow(title: "Plane max mean", value: formattedStaticMillimeters(plane.planeMaximumErrorMeanMm))
                     metricRow(title: "Plane max worst", value: formattedStaticMillimeters(plane.planeMaximumErrorWorstMm))
                 }
             }
@@ -559,153 +539,20 @@ struct ScannerView: View {
                 } else {
                     ForEach(viewModel.dualMarkerDebugStates) { state in
                         VStack(alignment: .leading, spacing: 4) {
-                        metricRow(title: "Marker fisico", value: "ID \(state.physicalMarkerId)")
-                        metricRow(title: "Top agora \(state.topTagId)", value: formattedBool(state.topTagRawDetected))
-                        metricRow(title: "Bottom agora \(state.bottomTagId)", value: formattedBool(state.bottomTagRawDetected))
-                        metricRow(title: "Bottom recente", value: formattedBool(state.bottomTagRecentlySeen))
-                        metricRow(title: "Visual ativo", value: formattedBool(state.visualMarkerActive))
-                        metricRow(title: "Modo visual", value: formattedDualMarkerVisualMode(state))
-                        metricRow(title: "Visual visto ha", value: formattedDualMarkerVisualAge(state))
-                        metricRow(title: "Dual visto ha", value: formattedDualMarkerVisualDualAge(state))
-                        metricRow(title: "Top status", value: formattedDualTagDetection(state, role: .top))
-                        metricRow(title: "Bottom status", value: formattedDualTagDetection(state, role: .bottom))
-                        metricRow(title: "Top area", value: formattedDualTagArea(state, role: .top))
-                        metricRow(title: "Bottom area", value: formattedDualTagArea(state, role: .bottom))
-                        metricRow(title: "Image X", value: formattedDualMarkerImageX(state))
-                        metricRow(title: "Image Y", value: formattedDualMarkerImageY(state))
-                        metricRow(title: "Perto borda", value: formattedDualMarkerNearImageEdge(state))
-                        metricRow(title: "Borda prox.", value: formattedDualMarkerNearestImageEdge(state))
-                        metricRow(title: "Dist. borda", value: formattedDualMarkerImageEdgeDistance(state))
-                        metricRow(title: "Frames borda", value: formattedDualMarkerNearImageEdgeFrames(state))
-                        metricRow(title: "Modo borda", value: formattedDualMarkerNearImageEdgeMode(state))
-                        metricRow(title: "Top frames", value: formattedDualTagCounts(state, role: .top))
-                        metricRow(title: "Bottom frames", value: formattedDualTagCounts(state, role: .bottom))
-                        metricRow(title: "Top ultimos", value: formattedDualTagRecentCounts(state, role: .top))
-                        metricRow(title: "Bottom ultimos", value: formattedDualTagRecentCounts(state, role: .bottom))
-                        metricRow(title: "Modo", value: formattedDualMarkerPoseMode(state))
-                        metricRow(title: "Dual validos", value: "\(state.scanDualTagFrameCount)")
-                        metricRow(title: "Top fallback validos", value: "\(state.scanTopFallbackFrameCount)")
-                        metricRow(title: "Bottom fallback validos", value: "\(state.scanBottomFallbackFrameCount)")
-                        metricRow(title: "Dual %", value: formattedDualMarkerScanDualPercent(state))
-                        metricRow(title: "Dual angular", value: formattedDualMarkerAngularCoverage(state))
-                        metricRow(title: "Modo dominante", value: formattedDualMarkerDominantMode(state))
-                        metricRow(title: "Dist. plano", value: formattedDualMarkerPlanarDistance(state))
-                        metricRow(title: "Dual descartados", value: "\(state.scanDualTagRejectedFrameCount)")
-                        metricRow(
-                            title: "Obs coletadas",
-                            value: "\(state.finalRefinementCollectedObservationCount)"
-                        )
-                        metricRow(
-                            title: "Obs antes filtro",
-                            value: "\(state.finalRefinementObservationCountBeforeFilter)"
-                        )
-                        metricRow(title: "Obs refino usadas", value: "\(state.finalRefinementUsedObservationCount)")
-                        metricRow(title: "Obs refino descart.", value: "\(state.finalRefinementDiscardedObservationCount)")
-                        metricRow(
-                            title: "Score medio final",
-                            value: formattedDualMarkerFinalAverageQualityScore(state)
-                        )
-                        metricRow(
-                            title: "Image X medio",
-                            value: formattedDualMarkerFinalAverageImageX(state)
-                        )
-                        metricRow(
-                            title: "Image Y medio",
-                            value: formattedDualMarkerFinalAverageImageY(state)
-                        )
-                        metricRow(
-                            title: "Edge medio",
-                            value: formattedDualMarkerFinalAverageImageEdgeMargin(state)
-                        )
-                        metricRow(
-                            title: "Var pos final",
-                            value: formattedDualMarkerFinalPositionVariation(state)
-                        )
-                        metricRow(
-                            title: "Var rot final",
-                            value: formattedDualMarkerFinalRotationVariation(state)
-                        )
-                        metricRow(
-                            title: "Normal media",
-                            value: formattedDualMarkerFinalAverageNormal(state)
-                        )
-                        metricRow(
-                            title: "Normal std",
-                            value: formattedDualMarkerNormalStdDev(state)
-                        )
-                        metricRow(
-                            title: "Normal peak",
-                            value: formattedDualMarkerNormalPeak(state)
-                        )
-                        metricRow(
-                            title: "Normal pior",
-                            value: formattedDualMarkerWorstNormalDifference(state)
-                        )
-                        metricRow(
-                            title: "Dual normal std",
-                            value: formattedDualMarkerDualNormalStdDev(state)
-                        )
-                        metricRow(
-                            title: "Fallback normal std",
-                            value: formattedDualMarkerFallbackNormalStdDev(state)
-                        )
-                        metricRow(
-                            title: "Dual vs fallback",
-                            value: formattedDualMarkerDualFallbackNormalDifference(state)
-                        )
-                        metricRow(
-                            title: "Motion score final",
-                            value: formattedDualMarkerAverageMotionScore(state)
-                        )
-                        metricRow(
-                            title: "Modo final",
-                            value: formattedDualMarkerFinalDominantMode(state)
-                        )
-                        metricRow(
-                            title: "Desc borda",
-                            value: "\(state.finalRefinementEdgeDiscardedObservationCount)"
-                        )
-                        metricRow(
-                            title: "Desc bottom peq.",
-                            value: "\(state.finalRefinementSmallBottomDiscardedObservationCount)"
-                        )
-                        metricRow(
-                            title: "Desc reproj.",
-                            value: "\(state.finalRefinementReprojectionDiscardedObservationCount)"
-                        )
-                        metricRow(
-                            title: "Desc fallback",
-                            value: "\(state.finalRefinementLowPriorityFallbackDiscardedObservationCount)"
-                        )
-                        metricRow(
-                            title: "Desc normal",
-                            value: "\(state.finalRefinementNormalOutlierDiscardedObservationCount)"
-                        )
-                        metricRow(
-                            title: "Desc motion",
-                            value: "\(state.finalRefinementMotionDiscardedObservationCount)"
-                        )
-                        metricRow(
-                            title: "Motion penal.",
-                            value: "\(state.finalRefinementMotionPenalizedObservationCount)"
-                        )
-                        metricRow(title: "Outliers removidos", value: "\(state.finalRefinementOutlierRemovedCount)")
-                        metricRow(
-                            title: "Erro medio final",
-                            value: formattedDualMarkerFinalAverageReprojectionError(state)
-                        )
-                        metricRow(
-                            title: "Confianca final",
-                            value: formattedDualMarkerFinalConfidence(state)
-                        )
-                        metricRow(
-                            title: "Motivo confianca",
-                            value: formattedDualMarkerFinalConfidenceReason(state)
-                        )
-                        metricRow(title: "Desc. principal", value: formattedDualMarkerDiscardReason(state))
-                        metricRow(title: "Erro reproj.", value: formattedDualMarkerReprojectionError(state))
-                        metricRow(title: "Pontos", value: formattedDualMarkerPointCount(state))
-                        metricRow(title: "Aviso", value: formattedDualMarkerDetectionWarning(state))
+                            metricRow(title: "Marker fisico", value: "ID \(state.physicalMarkerId)")
+                            metricRow(title: "Top agora \(state.topTagId)", value: formattedBool(state.topTagRawDetected))
+                            metricRow(title: "Bottom agora \(state.bottomTagId)", value: formattedBool(state.bottomTagRawDetected))
+                            metricRow(title: "Bottom recente", value: formattedBool(state.bottomTagRecentlySeen))
+                            metricRow(title: "Modo", value: formattedDualMarkerPoseMode(state))
+                            metricRow(title: "Dual validos", value: "\(state.scanDualTagFrameCount)")
+                            metricRow(title: "Top fallback validos", value: "\(state.scanTopFallbackFrameCount)")
+                            metricRow(title: "Bottom fallback validos", value: "\(state.scanBottomFallbackFrameCount)")
+                            metricRow(title: "Dual %", value: formattedDualMarkerScanDualPercent(state))
+                            metricRow(title: "Dual angular", value: formattedDualMarkerAngularCoverage(state))
+                            metricRow(title: "Modo dominante", value: formattedDualMarkerDominantMode(state))
+                            metricRow(title: "Erro reproj.", value: formattedDualMarkerReprojectionError(state))
+                            metricRow(title: "Pontos", value: formattedDualMarkerPointCount(state))
+                            metricRow(title: "Aviso", value: formattedDualMarkerDetectionWarning(state))
                         }
                         .padding(.vertical, 4)
                     }
@@ -867,7 +714,7 @@ struct ScannerView: View {
     }
 
     private var missingDebugValue: String {
-        "—"
+        "\u{2014}"
     }
 
     private func safeDouble(_ value: Double?, decimals: Int = 2) -> String {
@@ -2204,7 +2051,7 @@ struct ScannerView: View {
 
                     Spacer()
 
-                    Text(String(format: "%.1f mm", viewModel.poseMarkerSizeMillimeters))
+                    Text(safeUnit(viewModel.poseMarkerSizeMillimeters, decimals: 1, unit: "mm"))
                         .monospacedDigit()
                 }
             }
