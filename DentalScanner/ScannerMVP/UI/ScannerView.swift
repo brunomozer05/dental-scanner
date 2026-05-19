@@ -14,6 +14,11 @@ struct ScannerView: View {
     private let panelBackgroundColor = Color(red: 0.11, green: 0.11, blue: 0.12)
     private let chipBackgroundColor = Color(red: 0.16, green: 0.16, blue: 0.18)
     private let scannerAccentColor = Color(red: 0.23, green: 0.51, blue: 0.96)
+    private let showAdvancedPoseDebug = false
+    private let showMotionDebug = false
+    private let showStaticStabilityDebug = false
+    private let showPlanarDebug = false
+    private let showQualityDebug = false
 
     init(onCancel: (() -> Void)? = nil) {
         self.onCancel = onCancel
@@ -101,13 +106,11 @@ struct ScannerView: View {
                     }
                 }
                 .zIndex(2)
-                .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
         .background(Color.black)
         .ignoresSafeArea(.all)
         .supportedInterfaceOrientations(.landscape)
-        .animation(.easeInOut(duration: 0.18), value: isDebugPanelExpanded)
         .task {
             applyPreviewOrientation(previewOrientation)
             updateLandscapePreviewOrientation()
@@ -233,9 +236,7 @@ struct ScannerView: View {
                 isEnabled: true,
                 isActive: isDebugPanelExpanded
             ) {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    isDebugPanelExpanded.toggle()
-                }
+                isDebugPanelExpanded.toggle()
             }
         }
     }
@@ -417,7 +418,7 @@ struct ScannerView: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
-    private func debugPanel(isLandscape: Bool) -> some View {
+    private func debugPanel(isLandscape _: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Debug")
@@ -430,24 +431,65 @@ struct ScannerView: View {
                     .foregroundStyle(.secondary)
             }
 
-            ScrollView(showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
+                basicDebugSection
+
+                if showAdvancedPoseDebug {
                     debugSummarySection
                     poseDebugSection
-                    scanDebugControl
+                }
+
+                if showStaticStabilityDebug {
                     staticPoseStabilitySection
+                }
+
+                if showQualityDebug {
                     dualMarkerDebugSection
                     scanQualitySection
+                }
+
+                if showMotionDebug || showPlanarDebug {
+                    scanQualitySection
+                }
+
+                if showAdvancedPoseDebug {
+                    scanDebugControl
                     errorDebugSection
                 }
-                .padding(.trailing, 2)
             }
-            .frame(maxHeight: isLandscape ? 260 : 360)
         }
         .padding(12)
         .foregroundStyle(.white)
         .background(panelBackgroundColor.opacity(0.92))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var basicDebugSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Debug seguro")
+                .font(.subheadline.weight(.semibold))
+
+            basicDebugRow(title: "Estado atual", value: formattedScanState)
+            basicDebugRow(title: "Perfil marker", value: viewModel.markerProfile.debugTitle)
+            basicDebugRow(title: "isGeneratingSTL", value: formattedBool(viewModel.isGeneratingSTL))
+            basicDebugRow(title: "STL URL existe", value: formattedSTLExportURLExists)
+            basicDebugRow(title: "Erro STL", value: formattedSTLExportError)
+            basicDebugRow(title: "tagPoses atuais", value: formattedCurrentExportableTagPoseCount)
+        }
+    }
+
+    private func basicDebugRow(title: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(title)
+                .foregroundStyle(.secondary)
+
+            Spacer(minLength: 8)
+
+            Text(value.isEmpty ? missingDebugValue : value)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(2)
+        }
+        .font(.caption.weight(.semibold))
     }
 
     private var debugSummarySection: some View {
@@ -576,9 +618,7 @@ struct ScannerView: View {
 
     private var debugPanelToggleButton: some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.18)) {
-                isDebugPanelExpanded.toggle()
-            }
+            isDebugPanelExpanded.toggle()
         } label: {
             Image(systemName: isDebugPanelExpanded ? "gearshape.fill" : "gearshape")
                 .font(.body.weight(.semibold))
