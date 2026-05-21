@@ -411,6 +411,9 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var currentMotionFrameQuality: MotionFrameQuality = .neutral
     @Published private(set) var scanMotionPenalizedFrameCount: Int = 0
     @Published private(set) var scanMotionDiscardedObservationCount: Int = 0
+    @Published private(set) var currentARKitFrameQuality: ARKitFrameQuality = .disabled
+    @Published private(set) var arkitAssistedCaptureEnabled: Bool = false
+    @Published private(set) var scanARKitPenalizedFrameCount: Int = 0
     @Published private(set) var currentCameraFrameQuality: CameraFrameQuality = .neutral
     @Published private(set) var currentCameraDebugSnapshot: CameraDebugSnapshot = .unavailable
     @Published private(set) var lockFocusAndExposureForScan: Bool = false
@@ -482,6 +485,7 @@ final class ScannerViewModel: ObservableObject {
     private let multiFramePoseAccumulator: MultiFramePoseAccumulator
     private let finalPoseRefiner: FinalPoseRefiner
     private let motionFrameQualityService: MotionFrameQualityService
+    private let arKitCaptureAssistService: ARKitCaptureAssistService
     private let poseSmoother = PoseSmoother()
     private let scanReadinessConfiguration = ScanReadinessConfiguration.default
     private let stlExporter: STLExporter
@@ -692,6 +696,7 @@ final class ScannerViewModel: ObservableObject {
         multiFramePoseAccumulator: MultiFramePoseAccumulator = MultiFramePoseAccumulator(),
         finalPoseRefiner: FinalPoseRefiner = FinalPoseRefiner(),
         motionFrameQualityService: MotionFrameQualityService = MotionFrameQualityService(),
+        arKitCaptureAssistService: ARKitCaptureAssistService = ARKitCaptureAssistService(),
         stlExporter: STLExporter = STLExporter(),
         scanStorageManager: ScanStorageManager = ScanStorageManager()
     ) {
@@ -702,10 +707,16 @@ final class ScannerViewModel: ObservableObject {
         self.multiFramePoseAccumulator = multiFramePoseAccumulator
         self.finalPoseRefiner = finalPoseRefiner
         self.motionFrameQualityService = motionFrameQualityService
+        self.arKitCaptureAssistService = arKitCaptureAssistService
         self.stlExporter = stlExporter
         self.scanStorageManager = scanStorageManager
         self.isOpenCVAvailable = arUcoDetector.isOpenCVAvailable
         bindCameraCallbacks()
+    }
+
+    deinit {
+        motionFrameQualityService.stop()
+        arKitCaptureAssistService.stop()
     }
 
     func prepareCamera() async {
@@ -768,6 +779,9 @@ final class ScannerViewModel: ObservableObject {
 
         cameraService.startRunning()
         motionFrameQualityService.start()
+        if arkitAssistedCaptureEnabled {
+            arKitCaptureAssistService.start()
+        }
         await MainActor.run {
             cameraState = .running
         }
@@ -778,7 +792,9 @@ final class ScannerViewModel: ObservableObject {
         shouldRunCamera = false
         cameraService.stopRunning()
         motionFrameQualityService.stop()
+        arKitCaptureAssistService.stop()
         currentMotionFrameQuality = .neutral
+        currentARKitFrameQuality = arkitAssistedCaptureEnabled ? .waitingForData : .disabled
         currentCameraFrameQuality = .neutral
         turnOffTorchForInactiveCamera()
         guard cameraState != .failed else { return }
@@ -853,6 +869,24 @@ final class ScannerViewModel: ObservableObject {
                 self.lockFocusAndExposureForScan = snapshot.automaticLockEnabled
                 self.cameraLockErrorMessage = snapshot.lockError
             }
+        }
+    }
+
+    @MainActor
+    func setARKitAssistedCaptureEnabled(_ isEnabled: Bool) {
+        guard arkitAssistedCaptureEnabled != isEnabled else {
+            return
+        }
+
+        arkitAssistedCaptureEnabled = isEnabled
+        if isEnabled {
+            currentARKitFrameQuality = .waitingForData
+            if cameraState == .running {
+                arKitCaptureAssistService.start()
+            }
+        } else {
+            arKitCaptureAssistService.stop()
+            currentARKitFrameQuality = .disabled
         }
     }
 
@@ -1536,6 +1570,7 @@ final class ScannerViewModel: ObservableObject {
     private func handleFrame(_ frame: CameraFrame) {
         let metrics = buildFrameMetrics(from: frame)
         let motionQuality = motionFrameQualityService.quality(near: metrics.lastFrameTimestamp)
+        let arKitQuality = arKitCaptureAssistService.quality(near: metrics.lastFrameTimestamp)
         let rawArucoMetrics = detectArucoMarkers(in: frame)
         let validatedDetections = arUcoConsistencyFilter.filterDetections(rawArucoMetrics.detections)
         let arucoMetrics = arucoMetrics(
@@ -1619,7 +1654,8 @@ final class ScannerViewModel: ObservableObject {
                 markerSizeMillimeters: markerSizeMillimeters,
                 markerProfile: activeMarkerProfile,
                 dualMarkerDefinitions: dualMarkerDefinitions,
-                motionQuality: motionQuality
+                motionQuality: motionQuality,
+                arKitQuality: arKitQuality
             )
             : []
         let staticPoseObservations = shouldCollectStaticPoseFrame
@@ -1630,7 +1666,8 @@ final class ScannerViewModel: ObservableObject {
                 markerSizeMillimeters: markerSizeMillimeters,
                 markerProfile: activeMarkerProfile,
                 dualMarkerDefinitions: dualMarkerDefinitions,
-                motionQuality: motionQuality
+                motionQuality: motionQuality,
+                arKitQuality: arKitQuality
             )
             : []
 
@@ -1640,6 +1677,7 @@ final class ScannerViewModel: ObservableObject {
             self.estimatedFPS = metrics.estimatedFPS
             self.lastFrameTimestamp = metrics.lastFrameTimestamp
             self.currentMotionFrameQuality = motionQuality
+            self.currentARKitFrameQuality = arKitQuality
             self.currentCameraFrameQuality = frame.cameraQuality
             self.currentCameraDebugSnapshot = frame.cameraDebugSnapshot
             self.cameraLockErrorMessage = frame.cameraDebugSnapshot.lockError
@@ -1704,6 +1742,7 @@ final class ScannerViewModel: ObservableObject {
                     finalPoseObservations: frameFinalPoseObservations,
                     dualTagRejectionReasons: poseMetrics.dualTagRejectionReasons,
                     cameraQuality: frame.cameraQuality,
+                    arKitQuality: arKitQuality,
                     hasIntrinsics: frame.metadata.intrinsicMatrix != nil,
                     timestamp: metrics.lastFrameTimestamp,
                     frameIndex: metrics.totalFramesReceived
@@ -1762,6 +1801,7 @@ final class ScannerViewModel: ObservableObject {
         scanFinalMainIssueSummary = "-"
         scanMotionPenalizedFrameCount = 0
         scanMotionDiscardedObservationCount = 0
+        scanARKitPenalizedFrameCount = 0
         cameraFocusAdjustingFrameCount = 0
         cameraExposureAdjustingFrameCount = 0
         cameraWhiteBalanceAdjustingFrameCount = 0
@@ -1825,6 +1865,7 @@ final class ScannerViewModel: ObservableObject {
         finalPoseObservations: [FinalPoseObservation],
         dualTagRejectionReasons: [Int: String],
         cameraQuality: CameraFrameQuality,
+        arKitQuality: ARKitFrameQuality,
         hasIntrinsics: Bool,
         timestamp: Double,
         frameIndex: Int
@@ -1834,6 +1875,11 @@ final class ScannerViewModel: ObservableObject {
         }
 
         scanAverageDistanceMm = averageDistance(in: rawPoseResults)
+        if arKitQuality.isEnabled,
+           arKitQuality.stabilityScore.isFinite,
+           arKitQuality.stabilityScore < 0.999 {
+            scanARKitPenalizedFrameCount += 1
+        }
 
         let frameReprojectionError = averageReprojectionError(in: rawPoseResults)
         if let cameraBlocker = cameraFrameQualityBlocker(
@@ -5072,7 +5118,8 @@ final class ScannerViewModel: ObservableObject {
         markerSizeMillimeters: Double,
         markerProfile: MarkerProfile,
         dualMarkerDefinitions: [DualArucoMarkerDefinition],
-        motionQuality: MotionFrameQuality
+        motionQuality: MotionFrameQuality,
+        arKitQuality: ARKitFrameQuality
     ) -> [FinalPoseObservation] {
         guard let cameraMatrix = frame.metadata.intrinsicMatrix else {
             return []
@@ -5122,7 +5169,8 @@ final class ScannerViewModel: ObservableObject {
                     bottomTagAreaPixels: nil,
                     distanceMm: poseResult.distanceMm,
                     motionQuality: motionQuality,
-                    cameraQuality: frame.cameraQuality
+                    cameraQuality: frame.cameraQuality,
+                    arKitQuality: arKitQuality
                 )
             }
         case .dualArucoV2:
@@ -5164,7 +5212,8 @@ final class ScannerViewModel: ObservableObject {
                     bottomTagAreaPixels: observationPoints.bottomTagAreaPixels,
                     distanceMm: poseResult.distanceMm,
                     motionQuality: motionQuality,
-                    cameraQuality: frame.cameraQuality
+                    cameraQuality: frame.cameraQuality,
+                    arKitQuality: arKitQuality
                 )
             }
         }

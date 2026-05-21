@@ -43,6 +43,7 @@ struct ScannerDebugSnapshot: Equatable {
         let manualLensPosition: String
         let autoFocusOnDetectedAruco: String
         let lockAfterArucoFocus: String
+        let arkitAssistedCaptureEnabled: String
         let requiredAngularCoverage: String
         let minimumDualTagFrames: String
         let minimumDualAngularCoverage: String
@@ -111,6 +112,22 @@ struct ScannerDebugSnapshot: Equatable {
         let distanceReady: String
     }
 
+    struct ARKitSection: Equatable {
+        let enabled: String
+        let available: String
+        let trackingState: String
+        let reliable: String
+        let hasTransform: String
+        let hasIntrinsics: String
+        let motionSinceLastFrame: String
+        let intrinsicsChanged: String
+        let lightEstimate: String
+        let stabilityScore: String
+        let rotationStabilityScore: String
+        let recent: String
+        let penalizedFrames: String
+    }
+
     struct MarkerV2Row: Equatable, Identifiable {
         let markerId: Int
         let dualFrames: String
@@ -129,6 +146,7 @@ struct ScannerDebugSnapshot: Equatable {
     let readiness: ReadinessSection
     let configuration: ConfigurationSection
     let camera: CameraSection
+    let arkit: ARKitSection
     let isDualArucoV2: Bool
     let markerV2Rows: [MarkerV2Row]
 }
@@ -172,6 +190,7 @@ extension ScannerViewModel {
                 manualLensPosition: Self.debugNumber(manualLensPosition, decimals: 2),
                 autoFocusOnDetectedAruco: debugBool(autoFocusOnDetectedAruco),
                 lockAfterArucoFocus: debugBool(lockAfterArucoFocus),
+                arkitAssistedCaptureEnabled: debugBool(arkitAssistedCaptureEnabled),
                 requiredAngularCoverage: Self.debugPercent(scanRequiredAngularCoveragePercent),
                 minimumDualTagFrames: "\(scanMinimumDualTagFrameCount)",
                 minimumDualAngularCoverage: Self.debugPercent(scanRequiredDualAngularCoveragePercent),
@@ -203,6 +222,10 @@ extension ScannerViewModel {
                 lastArucoFocusRequestAge: lastArucoFocusRequestAge(),
                 arucoFocusCooldown: arucoFocusCooldownSeconds,
                 lastArucoFocusError: lastArucoFocusErrorMessage
+            ),
+            arkit: Self.debugARKitSection(
+                currentARKitFrameQuality,
+                penalizedFrames: scanARKitPenalizedFrameCount
             ),
             isDualArucoV2: markerProfile == .dualArucoV2,
             markerV2Rows: markerProfile == .dualArucoV2
@@ -314,6 +337,27 @@ extension ScannerViewModel {
         )
     }
 
+    private static func debugARKitSection(
+        _ quality: ARKitFrameQuality,
+        penalizedFrames: Int
+    ) -> ScannerDebugSnapshot.ARKitSection {
+        ScannerDebugSnapshot.ARKitSection(
+            enabled: quality.isEnabled ? "Sim" : "Nao",
+            available: quality.isAvailable ? "Sim" : "Nao",
+            trackingState: debugText(quality.trackingStateText),
+            reliable: quality.isTrackingReliable ? "Sim" : "Nao",
+            hasTransform: quality.hasCameraTransform ? "Sim" : "Nao",
+            hasIntrinsics: quality.hasIntrinsics ? "Sim" : "Nao",
+            motionSinceLastFrame: debugMeters(quality.cameraMotionSinceLastFrame),
+            intrinsicsChanged: quality.intrinsicsChanged ? "Sim" : "Nao",
+            lightEstimate: debugText(quality.lightEstimateText),
+            stabilityScore: debugUnitIntervalPercent(quality.stabilityScore),
+            rotationStabilityScore: debugUnitIntervalPercent(quality.rotationStabilityScore),
+            recent: quality.isRecent ? "Sim" : "Nao",
+            penalizedFrames: "\(penalizedFrames)"
+        )
+    }
+
     private static func debugScanStateTitle(_ scanState: ScanState) -> String {
         switch scanState {
         case .idle:
@@ -407,6 +451,18 @@ extension ScannerViewModel {
         }
 
         return "\(String(format: "%.1f", value)) mm"
+    }
+
+    private static func debugMeters(_ value: Double?) -> String {
+        guard let value, value.isFinite else {
+            return ScannerDebugSnapshot.missingValue
+        }
+
+        if value < 0.001 {
+            return "\(String(format: "%.2f", value * 1000.0)) mm"
+        }
+
+        return "\(String(format: "%.4f", value)) m"
     }
 
     private static func debugOptionalBool(_ value: Bool?) -> String {

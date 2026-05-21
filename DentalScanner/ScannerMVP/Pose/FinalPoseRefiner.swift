@@ -18,6 +18,7 @@ struct FinalPoseObservation {
     let distanceMm: Double
     let motionQuality: MotionFrameQuality?
     let cameraQuality: CameraFrameQuality?
+    let arKitQuality: ARKitFrameQuality?
 
     static func markerObjectPoints(markerSizeMillimeters: Double) -> [SIMD3<Double>] {
         let halfSize = markerSizeMillimeters / 2.0
@@ -46,6 +47,8 @@ struct PoseObservationQuality: Equatable {
     let motionRotationStabilityScore: Double
     let cameraStabilityScore: Double
     let cameraRotationStabilityScore: Double
+    let arKitStabilityScore: Double
+    let arKitRotationStabilityScore: Double
     let wasNearImageEdge: Bool
     let wasHardRejectedByEdge: Bool
     let wasRejectedByBottomArea: Bool
@@ -1342,12 +1345,16 @@ final class FinalPoseRefiner {
         let cameraAdjustment = quality.cameraStabilityScore > 0
             ? quality.cameraRotationStabilityScore / quality.cameraStabilityScore
             : quality.cameraRotationStabilityScore
+        let arKitAdjustment = quality.arKitStabilityScore > 0
+            ? quality.arKitRotationStabilityScore / quality.arKitStabilityScore
+            : quality.arKitRotationStabilityScore
         let weight = quality.qualityScore /
             positionSourceWeight *
             rotationSourceWeight *
             bottomRotationConfidence *
             min(max(motionAdjustment, 0.05), 1.0) *
-            min(max(cameraAdjustment, 0.05), 1.0)
+            min(max(cameraAdjustment, 0.05), 1.0) *
+            min(max(arKitAdjustment, 0.05), 1.0)
 
         return weight.isFinite ? max(weight, 0.0) : 0.0
     }
@@ -1428,6 +1435,9 @@ final class FinalPoseRefiner {
                 cameraStabilityScore: observation.cameraQuality?.cameraStabilityScore ?? 1.0,
                 cameraRotationStabilityScore:
                     observation.cameraQuality?.rotationStabilityScore ?? 1.0,
+                arKitStabilityScore: observation.arKitQuality?.stabilityScore ?? 1.0,
+                arKitRotationStabilityScore:
+                    observation.arKitQuality?.rotationStabilityScore ?? 1.0,
                 wasNearImageEdge: false,
                 wasHardRejectedByEdge: false,
                 wasRejectedByBottomArea: false,
@@ -1456,6 +1466,9 @@ final class FinalPoseRefiner {
         let cameraStabilityScore = observation.cameraQuality?.cameraStabilityScore ?? 1.0
         let cameraRotationStabilityScore =
             observation.cameraQuality?.rotationStabilityScore ?? cameraStabilityScore
+        let arKitStabilityScore = observation.arKitQuality?.stabilityScore ?? 1.0
+        let arKitRotationStabilityScore =
+            observation.arKitQuality?.rotationStabilityScore ?? arKitStabilityScore
         let cameraRejectionReason = observation.cameraQuality?.scanRejectionReason
         let wasRejectedByCamera = cameraRejectionReason != nil || cameraStabilityScore < 0.999
         let rawScore = sourceScore *
@@ -1465,7 +1478,8 @@ final class FinalPoseRefiner {
             imageCenterScore *
             bottomConfidenceScore *
             motionStabilityScore *
-            cameraStabilityScore
+            cameraStabilityScore *
+            arKitStabilityScore
         let rejectionReason: String?
         if reprojectionScore <= 0 {
             rejectionReason = "reprojection error alto"
@@ -1501,6 +1515,10 @@ final class FinalPoseRefiner {
             cameraStabilityScore: cameraStabilityScore.isFinite ? cameraStabilityScore : 1.0,
             cameraRotationStabilityScore: cameraRotationStabilityScore.isFinite
                 ? cameraRotationStabilityScore
+                : 1.0,
+            arKitStabilityScore: arKitStabilityScore.isFinite ? arKitStabilityScore : 1.0,
+            arKitRotationStabilityScore: arKitRotationStabilityScore.isFinite
+                ? arKitRotationStabilityScore
                 : 1.0,
             wasNearImageEdge: wasNearImageEdge,
             wasHardRejectedByEdge: wasHardRejectedByEdge,

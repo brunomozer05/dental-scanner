@@ -134,6 +134,7 @@ struct ScannerView: View {
                             manualLensPosition: manualLensPositionBinding,
                             autoFocusOnDetectedAruco: autoFocusOnDetectedArucoBinding,
                             lockAfterArucoFocus: lockAfterArucoFocusBinding,
+                            arkitAssistedCaptureEnabled: arkitAssistedCaptureEnabledBinding,
                             lensPositionChangeThreshold: cameraLensPositionChangeThresholdBinding,
                             focusSettleTimeSeconds: cameraFocusSettleTimeBinding,
                             minimumAllowedSharpness: minimumAllowedSharpnessBinding,
@@ -544,6 +545,13 @@ struct ScannerView: View {
         Binding(
             get: { viewModel.lockAfterArucoFocus },
             set: { viewModel.setLockAfterArucoFocus($0) }
+        )
+    }
+
+    private var arkitAssistedCaptureEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.arkitAssistedCaptureEnabled },
+            set: { viewModel.setARKitAssistedCaptureEnabled($0) }
         )
     }
 

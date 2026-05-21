@@ -18,6 +18,7 @@ private enum OpenCV {
 
     static let systemDependencies: [TargetDependency] = [
         .sdk(name: "Accelerate", type: .framework, status: .required),
+        .sdk(name: "ARKit", type: .framework, status: .required),
         .sdk(name: "AVFoundation", type: .framework, status: .required),
         .sdk(name: "CoreGraphics", type: .framework, status: .required),
         .sdk(name: "CoreMedia", type: .framework, status: .required),

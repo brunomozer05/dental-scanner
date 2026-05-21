@@ -39,6 +39,7 @@ struct ScannerDebugPanelView: View {
     @Binding var manualLensPosition: Double
     @Binding var autoFocusOnDetectedAruco: Bool
     @Binding var lockAfterArucoFocus: Bool
+    @Binding var arkitAssistedCaptureEnabled: Bool
     @Binding var lensPositionChangeThreshold: Double
     @Binding var focusSettleTimeSeconds: Double
     @Binding var minimumAllowedSharpness: Double
@@ -149,6 +150,22 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "distanceReady", value: snapshot.camera.distanceReady)
                     }
 
+                    debugSection(title: "ARKit Assist") {
+                        debugRow(title: "Enabled", value: snapshot.arkit.enabled)
+                        debugRow(title: "Available", value: snapshot.arkit.available)
+                        debugRow(title: "Tracking", value: snapshot.arkit.trackingState)
+                        debugRow(title: "Reliable", value: snapshot.arkit.reliable)
+                        debugRow(title: "Has transform", value: snapshot.arkit.hasTransform)
+                        debugRow(title: "Has intrinsics", value: snapshot.arkit.hasIntrinsics)
+                        debugRow(title: "Motion/frame", value: snapshot.arkit.motionSinceLastFrame)
+                        debugRow(title: "Intrinsics changed", value: snapshot.arkit.intrinsicsChanged)
+                        debugRow(title: "Light estimate", value: snapshot.arkit.lightEstimate)
+                        debugRow(title: "Score", value: snapshot.arkit.stabilityScore)
+                        debugRow(title: "Rotation score", value: snapshot.arkit.rotationStabilityScore)
+                        debugRow(title: "Recent", value: snapshot.arkit.recent)
+                        debugRow(title: "Frames penalizados", value: snapshot.arkit.penalizedFrames)
+                    }
+
                     debugSection(title: "Config") {
                         debugRow(title: "Perfil marker", value: snapshot.configuration.markerProfile)
                         debugRow(title: "Barra distancia", value: snapshot.configuration.showDistanceGuide)
@@ -158,6 +175,7 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Lens manual", value: snapshot.configuration.manualLensPosition)
                         debugRow(title: "Auto focus ArUco", value: snapshot.configuration.autoFocusOnDetectedAruco)
                         debugRow(title: "Lock apos ArUco", value: snapshot.configuration.lockAfterArucoFocus)
+                        debugRow(title: "ARKit Assist", value: snapshot.configuration.arkitAssistedCaptureEnabled)
                         debugRow(title: "Frames min", value: snapshot.configuration.minimumGoodFrames)
                         debugRow(title: "Frames alvo", value: snapshot.configuration.targetValidFrames)
                         debugRow(title: "Cobertura angular", value: snapshot.configuration.requiredAngularCoverage)
@@ -181,6 +199,7 @@ struct ScannerDebugPanelView: View {
                         Toggle("Foco manual", isOn: $manualFocusEnabled)
                         Toggle("Auto focus no ArUco", isOn: $autoFocusOnDetectedAruco)
                         Toggle("Travar apos foco ArUco", isOn: $lockAfterArucoFocus)
+                        Toggle("ARKit Assist experimental", isOn: $arkitAssistedCaptureEnabled)
 
                         HStack(spacing: 8) {
                             Button("Lock camera now", action: onLockCameraNow)
