@@ -128,6 +128,24 @@ struct ScannerDebugSnapshot: Equatable {
         let penalizedFrames: String
     }
 
+    struct ExportQualitySection: Equatable {
+        let confidence: String
+        let highMarkers: String
+        let mediumMarkers: String
+        let lowMarkers: String
+        let worstMarker: String
+        let mainIssue: String
+        let finalObservationsUsed: String
+        let rejectedByFocus: String
+        let rejectedByBlur: String
+        let rejectedByCamera: String
+        let rejectedByNormal: String
+        let rejectedByFallback: String
+        let rejectedByEdge: String
+        let rejectedByMotion: String
+        let penalizedByARKit: String
+    }
+
     struct MarkerV2Row: Equatable, Identifiable {
         let markerId: Int
         let dualFrames: String
@@ -147,6 +165,7 @@ struct ScannerDebugSnapshot: Equatable {
     let configuration: ConfigurationSection
     let camera: CameraSection
     let arkit: ARKitSection
+    let exportQuality: ExportQualitySection
     let isDualArucoV2: Bool
     let markerV2Rows: [MarkerV2Row]
 }
@@ -226,6 +245,23 @@ extension ScannerViewModel {
             arkit: Self.debugARKitSection(
                 currentARKitFrameQuality,
                 penalizedFrames: scanARKitPenalizedFrameCount
+            ),
+            exportQuality: ScannerDebugSnapshot.ExportQualitySection(
+                confidence: debugString(scanFinalConfidenceSummary),
+                highMarkers: "\(scanFinalHighConfidenceMarkerCount)",
+                mediumMarkers: "\(scanFinalMediumConfidenceMarkerCount)",
+                lowMarkers: "\(scanFinalLowConfidenceMarkerCount)",
+                worstMarker: debugString(scanFinalWorstMarkerSummary),
+                mainIssue: debugString(scanFinalMainIssueSummary),
+                finalObservationsUsed: "\(scanFinalUsedObservationCount)",
+                rejectedByFocus: "\(scanFinalRejectedByFocusCount)",
+                rejectedByBlur: "\(scanFinalRejectedByBlurCount)",
+                rejectedByCamera: "\(scanFinalRejectedByCameraCount)",
+                rejectedByNormal: "\(scanFinalRejectedByNormalCount)",
+                rejectedByFallback: "\(scanFinalRejectedByFallbackCount)",
+                rejectedByEdge: "\(scanFinalRejectedByEdgeCount)",
+                rejectedByMotion: "\(scanFinalRejectedByMotionCount)",
+                penalizedByARKit: "\(scanFinalPenalizedByARKitCount)"
             ),
             isDualArucoV2: markerProfile == .dualArucoV2,
             markerV2Rows: markerProfile == .dualArucoV2

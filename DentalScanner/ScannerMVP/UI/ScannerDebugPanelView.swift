@@ -166,6 +166,24 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Frames penalizados", value: snapshot.arkit.penalizedFrames)
                     }
 
+                    debugSection(title: "Export Quality") {
+                        debugRow(title: "Confianca", value: snapshot.exportQuality.confidence)
+                        debugRow(title: "Markers alta", value: snapshot.exportQuality.highMarkers)
+                        debugRow(title: "Markers media", value: snapshot.exportQuality.mediumMarkers)
+                        debugRow(title: "Markers baixa", value: snapshot.exportQuality.lowMarkers)
+                        debugRow(title: "Worst marker", value: snapshot.exportQuality.worstMarker)
+                        debugRow(title: "Main issue", value: snapshot.exportQuality.mainIssue)
+                        debugRow(title: "Observacoes finais", value: snapshot.exportQuality.finalObservationsUsed)
+                        debugRow(title: "Rejeitadas foco", value: snapshot.exportQuality.rejectedByFocus)
+                        debugRow(title: "Rejeitadas blur", value: snapshot.exportQuality.rejectedByBlur)
+                        debugRow(title: "Rejeitadas camera", value: snapshot.exportQuality.rejectedByCamera)
+                        debugRow(title: "Rejeitadas normal", value: snapshot.exportQuality.rejectedByNormal)
+                        debugRow(title: "Rejeitadas fallback", value: snapshot.exportQuality.rejectedByFallback)
+                        debugRow(title: "Rejeitadas edge", value: snapshot.exportQuality.rejectedByEdge)
+                        debugRow(title: "Rejeitadas motion", value: snapshot.exportQuality.rejectedByMotion)
+                        debugRow(title: "Penalizadas ARKit", value: snapshot.exportQuality.penalizedByARKit)
+                    }
+
                     debugSection(title: "Config") {
                         debugRow(title: "Perfil marker", value: snapshot.configuration.markerProfile)
                         debugRow(title: "Barra distancia", value: snapshot.configuration.showDistanceGuide)

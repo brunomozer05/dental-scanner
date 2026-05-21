@@ -408,6 +408,18 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var scanFinalConfidenceSummary: String = "-"
     @Published private(set) var scanFinalWorstMarkerSummary: String = "-"
     @Published private(set) var scanFinalMainIssueSummary: String = "-"
+    @Published private(set) var scanFinalHighConfidenceMarkerCount: Int = 0
+    @Published private(set) var scanFinalMediumConfidenceMarkerCount: Int = 0
+    @Published private(set) var scanFinalLowConfidenceMarkerCount: Int = 0
+    @Published private(set) var scanFinalUsedObservationCount: Int = 0
+    @Published private(set) var scanFinalRejectedByFocusCount: Int = 0
+    @Published private(set) var scanFinalRejectedByBlurCount: Int = 0
+    @Published private(set) var scanFinalRejectedByCameraCount: Int = 0
+    @Published private(set) var scanFinalRejectedByNormalCount: Int = 0
+    @Published private(set) var scanFinalRejectedByFallbackCount: Int = 0
+    @Published private(set) var scanFinalRejectedByEdgeCount: Int = 0
+    @Published private(set) var scanFinalRejectedByMotionCount: Int = 0
+    @Published private(set) var scanFinalPenalizedByARKitCount: Int = 0
     @Published private(set) var currentMotionFrameQuality: MotionFrameQuality = .neutral
     @Published private(set) var scanMotionPenalizedFrameCount: Int = 0
     @Published private(set) var scanMotionDiscardedObservationCount: Int = 0
@@ -1449,6 +1461,10 @@ final class ScannerViewModel: ObservableObject {
             scanReadinessMessage = "Erro ao gerar modelo"
             scanQualityStatus = "Erro ao gerar modelo"
             scanReadinessBlockerSummary = "Erro STL: \(stlExportErrorMessage ?? "desconhecido")"
+        } else if scanFinalConfidenceSummary == FinalPoseMarkerConfidence.low.rawValue {
+            scanReadinessMessage = "Export baixa confianca: \(scanFinalWorstMarkerSummary)"
+            scanQualityStatus = "Baixa confianca final"
+            scanReadinessBlockerSummary = "Aviso final: \(scanFinalMainIssueSummary)"
         } else {
             scanReadinessMessage = "Pronto para gerar modelo"
             scanQualityStatus = "Pronto para exportar"
@@ -1799,6 +1815,18 @@ final class ScannerViewModel: ObservableObject {
         scanFinalConfidenceSummary = "-"
         scanFinalWorstMarkerSummary = "-"
         scanFinalMainIssueSummary = "-"
+        scanFinalHighConfidenceMarkerCount = 0
+        scanFinalMediumConfidenceMarkerCount = 0
+        scanFinalLowConfidenceMarkerCount = 0
+        scanFinalUsedObservationCount = 0
+        scanFinalRejectedByFocusCount = 0
+        scanFinalRejectedByBlurCount = 0
+        scanFinalRejectedByCameraCount = 0
+        scanFinalRejectedByNormalCount = 0
+        scanFinalRejectedByFallbackCount = 0
+        scanFinalRejectedByEdgeCount = 0
+        scanFinalRejectedByMotionCount = 0
+        scanFinalPenalizedByARKitCount = 0
         scanMotionPenalizedFrameCount = 0
         scanMotionDiscardedObservationCount = 0
         scanARKitPenalizedFrameCount = 0
@@ -5368,6 +5396,18 @@ final class ScannerViewModel: ObservableObject {
             scanFinalConfidenceSummary = "-"
             scanFinalWorstMarkerSummary = "-"
             scanFinalMainIssueSummary = "-"
+            scanFinalHighConfidenceMarkerCount = 0
+            scanFinalMediumConfidenceMarkerCount = 0
+            scanFinalLowConfidenceMarkerCount = 0
+            scanFinalUsedObservationCount = 0
+            scanFinalRejectedByFocusCount = 0
+            scanFinalRejectedByBlurCount = 0
+            scanFinalRejectedByCameraCount = 0
+            scanFinalRejectedByNormalCount = 0
+            scanFinalRejectedByFallbackCount = 0
+            scanFinalRejectedByEdgeCount = 0
+            scanFinalRejectedByMotionCount = 0
+            scanFinalPenalizedByARKitCount = 0
             scanMotionDiscardedObservationCount = 0
             return
         }
@@ -5377,6 +5417,36 @@ final class ScannerViewModel: ObservableObject {
         }
         scanMotionDiscardedObservationCount = diagnostics.reduce(0) {
             $0 + $1.motionDiscardedObservationCount
+        }
+        scanFinalHighConfidenceMarkerCount = diagnostics.filter { $0.finalConfidence == .high }.count
+        scanFinalMediumConfidenceMarkerCount = diagnostics.filter { $0.finalConfidence == .medium }.count
+        scanFinalLowConfidenceMarkerCount = diagnostics.filter { $0.finalConfidence == .low }.count
+        scanFinalUsedObservationCount = diagnostics.reduce(0) {
+            $0 + $1.selectedObservationCount
+        }
+        scanFinalRejectedByFocusCount = diagnostics.reduce(0) {
+            $0 + $1.cameraFocusDiscardedObservationCount
+        }
+        scanFinalRejectedByBlurCount = diagnostics.reduce(0) {
+            $0 + $1.cameraBlurDiscardedObservationCount
+        }
+        scanFinalRejectedByCameraCount = diagnostics.reduce(0) {
+            $0 + $1.cameraDiscardedObservationCount
+        }
+        scanFinalRejectedByNormalCount = diagnostics.reduce(0) {
+            $0 + $1.normalOutlierDiscardedObservationCount
+        }
+        scanFinalRejectedByFallbackCount = diagnostics.reduce(0) {
+            $0 + $1.lowPriorityFallbackDiscardedObservationCount
+        }
+        scanFinalRejectedByEdgeCount = diagnostics.reduce(0) {
+            $0 + $1.edgeDiscardedObservationCount
+        }
+        scanFinalRejectedByMotionCount = diagnostics.reduce(0) {
+            $0 + $1.motionDiscardedObservationCount
+        }
+        scanFinalPenalizedByARKitCount = diagnostics.reduce(0) {
+            $0 + $1.arKitPenalizedObservationCount
         }
         let confidence = diagnostics.reduce(FinalPoseMarkerConfidence.high) { partialResult, item in
             if confidenceRank(item.finalConfidence) > confidenceRank(partialResult) {
@@ -5419,9 +5489,11 @@ final class ScannerViewModel: ObservableObject {
             diagnostics.edgeDiscardedObservationCount +
             diagnostics.smallBottomDiscardedObservationCount +
             diagnostics.reprojectionDiscardedObservationCount +
+            diagnostics.cameraDiscardedObservationCount +
             diagnostics.lowPriorityFallbackDiscardedObservationCount +
             diagnostics.normalOutlierDiscardedObservationCount +
             diagnostics.motionDiscardedObservationCount +
+            diagnostics.arKitPenalizedObservationCount +
             edgeFrameCount
     }
 
@@ -5439,6 +5511,15 @@ final class ScannerViewModel: ObservableObject {
             (diagnostics.averageImageEdgeMargin ?? 1.0) <
                 ImageEdgeDiagnosticsConfiguration.minimumPreferredNormalizedMargin {
             return "edge"
+        }
+
+        if diagnostics.cameraFocusDiscardedObservationCount > 0 ||
+            (diagnostics.finalAverageCameraStabilityScore ?? 1.0) < 0.55 {
+            return "focus"
+        }
+
+        if diagnostics.cameraBlurDiscardedObservationCount > 0 {
+            return "blur"
         }
 
         if diagnostics.smallBottomDiscardedObservationCount > 0 {
@@ -5463,6 +5544,11 @@ final class ScannerViewModel: ObservableObject {
         if diagnostics.motionDiscardedObservationCount > 0 ||
             (diagnostics.finalAverageMotionStabilityScore ?? 1.0) < 0.45 {
             return "motion"
+        }
+
+        if diagnostics.arKitPenalizedObservationCount > 0 ||
+            (diagnostics.finalAverageARKitStabilityScore ?? 1.0) < 0.45 {
+            return "arkit"
         }
 
         if diagnostics.lowPriorityFallbackDiscardedObservationCount > 0 {

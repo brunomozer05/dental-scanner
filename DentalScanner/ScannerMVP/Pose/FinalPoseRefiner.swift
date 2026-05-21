@@ -85,15 +85,21 @@ struct FinalPoseObservationSelectionDiagnostics: Equatable {
     let finalFallbackNormalStdDevDegrees: Double?
     let finalDualFallbackNormalDifferenceDegrees: Double?
     let finalAverageMotionStabilityScore: Double?
+    let finalAverageCameraStabilityScore: Double?
+    let finalAverageARKitStabilityScore: Double?
     let finalConfidence: FinalPoseMarkerConfidence
     let finalConfidenceReason: String?
     let edgeDiscardedObservationCount: Int
     let smallBottomDiscardedObservationCount: Int
     let reprojectionDiscardedObservationCount: Int
+    let cameraDiscardedObservationCount: Int
+    let cameraFocusDiscardedObservationCount: Int
+    let cameraBlurDiscardedObservationCount: Int
     let lowPriorityFallbackDiscardedObservationCount: Int
     let normalOutlierDiscardedObservationCount: Int
     let motionDiscardedObservationCount: Int
     let motionPenalizedObservationCount: Int
+    let arKitPenalizedObservationCount: Int
     let finalDominantPoseSource: MarkerPoseSource?
     let dominantDiscardReason: String?
 }
@@ -428,6 +434,11 @@ final class FinalPoseRefiner {
             shouldReject: { $0.wasRejectedByCamera },
             discardReasonCounts: &discardReasonCounts
         )
+        let cameraRejectedObservations = rejectedObservations(
+            before: structurallyValidIndexedObservations,
+            after: cameraFilteredIndexedObservations
+        )
+        let cameraDiscardBreakdown = cameraDiscardBreakdown(in: cameraRejectedObservations)
         if preferDualTagForFinalExport {
             let edgeFilteredIndexedObservations = indexedObservationsAfterConditionalRejection(
                 from: cameraFilteredIndexedObservations,
@@ -497,6 +508,9 @@ final class FinalPoseRefiner {
         let motionPenalizedObservationCount = qualitiesByOffset.values.filter {
             $0.motionStabilityScore.isFinite && $0.motionStabilityScore < 0.999
         }.count
+        let arKitPenalizedObservationCount = qualitiesByOffset.values.filter {
+            $0.arKitStabilityScore.isFinite && $0.arKitStabilityScore < 0.999
+        }.count
         let normalOutlierThresholdDegrees = resolvedMaximumFinalNormalOutlierDegrees(
             maximumFinalNormalOutlierDegrees
         )
@@ -509,6 +523,8 @@ final class FinalPoseRefiner {
             normalStdDevDegrees: normalDiagnostics.stdDevDegrees,
             maximumFinalNormalOutlierDegrees: normalOutlierThresholdDegrees,
             averageMotionStabilityScore: averageMotionStabilityScore(in: selectedQualities),
+            averageCameraStabilityScore: averageCameraStabilityScore(in: selectedQualities),
+            averageARKitStabilityScore: averageARKitStabilityScore(in: selectedQualities),
             wasOutlierFilterRelaxed: outlierResult.wasRelaxed
         )
 
@@ -539,18 +555,28 @@ final class FinalPoseRefiner {
                 finalAverageMotionStabilityScore: averageMotionStabilityScore(
                     in: selectedQualities
                 ),
+                finalAverageCameraStabilityScore: averageCameraStabilityScore(
+                    in: selectedQualities
+                ),
+                finalAverageARKitStabilityScore: averageARKitStabilityScore(
+                    in: selectedQualities
+                ),
                 finalConfidence: confidence.value,
                 finalConfidenceReason: confidence.reason,
                 edgeDiscardedObservationCount: discardReasonCounts["borda da imagem"] ?? 0,
                 smallBottomDiscardedObservationCount: discardReasonCounts["bottom pequena"] ?? 0,
                 reprojectionDiscardedObservationCount:
                     discardReasonCounts["reprojection error alto"] ?? 0,
+                cameraDiscardedObservationCount: cameraDiscardBreakdown.total,
+                cameraFocusDiscardedObservationCount: cameraDiscardBreakdown.focus,
+                cameraBlurDiscardedObservationCount: cameraDiscardBreakdown.blur,
                 lowPriorityFallbackDiscardedObservationCount:
                     lowPriorityFallbackDiscardCount(in: discardReasonCounts),
                 normalOutlierDiscardedObservationCount:
                     discardReasonCounts["outlier normal"] ?? 0,
                 motionDiscardedObservationCount: discardReasonCounts["movimento alto"] ?? 0,
                 motionPenalizedObservationCount: motionPenalizedObservationCount,
+                arKitPenalizedObservationCount: arKitPenalizedObservationCount,
                 finalDominantPoseSource: dominantPoseSource(in: selectedObservations),
                 dominantDiscardReason: dominantReason(in: discardReasonCounts)
             )
@@ -568,6 +594,16 @@ final class FinalPoseRefiner {
         }
         let discardedObservationCount = max(observations.count - selectedObservations.count, 0)
         let selectedQualities = selectedObservations.map { observationQuality(for: $0) }
+        let rejectedObservations = observations.filter { observation in
+            !selectedObservations.contains { selected in
+                selected.markerId == observation.markerId &&
+                    selected.reprojectionError == observation.reprojectionError &&
+                    selected.distanceMm == observation.distanceMm
+            }
+        }
+        let cameraDiscardBreakdown = cameraDiscardBreakdown(
+            in: rejectedObservations.map { (offset: 0, element: $0) }
+        )
         let averageImagePosition = averageImagePosition(in: selectedQualities)
         let normalDiagnostics = normalDiagnostics(in: selectedObservations)
 
@@ -598,16 +634,28 @@ final class FinalPoseRefiner {
                 finalAverageMotionStabilityScore: averageMotionStabilityScore(
                     in: selectedQualities
                 ),
+                finalAverageCameraStabilityScore: averageCameraStabilityScore(
+                    in: selectedQualities
+                ),
+                finalAverageARKitStabilityScore: averageARKitStabilityScore(
+                    in: selectedQualities
+                ),
                 finalConfidence: selectedObservations.isEmpty ? .low : .medium,
                 finalConfidenceReason: selectedObservations.isEmpty ? "sem observacoes finais" : nil,
                 edgeDiscardedObservationCount: 0,
                 smallBottomDiscardedObservationCount: 0,
                 reprojectionDiscardedObservationCount: discardedObservationCount,
+                cameraDiscardedObservationCount: cameraDiscardBreakdown.total,
+                cameraFocusDiscardedObservationCount: cameraDiscardBreakdown.focus,
+                cameraBlurDiscardedObservationCount: cameraDiscardBreakdown.blur,
                 lowPriorityFallbackDiscardedObservationCount: 0,
                 normalOutlierDiscardedObservationCount: 0,
                 motionDiscardedObservationCount: 0,
                 motionPenalizedObservationCount: selectedQualities.filter {
                     $0.motionStabilityScore.isFinite && $0.motionStabilityScore < 0.999
+                }.count,
+                arKitPenalizedObservationCount: selectedQualities.filter {
+                    $0.arKitStabilityScore.isFinite && $0.arKitStabilityScore < 0.999
                 }.count,
                 finalDominantPoseSource: dominantPoseSource(in: selectedObservations),
                 dominantDiscardReason: discardedObservationCount > 0
@@ -918,6 +966,43 @@ final class FinalPoseRefiner {
         return betterObservations
     }
 
+    private func rejectedObservations(
+        before: [(offset: Int, element: FinalPoseObservation)],
+        after: [(offset: Int, element: FinalPoseObservation)]
+    ) -> [(offset: Int, element: FinalPoseObservation)] {
+        let keptOffsets = Set(after.map(\.offset))
+        return before.filter { !keptOffsets.contains($0.offset) }
+    }
+
+    private func cameraDiscardBreakdown(
+        in rejectedObservations: [(offset: Int, element: FinalPoseObservation)]
+    ) -> (total: Int, focus: Int, blur: Int) {
+        var total = 0
+        var focus = 0
+        var blur = 0
+
+        for item in rejectedObservations {
+            guard let cameraQuality = item.element.cameraQuality,
+                  cameraQuality.scanRejectionReason != nil || cameraQuality.cameraStabilityScore < 0.999
+            else {
+                continue
+            }
+
+            total += 1
+            guard let reason = cameraQuality.scanRejectionReason else {
+                continue
+            }
+
+            if reason.localizedCaseInsensitiveContains("fora de foco") {
+                blur += 1
+            } else if reason.localizedCaseInsensitiveContains("foco") {
+                focus += 1
+            }
+        }
+
+        return (total, focus, blur)
+    }
+
     private func isValidObservationPose(_ observation: FinalPoseObservation) -> Bool {
         PoseMath.isFinite(observation.rotationMatrix) &&
             PoseMath.isFinite(observation.translationVector) &&
@@ -1017,6 +1102,14 @@ final class FinalPoseRefiner {
 
     private func averageMotionStabilityScore(in qualities: [PoseObservationQuality]) -> Double? {
         average(qualities.map(\.motionStabilityScore))
+    }
+
+    private func averageCameraStabilityScore(in qualities: [PoseObservationQuality]) -> Double? {
+        average(qualities.map(\.cameraStabilityScore))
+    }
+
+    private func averageARKitStabilityScore(in qualities: [PoseObservationQuality]) -> Double? {
+        average(qualities.map(\.arKitStabilityScore))
     }
 
     private func normalDiagnostics(
@@ -1212,6 +1305,8 @@ final class FinalPoseRefiner {
         normalStdDevDegrees: Double?,
         maximumFinalNormalOutlierDegrees: Double,
         averageMotionStabilityScore: Double?,
+        averageCameraStabilityScore: Double?,
+        averageARKitStabilityScore: Double?,
         wasOutlierFilterRelaxed: Bool
     ) -> (value: FinalPoseMarkerConfidence, reason: String?) {
         guard !selectedObservations.isEmpty else {
@@ -1253,15 +1348,33 @@ final class FinalPoseRefiner {
             return (.low, "movimento alto")
         }
 
+        if let averageCameraStabilityScore,
+           averageCameraStabilityScore < 0.55 {
+            return (.low, "camera/foco instavel")
+        }
+
+        if let averageARKitStabilityScore,
+           averageARKitStabilityScore < 0.45 {
+            return (.low, "ARKit instavel")
+        }
+
         let dualTagObservationCount = selectedObservations.filter {
             isDualTagObservation($0)
         }.count
+        let dualTagRatio = Double(dualTagObservationCount) / Double(selectedObservations.count)
+        if selectedObservations.count >= configuration.minimumFinalObservationsPerMarker,
+           dualTagRatio < 0.20 {
+            return (.low, "fallback dominante")
+        }
+
         if selectedObservations.count >= configuration.minimumFinalObservationsPerMarker,
            dualTagObservationCount >= configuration.minimumFinalObservationsPerMarker,
            (averageReprojectionError ?? .infinity) <= 1.2,
            (averageImageEdgeMargin ?? 1.0) >= configuration.minimumPreferredImageEdgeMargin,
            (normalStdDevDegrees ?? 0.0) <= maximumFinalNormalOutlierDegrees * 0.60,
            (averageMotionStabilityScore ?? 1.0) >= 0.75,
+           (averageCameraStabilityScore ?? 1.0) >= 0.85,
+           (averageARKitStabilityScore ?? 1.0) >= 0.75,
            outlierRatio <= 0.20 {
             return (.high, nil)
         }
