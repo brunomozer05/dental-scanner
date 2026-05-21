@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreGraphics
 import CoreMedia
 import CoreVideo
 import Foundation
@@ -60,6 +61,7 @@ final class CameraFrameService: NSObject {
     private var lastLensPositionChangeTimestamp: Double?
     private var forceFocusSettleOnNextFrame = false
     private var recentSharpnessValues: [Double] = []
+    private var focusRequestGeneration = 0
 
     var onFrame: ((CameraFrame) -> Void)?
     var onError: ((Error) -> Void)?
@@ -240,6 +242,31 @@ final class CameraFrameService: NSObject {
                 self.setAutomaticLockEnabled(true)
                 self.applyLockedCameraControlsToActiveDevice()
                 self.resetFocusStabilityReference(forceSettle: true)
+                continuation.resume(returning: self.makeCameraDebugSnapshot())
+            }
+        }
+    }
+
+    func focusAndExpose(
+        at normalizedPoint: CGPoint,
+        lockAfterFocus: Bool,
+        settleTimeSeconds: Double
+    ) async -> CameraDebugSnapshot {
+        await withCheckedContinuation { continuation in
+            sessionQueue.async { [weak self] in
+                guard let self else {
+                    continuation.resume(returning: .unavailable)
+                    return
+                }
+
+                self.focusRequestGeneration += 1
+                let generation = self.focusRequestGeneration
+                self.applyFocusAndExposurePoint(
+                    normalizedPoint,
+                    lockAfterFocus: lockAfterFocus,
+                    settleTimeSeconds: settleTimeSeconds,
+                    generation: generation
+                )
                 continuation.resume(returning: self.makeCameraDebugSnapshot())
             }
         }
@@ -550,6 +577,97 @@ final class CameraFrameService: NSObject {
                 ? nil
                 : "Auto nao suportado: \(unsupportedControls.joined(separator: ", "))"
             setCameraControlsLocked(false, error: error)
+        } catch {
+            setCameraControlsLocked(false, error: error.localizedDescription)
+        }
+    }
+
+    private func applyFocusAndExposurePoint(
+        _ normalizedPoint: CGPoint,
+        lockAfterFocus: Bool,
+        settleTimeSeconds: Double,
+        generation: Int
+    ) {
+        guard normalizedPoint.x.isFinite,
+              normalizedPoint.y.isFinite,
+              normalizedPoint.x >= 0,
+              normalizedPoint.x <= 1,
+              normalizedPoint.y >= 0,
+              normalizedPoint.y <= 1
+        else {
+            setCameraControlsLocked(false, error: "Ponto de foco invalido")
+            return
+        }
+
+        guard let device = activeDevice else {
+            setCameraControlsLocked(false, error: "Camera indisponivel")
+            return
+        }
+
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+
+            var appliedFocus = false
+            var appliedExposure = false
+            var warnings: [String] = []
+
+            if device.isFocusPointOfInterestSupported {
+                device.focusPointOfInterest = normalizedPoint
+                if device.isFocusModeSupported(.autoFocus) {
+                    device.focusMode = .autoFocus
+                    appliedFocus = true
+                } else if device.isFocusModeSupported(.continuousAutoFocus) {
+                    device.focusMode = .continuousAutoFocus
+                    appliedFocus = true
+                } else {
+                    warnings.append("modo foco")
+                }
+            } else {
+                warnings.append("ponto foco")
+            }
+
+            if device.isExposurePointOfInterestSupported {
+                device.exposurePointOfInterest = normalizedPoint
+                if device.isExposureModeSupported(.autoExpose) {
+                    device.exposureMode = .autoExpose
+                    appliedExposure = true
+                } else if device.isExposureModeSupported(.continuousAutoExposure) {
+                    device.exposureMode = .continuousAutoExposure
+                    appliedExposure = true
+                } else {
+                    warnings.append("modo exposicao")
+                }
+            } else {
+                warnings.append("ponto exposicao")
+            }
+
+            let message: String?
+            if appliedFocus {
+                message = warnings.isEmpty
+                    ? nil
+                    : "Foco parcial: \(warnings.joined(separator: ", "))"
+            } else {
+                message = "Foco ArUco nao suportado: \(warnings.joined(separator: ", "))"
+            }
+
+            setCameraControlsLocked(false, error: message)
+            resetFocusStabilityReference(forceSettle: true)
+
+            guard lockAfterFocus, appliedFocus else {
+                return
+            }
+
+            let delay = max(settleTimeSeconds, 0.0)
+            sessionQueue.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self,
+                      self.focusRequestGeneration == generation
+                else {
+                    return
+                }
+
+                self.applyLockedCameraControlsToActiveDevice()
+            }
         } catch {
             setCameraControlsLocked(false, error: error.localizedDescription)
         }

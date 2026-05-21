@@ -30,6 +30,8 @@ struct ScannerDebugPanelView: View {
     @Binding var showDistanceGuide: Bool
     @Binding var staticPoseStabilityMode: Bool
     @Binding var lockFocusAndExposureForScan: Bool
+    @Binding var autoFocusOnDetectedAruco: Bool
+    @Binding var lockAfterArucoFocus: Bool
     @Binding var lensPositionChangeThreshold: Double
     @Binding var focusSettleTimeSeconds: Double
     @Binding var minimumAllowedSharpness: Double
@@ -112,6 +114,12 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Auto lock", value: snapshot.camera.automaticLockEnabled)
                         debugRow(title: "Camera locked", value: snapshot.camera.cameraLocked)
                         debugRow(title: "Lock error", value: snapshot.camera.lockError)
+                        debugRow(title: "Last focus tag ID", value: snapshot.camera.lastArucoFocusTagId)
+                        debugRow(title: "Last focus marker ID", value: snapshot.camera.lastArucoFocusMarkerId)
+                        debugRow(title: "Last focus point", value: snapshot.camera.lastArucoFocusPoint)
+                        debugRow(title: "Last focus age", value: snapshot.camera.lastArucoFocusRequestAge)
+                        debugRow(title: "Focus cooldown", value: snapshot.camera.arucoFocusCooldown)
+                        debugRow(title: "Focus error", value: snapshot.camera.lastArucoFocusError)
                         debugRow(title: "Focus adjusting frames", value: snapshot.camera.focusAdjustingFrames)
                         debugRow(title: "Frames rejeitados foco", value: snapshot.camera.focusRejectedFrames)
                         debugRow(title: "Frames rejeitados blur", value: snapshot.camera.blurRejectedFrames)
@@ -133,6 +141,8 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Perfil marker", value: snapshot.configuration.markerProfile)
                         debugRow(title: "Barra distancia", value: snapshot.configuration.showDistanceGuide)
                         debugRow(title: "Travar camera", value: snapshot.configuration.lockFocusAndExposureForScan)
+                        debugRow(title: "Auto focus ArUco", value: snapshot.configuration.autoFocusOnDetectedAruco)
+                        debugRow(title: "Lock apos ArUco", value: snapshot.configuration.lockAfterArucoFocus)
                         debugRow(title: "Frames min", value: snapshot.configuration.minimumGoodFrames)
                         debugRow(title: "Frames alvo", value: snapshot.configuration.targetValidFrames)
                         debugRow(title: "Cobertura angular", value: snapshot.configuration.requiredAngularCoverage)
@@ -153,12 +163,14 @@ struct ScannerDebugPanelView: View {
 
                         Toggle("Mostrar barra de distancia", isOn: $showDistanceGuide)
                         Toggle("Travar foco/exposicao", isOn: $lockFocusAndExposureForScan)
+                        Toggle("Auto focus no ArUco", isOn: $autoFocusOnDetectedAruco)
+                        Toggle("Travar apos foco ArUco", isOn: $lockAfterArucoFocus)
 
                         HStack(spacing: 8) {
                             Button("Lock camera now", action: onLockCameraNow)
                                 .buttonStyle(.bordered)
 
-                            Button("Calibrar foco agora", action: onCalibrateFocusNow)
+                            Button("Lock focus now", action: onCalibrateFocusNow)
                                 .buttonStyle(.bordered)
                         }
                         .font(.caption2.weight(.semibold))

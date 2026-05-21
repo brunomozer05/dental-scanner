@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 struct ScannerDebugSnapshot: Equatable {
@@ -37,6 +38,8 @@ struct ScannerDebugSnapshot: Equatable {
         let markerProfile: String
         let showDistanceGuide: String
         let lockFocusAndExposureForScan: String
+        let autoFocusOnDetectedAruco: String
+        let lockAfterArucoFocus: String
         let requiredAngularCoverage: String
         let minimumDualTagFrames: String
         let minimumDualAngularCoverage: String
@@ -76,6 +79,12 @@ struct ScannerDebugSnapshot: Equatable {
         let automaticLockEnabled: String
         let cameraLocked: String
         let lockError: String
+        let lastArucoFocusTagId: String
+        let lastArucoFocusMarkerId: String
+        let lastArucoFocusPoint: String
+        let lastArucoFocusRequestAge: String
+        let arucoFocusCooldown: String
+        let lastArucoFocusError: String
         let focusAdjustingFrames: String
         let focusRejectedFrames: String
         let blurRejectedFrames: String
@@ -149,6 +158,8 @@ extension ScannerViewModel {
                 markerProfile: markerProfile.debugTitle,
                 showDistanceGuide: debugBool(showDistanceGuide),
                 lockFocusAndExposureForScan: debugBool(lockFocusAndExposureForScan),
+                autoFocusOnDetectedAruco: debugBool(autoFocusOnDetectedAruco),
+                lockAfterArucoFocus: debugBool(lockAfterArucoFocus),
                 requiredAngularCoverage: Self.debugPercent(scanRequiredAngularCoveragePercent),
                 minimumDualTagFrames: "\(scanMinimumDualTagFrameCount)",
                 minimumDualAngularCoverage: Self.debugPercent(scanRequiredDualAngularCoveragePercent),
@@ -173,7 +184,13 @@ extension ScannerViewModel {
                 lastBadFrameReason: scanLastBadFrameReason,
                 distanceGuideSourceReliable: distanceGuideSourceReliable,
                 distanceMm: poseDistanceMm,
-                distanceReady: scanDistanceReady
+                distanceReady: scanDistanceReady,
+                lastArucoFocusTagId: lastArucoFocusTagId,
+                lastArucoFocusMarkerId: lastArucoFocusMarkerId,
+                lastArucoFocusPoint: lastArucoFocusPoint,
+                lastArucoFocusRequestAge: lastArucoFocusRequestAge(),
+                arucoFocusCooldown: arucoFocusCooldownSeconds,
+                lastArucoFocusError: lastArucoFocusErrorMessage
             ),
             isDualArucoV2: markerProfile == .dualArucoV2,
             markerV2Rows: markerProfile == .dualArucoV2
@@ -200,7 +217,13 @@ extension ScannerViewModel {
         lastBadFrameReason: String?,
         distanceGuideSourceReliable: Bool,
         distanceMm: Double?,
-        distanceReady: Bool
+        distanceReady: Bool,
+        lastArucoFocusTagId: Int?,
+        lastArucoFocusMarkerId: Int?,
+        lastArucoFocusPoint: CGPoint?,
+        lastArucoFocusRequestAge: Double?,
+        arucoFocusCooldown: Double,
+        lastArucoFocusError: String?
     ) -> ScannerDebugSnapshot.CameraSection {
         ScannerDebugSnapshot.CameraSection(
             deviceName: debugText(snapshot.deviceName),
@@ -232,6 +255,12 @@ extension ScannerViewModel {
             automaticLockEnabled: snapshot.automaticLockEnabled ? "Sim" : "Nao",
             cameraLocked: snapshot.isCameraLocked ? "Sim" : "Nao",
             lockError: debugText(snapshot.lockError ?? "Nenhum"),
+            lastArucoFocusTagId: debugOptionalInt(lastArucoFocusTagId),
+            lastArucoFocusMarkerId: debugOptionalInt(lastArucoFocusMarkerId),
+            lastArucoFocusPoint: debugPoint(lastArucoFocusPoint),
+            lastArucoFocusRequestAge: debugSeconds(lastArucoFocusRequestAge),
+            arucoFocusCooldown: debugSeconds(arucoFocusCooldown),
+            lastArucoFocusError: debugText(lastArucoFocusError ?? "Nenhum"),
             focusAdjustingFrames: "\(focusAdjustingFrames)",
             focusRejectedFrames: "\(focusRejectedFrames)",
             blurRejectedFrames: "\(blurRejectedFrames)",
@@ -280,6 +309,19 @@ extension ScannerViewModel {
 
     private func debugBool(_ value: Bool) -> String {
         value ? "Sim" : "Nao"
+    }
+
+    private func lastArucoFocusRequestAge() -> Double? {
+        guard let lastArucoFocusRequestTimestamp,
+              lastArucoFocusRequestTimestamp.isFinite,
+              let lastFrameTimestamp,
+              lastFrameTimestamp.isFinite,
+              lastFrameTimestamp >= lastArucoFocusRequestTimestamp
+        else {
+            return nil
+        }
+
+        return lastFrameTimestamp - lastArucoFocusRequestTimestamp
     }
 
     private static func debugPercent(_ value: Double?) -> String {
@@ -349,6 +391,25 @@ extension ScannerViewModel {
         }
 
         return value ? "Sim" : "Nao"
+    }
+
+    private static func debugOptionalInt(_ value: Int?) -> String {
+        guard let value else {
+            return ScannerDebugSnapshot.missingValue
+        }
+
+        return "\(value)"
+    }
+
+    private static func debugPoint(_ point: CGPoint?) -> String {
+        guard let point,
+              point.x.isFinite,
+              point.y.isFinite
+        else {
+            return ScannerDebugSnapshot.missingValue
+        }
+
+        return "\(String(format: "%.3f", Double(point.x))), \(String(format: "%.3f", Double(point.y)))"
     }
 
     private static func debugText(_ value: String?) -> String {

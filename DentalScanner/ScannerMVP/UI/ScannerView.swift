@@ -125,6 +125,8 @@ struct ScannerView: View {
                             showDistanceGuide: showDistanceGuideBinding,
                             staticPoseStabilityMode: staticPoseStabilityModeBinding,
                             lockFocusAndExposureForScan: lockFocusAndExposureForScanBinding,
+                            autoFocusOnDetectedAruco: autoFocusOnDetectedArucoBinding,
+                            lockAfterArucoFocus: lockAfterArucoFocusBinding,
                             lensPositionChangeThreshold: cameraLensPositionChangeThresholdBinding,
                             focusSettleTimeSeconds: cameraFocusSettleTimeBinding,
                             minimumAllowedSharpness: minimumAllowedSharpnessBinding,
@@ -500,6 +502,20 @@ struct ScannerView: View {
         Binding(
             get: { viewModel.lockFocusAndExposureForScan },
             set: { viewModel.setLockFocusAndExposureForScan($0) }
+        )
+    }
+
+    private var autoFocusOnDetectedArucoBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.autoFocusOnDetectedAruco },
+            set: { viewModel.setAutoFocusOnDetectedAruco($0) }
+        )
+    }
+
+    private var lockAfterArucoFocusBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.lockAfterArucoFocus },
+            set: { viewModel.setLockAfterArucoFocus($0) }
         )
     }
 
