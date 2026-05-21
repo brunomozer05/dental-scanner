@@ -3,6 +3,7 @@ import Combine
 import CoreGraphics
 import CoreVideo
 import Foundation
+import UIKit
 import simd
 
 final class ScannerViewModel: ObservableObject {
@@ -5921,7 +5922,13 @@ final class ScannerViewModel: ObservableObject {
         }
 
         let scanStorageManager = self.scanStorageManager
-        let scanName = ScanStorageManager.automaticScanFileName()
+        let scanDate = Date()
+        let scanName = ScanStorageManager.automaticScanFileName(date: scanDate)
+        let technicalReport = makeTechnicalScanReport(
+            createdAt: scanDate,
+            markerProfile: currentMarkerProfile,
+            tagPoses: currentTagPoses
+        )
         let exportedTagCount = currentTagPoses.count
         let exportGenerationID = UUID()
 
@@ -5949,7 +5956,11 @@ final class ScannerViewModel: ObservableObject {
                     throw ScanStorageManager.StorageError.unableToEncodeSTL
                 }
 
-                let scan = try scanStorageManager.saveScan(stlData: stlData, name: scanName)
+                let scan = try scanStorageManager.saveScan(
+                    stlData: stlData,
+                    name: scanName,
+                    technicalReport: technicalReport
+                )
                 result = .success(scan)
             } catch {
                 result = .failure(error)
@@ -6017,6 +6028,184 @@ final class ScannerViewModel: ObservableObject {
 
         return "\(event): \(markerProfile.rawValue), \(referenceModelFileName), IDs \(markerIdSummary)"
     }
+
+    private func makeTechnicalScanReport(
+        createdAt: Date,
+        markerProfile: MarkerProfile,
+        tagPoses: [PoseResult]
+    ) -> ScanTechnicalReport {
+        ScanTechnicalReport(
+            createdAt: Self.reportDateFormatter.string(from: createdAt),
+            markerProfile: markerProfile.rawValue,
+            stlFileName: nil,
+            device: ScanTechnicalReport.Device(
+                model: UIDevice.current.model,
+                iosVersion: UIDevice.current.systemVersion,
+                cameraDevice: currentCameraDebugSnapshot.deviceName,
+                resolution: currentCameraDebugSnapshot.resolutionText,
+                zoomFactor: finiteReportDouble(currentCameraDebugSnapshot.videoZoomFactor)
+            ),
+            cameraQuality: ScanTechnicalReport.CameraQuality(
+                focusLocked: currentCameraDebugSnapshot.isCameraLocked,
+                sharpnessMean: finiteReportDouble(currentCameraDebugSnapshot.averageSharpness),
+                framesRejectedByFocus: cameraFocusRejectedFrameCount,
+                framesRejectedByBlur: cameraBlurRejectedFrameCount
+            ),
+            markers: tagPoses
+                .sorted { $0.markerId < $1.markerId }
+                .map { technicalReportMarker(from: $0, markerProfile: markerProfile) },
+            scanQuality: ScanTechnicalReport.ScanQuality(
+                confidence: technicalReportScanConfidence(),
+                worstMarkerId: worstFinalDiagnostics()?.markerId,
+                mainIssue: technicalReportMainIssue(),
+                planeAverageErrorMm: finiteReportDouble(scanPlanarAverageErrorMm),
+                planeMaxErrorMm: finiteReportDouble(scanPlanarMaximumErrorMm)
+            )
+        )
+    }
+
+    private func technicalReportMarker(
+        from pose: PoseResult,
+        markerProfile: MarkerProfile
+    ) -> ScanTechnicalReport.Marker {
+        let diagnostics = finalObservationDiagnosticsByMarkerId[pose.markerId]
+
+        return ScanTechnicalReport.Marker(
+            markerId: pose.markerId,
+            translationVector: reportVector(pose.translationVector),
+            rotationMatrix: reportMatrix(pose.rotationMatrix),
+            confidence: technicalReportConfidence(diagnostics?.finalConfidence),
+            qualityScore: finiteReportDouble(diagnostics?.finalAverageQualityScore),
+            dualFrames: markerProfile == .dualArucoV2
+                ? (scanDualTagFrameCountsByMarkerId[pose.markerId] ?? 0)
+                : nil,
+            topFallbackFrames: markerProfile == .dualArucoV2
+                ? (scanTopFallbackFrameCountsByMarkerId[pose.markerId] ?? 0)
+                : nil,
+            bottomFallbackFrames: markerProfile == .dualArucoV2
+                ? (scanBottomFallbackFrameCountsByMarkerId[pose.markerId] ?? 0)
+                : nil,
+            reprojectionError: finiteReportDouble(
+                diagnostics?.finalAverageReprojectionError ?? pose.reprojectionError
+            ),
+            sharpnessMean: averageSharpnessForReport(markerId: pose.markerId),
+            normalStdDegrees: finiteReportDouble(diagnostics?.finalNormalStdDevDegrees),
+            finalObservationsUsed: diagnostics?.selectedObservationCount
+        )
+    }
+
+    private func averageSharpnessForReport(markerId: Int) -> Double? {
+        let values = finalPoseObservations.compactMap { observation -> Double? in
+            guard observation.markerId == markerId,
+                  let sharpness = observation.cameraQuality?.sharpness,
+                  sharpness.isFinite
+            else {
+                return nil
+            }
+
+            return sharpness
+        }
+
+        guard !values.isEmpty else {
+            return nil
+        }
+
+        return values.reduce(0.0, +) / Double(values.count)
+    }
+
+    private func technicalReportScanConfidence() -> String? {
+        guard !finalObservationDiagnosticsByMarkerId.isEmpty else {
+            return nil
+        }
+
+        let confidence = finalObservationDiagnosticsByMarkerId.values.reduce(
+            FinalPoseMarkerConfidence.high
+        ) { partialResult, item in
+            confidenceRank(item.finalConfidence) > confidenceRank(partialResult)
+                ? item.finalConfidence
+                : partialResult
+        }
+
+        return technicalReportConfidence(confidence)
+    }
+
+    private func technicalReportMainIssue() -> String? {
+        guard let diagnostics = worstFinalDiagnostics() else {
+            return "none"
+        }
+
+        let issue = finalMainIssue(for: diagnostics)
+        return issue.isEmpty || issue == "ok" ? "none" : issue
+    }
+
+    private func worstFinalDiagnostics() -> FinalPoseObservationSelectionDiagnostics? {
+        finalObservationDiagnosticsByMarkerId.values.max {
+            let lhsRank = confidenceRank($0.finalConfidence)
+            let rhsRank = confidenceRank($1.finalConfidence)
+            if lhsRank == rhsRank {
+                return finalIssueWeight(for: $0) < finalIssueWeight(for: $1)
+            }
+
+            return lhsRank < rhsRank
+        }
+    }
+
+    private func technicalReportConfidence(_ confidence: FinalPoseMarkerConfidence?) -> String? {
+        guard let confidence else {
+            return nil
+        }
+
+        switch confidence {
+        case .high:
+            return "high"
+        case .medium:
+            return "medium"
+        case .low:
+            return "low"
+        }
+    }
+
+    private func reportVector(_ vector: SIMD3<Double>) -> [Double]? {
+        let values = [vector.x, vector.y, vector.z]
+        guard values.allSatisfy({ $0.isFinite }) else {
+            return nil
+        }
+
+        return values
+    }
+
+    private func reportMatrix(_ matrix: simd_double3x3) -> [[Double]]? {
+        let rows = [
+            [matrix.columns.0.x, matrix.columns.1.x, matrix.columns.2.x],
+            [matrix.columns.0.y, matrix.columns.1.y, matrix.columns.2.y],
+            [matrix.columns.0.z, matrix.columns.1.z, matrix.columns.2.z]
+        ]
+
+        guard rows.flatMap({ $0 }).allSatisfy({ $0.isFinite }) else {
+            return nil
+        }
+
+        return rows
+    }
+
+    private func finiteReportDouble(_ value: Double?) -> Double? {
+        guard let value,
+              value.isFinite
+        else {
+            return nil
+        }
+
+        return value
+    }
+
+    private static let reportDateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [
+            .withInternetDateTime,
+            .withFractionalSeconds
+        ]
+        return formatter
+    }()
 
     private struct ScanReadinessEvaluation {
         let hasCurrentGoodFrame: Bool

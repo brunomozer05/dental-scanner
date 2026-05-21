@@ -5,6 +5,38 @@ struct ScanItem: Identifiable, Codable {
     var name: String
     let date: Date
     let fileURL: URL
+    let reportURL: URL?
+
+    init(
+        id: UUID,
+        name: String,
+        date: Date,
+        fileURL: URL,
+        reportURL: URL? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.date = date
+        self.fileURL = fileURL
+        self.reportURL = reportURL
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case date
+        case fileURL
+        case reportURL
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        date = try container.decode(Date.self, forKey: .date)
+        fileURL = try container.decode(URL.self, forKey: .fileURL)
+        reportURL = try container.decodeIfPresent(URL.self, forKey: .reportURL)
+    }
 }
 
 final class ScanStorageManager {
@@ -35,7 +67,11 @@ final class ScanStorageManager {
     }
 
     @discardableResult
-    func saveScan(stlData: Data, name: String) throws -> ScanItem {
+    func saveScan(
+        stlData: Data,
+        name: String,
+        technicalReport: ScanTechnicalReport? = nil
+    ) throws -> ScanItem {
         let documentsURL = try documentsDirectoryURL()
         let fileURL = uniqueFileURL(
             in: documentsURL,
@@ -43,12 +79,17 @@ final class ScanStorageManager {
         )
 
         try stlData.write(to: fileURL, options: .atomic)
+        let reportURL = try saveTechnicalReportIfNeeded(
+            technicalReport,
+            forSTLFileURL: fileURL
+        )
 
         let scan = ScanItem(
             id: UUID(),
             name: fileURL.lastPathComponent,
             date: Date(),
-            fileURL: fileURL
+            fileURL: fileURL,
+            reportURL: reportURL
         )
         var scans = loadScans()
         scans.insert(scan, at: 0)
@@ -72,6 +113,11 @@ final class ScanStorageManager {
     func deleteScan(_ scan: ScanItem) {
         if fileManager.fileExists(atPath: scan.fileURL.path) {
             try? fileManager.removeItem(at: scan.fileURL)
+        }
+
+        if let reportURL = scan.reportURL,
+           fileManager.fileExists(atPath: reportURL.path) {
+            try? fileManager.removeItem(at: reportURL)
         }
 
         let scans = loadScans().filter { $0.id != scan.id }
@@ -118,6 +164,27 @@ final class ScanStorageManager {
         }
 
         return "\(safeFileName).stl"
+    }
+
+    private func saveTechnicalReportIfNeeded(
+        _ report: ScanTechnicalReport?,
+        forSTLFileURL stlFileURL: URL
+    ) throws -> URL? {
+        guard var report else {
+            return nil
+        }
+
+        report.stlFileName = stlFileURL.lastPathComponent
+        let reportFileName = "\(stlFileURL.deletingPathExtension().lastPathComponent)_report.json"
+        let reportURL = stlFileURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(reportFileName)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let reportData = try encoder.encode(report)
+        try reportData.write(to: reportURL, options: .atomic)
+
+        return reportURL
     }
 
     private func uniqueFileURL(
