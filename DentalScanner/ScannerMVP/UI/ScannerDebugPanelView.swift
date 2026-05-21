@@ -19,6 +19,10 @@ struct ScannerDebugPanelView: View {
     let focusSettleTimeStep: Double
     let sharpnessThresholdRange: ClosedRange<Double>
     let sharpnessThresholdStep: Double
+    let cameraZoomFactorRange: ClosedRange<Double>
+    let cameraZoomFactorStep: Double
+    let manualLensPositionRange: ClosedRange<Double>
+    let manualLensPositionStep: Double
     @Binding var markerProfile: MarkerProfile
     @Binding var requiredCoveragePercent: Double
     @Binding var minimumGoodFrames: Int
@@ -30,6 +34,9 @@ struct ScannerDebugPanelView: View {
     @Binding var showDistanceGuide: Bool
     @Binding var staticPoseStabilityMode: Bool
     @Binding var lockFocusAndExposureForScan: Bool
+    @Binding var cameraZoomFactor: Double
+    @Binding var manualFocusEnabled: Bool
+    @Binding var manualLensPosition: Double
     @Binding var autoFocusOnDetectedAruco: Bool
     @Binding var lockAfterArucoFocus: Bool
     @Binding var lensPositionChangeThreshold: Double
@@ -86,7 +93,7 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "dualAngularReady", value: snapshot.readiness.dualAngularReady)
                     }
 
-                    debugSection(title: "Camera") {
+                    debugSection(title: "Camera / Focus") {
                         debugRow(title: "Device", value: snapshot.camera.deviceName)
                         debugRow(title: "Type", value: snapshot.camera.deviceType)
                         debugRow(title: "Unique ID", value: snapshot.camera.uniqueID)
@@ -111,6 +118,11 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Exposure", value: snapshot.camera.exposureDuration)
                         debugRow(title: "Camera score", value: snapshot.camera.cameraStabilityScore)
                         debugRow(title: "Rotation score", value: snapshot.camera.rotationStabilityScore)
+                        debugRow(title: "Zoom", value: snapshot.camera.videoZoomFactor)
+                        debugRow(title: "Zoom min/max", value: "\(snapshot.camera.minimumAvailableVideoZoomFactor) / \(snapshot.camera.maximumAvailableVideoZoomFactor)")
+                        debugRow(title: "Manual focus", value: snapshot.camera.manualFocusEnabled)
+                        debugRow(title: "Manual lens target", value: snapshot.camera.manualLensPosition)
+                        debugRow(title: "Manual focus supported", value: snapshot.camera.manualFocusSupported)
                         debugRow(title: "Auto lock", value: snapshot.camera.automaticLockEnabled)
                         debugRow(title: "Camera locked", value: snapshot.camera.cameraLocked)
                         debugRow(title: "Lock error", value: snapshot.camera.lockError)
@@ -141,6 +153,9 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Perfil marker", value: snapshot.configuration.markerProfile)
                         debugRow(title: "Barra distancia", value: snapshot.configuration.showDistanceGuide)
                         debugRow(title: "Travar camera", value: snapshot.configuration.lockFocusAndExposureForScan)
+                        debugRow(title: "Zoom", value: snapshot.configuration.cameraZoomFactor)
+                        debugRow(title: "Foco manual", value: snapshot.configuration.manualFocusEnabled)
+                        debugRow(title: "Lens manual", value: snapshot.configuration.manualLensPosition)
                         debugRow(title: "Auto focus ArUco", value: snapshot.configuration.autoFocusOnDetectedAruco)
                         debugRow(title: "Lock apos ArUco", value: snapshot.configuration.lockAfterArucoFocus)
                         debugRow(title: "Frames min", value: snapshot.configuration.minimumGoodFrames)
@@ -163,6 +178,7 @@ struct ScannerDebugPanelView: View {
 
                         Toggle("Mostrar barra de distancia", isOn: $showDistanceGuide)
                         Toggle("Travar foco/exposicao", isOn: $lockFocusAndExposureForScan)
+                        Toggle("Foco manual", isOn: $manualFocusEnabled)
                         Toggle("Auto focus no ArUco", isOn: $autoFocusOnDetectedAruco)
                         Toggle("Travar apos foco ArUco", isOn: $lockAfterArucoFocus)
 
@@ -180,6 +196,26 @@ struct ScannerDebugPanelView: View {
                                 .buttonStyle(.bordered)
                         }
                         .font(.caption2.weight(.semibold))
+
+                        debugDoubleStepper(
+                            title: "Zoom camera",
+                            value: $cameraZoomFactor,
+                            range: cameraZoomFactorRange,
+                            step: cameraZoomFactorStep,
+                            decimals: 1,
+                            suffix: "x"
+                        )
+
+                        debugDoubleStepper(
+                            title: "Lens manual",
+                            value: $manualLensPosition,
+                            range: manualLensPositionRange,
+                            step: manualLensPositionStep,
+                            decimals: 2,
+                            suffix: ""
+                        )
+                        .disabled(!manualFocusEnabled)
+                        .opacity(manualFocusEnabled ? 1.0 : 0.55)
 
                         debugDoubleStepper(
                             title: "Lens delta foco",

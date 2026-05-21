@@ -105,6 +105,12 @@ struct CameraDebugSnapshot: Equatable {
     let rotationStabilityScore: Double?
     let isCameraLocked: Bool
     let automaticLockEnabled: Bool
+    let videoZoomFactor: Double?
+    let minimumAvailableVideoZoomFactor: Double?
+    let maximumAvailableVideoZoomFactor: Double?
+    let manualFocusEnabled: Bool
+    let manualLensPosition: Float?
+    let isManualFocusSupported: Bool?
     let lockError: String?
 
     static let unavailable = CameraDebugSnapshot(
@@ -136,6 +142,12 @@ struct CameraDebugSnapshot: Equatable {
         rotationStabilityScore: nil,
         isCameraLocked: false,
         automaticLockEnabled: false,
+        videoZoomFactor: nil,
+        minimumAvailableVideoZoomFactor: nil,
+        maximumAvailableVideoZoomFactor: nil,
+        manualFocusEnabled: false,
+        manualLensPosition: nil,
+        isManualFocusSupported: nil,
         lockError: nil
     )
 }

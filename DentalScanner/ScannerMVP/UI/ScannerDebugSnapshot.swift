@@ -38,6 +38,9 @@ struct ScannerDebugSnapshot: Equatable {
         let markerProfile: String
         let showDistanceGuide: String
         let lockFocusAndExposureForScan: String
+        let cameraZoomFactor: String
+        let manualFocusEnabled: String
+        let manualLensPosition: String
         let autoFocusOnDetectedAruco: String
         let lockAfterArucoFocus: String
         let requiredAngularCoverage: String
@@ -78,6 +81,12 @@ struct ScannerDebugSnapshot: Equatable {
         let rotationStabilityScore: String
         let automaticLockEnabled: String
         let cameraLocked: String
+        let videoZoomFactor: String
+        let minimumAvailableVideoZoomFactor: String
+        let maximumAvailableVideoZoomFactor: String
+        let manualFocusEnabled: String
+        let manualLensPosition: String
+        let manualFocusSupported: String
         let lockError: String
         let lastArucoFocusTagId: String
         let lastArucoFocusMarkerId: String
@@ -158,6 +167,9 @@ extension ScannerViewModel {
                 markerProfile: markerProfile.debugTitle,
                 showDistanceGuide: debugBool(showDistanceGuide),
                 lockFocusAndExposureForScan: debugBool(lockFocusAndExposureForScan),
+                cameraZoomFactor: Self.debugNumber(cameraZoomFactor, decimals: 1),
+                manualFocusEnabled: debugBool(manualFocusEnabled),
+                manualLensPosition: Self.debugNumber(manualLensPosition, decimals: 2),
                 autoFocusOnDetectedAruco: debugBool(autoFocusOnDetectedAruco),
                 lockAfterArucoFocus: debugBool(lockAfterArucoFocus),
                 requiredAngularCoverage: Self.debugPercent(scanRequiredAngularCoveragePercent),
@@ -254,6 +266,18 @@ extension ScannerViewModel {
             rotationStabilityScore: debugUnitIntervalPercent(snapshot.rotationStabilityScore),
             automaticLockEnabled: snapshot.automaticLockEnabled ? "Sim" : "Nao",
             cameraLocked: snapshot.isCameraLocked ? "Sim" : "Nao",
+            videoZoomFactor: debugNumber(snapshot.videoZoomFactor, decimals: 2),
+            minimumAvailableVideoZoomFactor: debugNumber(
+                snapshot.minimumAvailableVideoZoomFactor,
+                decimals: 2
+            ),
+            maximumAvailableVideoZoomFactor: debugNumber(
+                snapshot.maximumAvailableVideoZoomFactor,
+                decimals: 2
+            ),
+            manualFocusEnabled: snapshot.manualFocusEnabled ? "Sim" : "Nao",
+            manualLensPosition: debugNumber(snapshot.manualLensPosition.map(Double.init), decimals: 3),
+            manualFocusSupported: debugOptionalBool(snapshot.isManualFocusSupported),
             lockError: debugText(snapshot.lockError ?? "Nenhum"),
             lastArucoFocusTagId: debugOptionalInt(lastArucoFocusTagId),
             lastArucoFocusMarkerId: debugOptionalInt(lastArucoFocusMarkerId),

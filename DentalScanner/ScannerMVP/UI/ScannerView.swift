@@ -114,6 +114,10 @@ struct ScannerView: View {
                             focusSettleTimeStep: viewModel.cameraFocusSettleTimeStep,
                             sharpnessThresholdRange: viewModel.sharpnessThresholdRange,
                             sharpnessThresholdStep: viewModel.sharpnessThresholdStep,
+                            cameraZoomFactorRange: viewModel.cameraZoomFactorRange,
+                            cameraZoomFactorStep: viewModel.cameraZoomFactorStep,
+                            manualLensPositionRange: viewModel.manualLensPositionRange,
+                            manualLensPositionStep: viewModel.manualLensPositionStep,
                             markerProfile: markerProfileBinding,
                             requiredCoveragePercent: scanRequiredCoverageBinding,
                             minimumGoodFrames: scanMinimumGoodFrameBinding,
@@ -125,6 +129,9 @@ struct ScannerView: View {
                             showDistanceGuide: showDistanceGuideBinding,
                             staticPoseStabilityMode: staticPoseStabilityModeBinding,
                             lockFocusAndExposureForScan: lockFocusAndExposureForScanBinding,
+                            cameraZoomFactor: cameraZoomFactorBinding,
+                            manualFocusEnabled: manualFocusEnabledBinding,
+                            manualLensPosition: manualLensPositionBinding,
                             autoFocusOnDetectedAruco: autoFocusOnDetectedArucoBinding,
                             lockAfterArucoFocus: lockAfterArucoFocusBinding,
                             lensPositionChangeThreshold: cameraLensPositionChangeThresholdBinding,
@@ -502,6 +509,27 @@ struct ScannerView: View {
         Binding(
             get: { viewModel.lockFocusAndExposureForScan },
             set: { viewModel.setLockFocusAndExposureForScan($0) }
+        )
+    }
+
+    private var cameraZoomFactorBinding: Binding<Double> {
+        Binding(
+            get: { viewModel.cameraZoomFactor },
+            set: { viewModel.setCameraZoomFactor($0) }
+        )
+    }
+
+    private var manualFocusEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.manualFocusEnabled },
+            set: { viewModel.setManualFocusEnabled($0) }
+        )
+    }
+
+    private var manualLensPositionBinding: Binding<Double> {
+        Binding(
+            get: { viewModel.manualLensPosition },
+            set: { viewModel.setManualLensPosition($0) }
         )
     }
 

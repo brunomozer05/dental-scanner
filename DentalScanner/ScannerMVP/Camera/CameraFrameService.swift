@@ -62,6 +62,9 @@ final class CameraFrameService: NSObject {
     private var forceFocusSettleOnNextFrame = false
     private var recentSharpnessValues: [Double] = []
     private var focusRequestGeneration = 0
+    private var desiredVideoZoomFactor: CGFloat = 1.0
+    private var manualFocusEnabled = false
+    private var manualLensPosition: Float = 0.5
 
     var onFrame: ((CameraFrame) -> Void)?
     var onError: ((Error) -> Void)?
@@ -226,6 +229,54 @@ final class CameraFrameService: NSObject {
                 }
 
                 self.setCameraQualityConfiguration(configuration)
+                continuation.resume(returning: self.makeCameraDebugSnapshot())
+            }
+        }
+    }
+
+    func setVideoZoomFactor(_ zoomFactor: CGFloat) async -> CameraDebugSnapshot {
+        await withCheckedContinuation { continuation in
+            sessionQueue.async { [weak self] in
+                guard let self else {
+                    continuation.resume(returning: .unavailable)
+                    return
+                }
+
+                let requestedZoom = zoomFactor.isFinite ? max(zoomFactor, 1.0) : 1.0
+                self.setDesiredVideoZoomFactor(requestedZoom)
+
+                if let device = self.activeDevice {
+                    self.applyVideoZoomFactor(requestedZoom, to: device)
+                }
+
+                continuation.resume(returning: self.makeCameraDebugSnapshot())
+            }
+        }
+    }
+
+    func setManualFocus(
+        enabled: Bool,
+        lensPosition: Float
+    ) async -> CameraDebugSnapshot {
+        await withCheckedContinuation { continuation in
+            sessionQueue.async { [weak self] in
+                guard let self else {
+                    continuation.resume(returning: .unavailable)
+                    return
+                }
+
+                let sanitizedLensPosition = min(max(lensPosition, 0.0), 1.0)
+                self.setManualFocusState(
+                    isEnabled: enabled,
+                    lensPosition: sanitizedLensPosition
+                )
+
+                if enabled {
+                    self.applyManualFocusToActiveDevice(lensPosition: sanitizedLensPosition)
+                } else {
+                    self.applyContinuousFocusToActiveDevice()
+                }
+
                 continuation.resume(returning: self.makeCameraDebugSnapshot())
             }
         }
@@ -405,6 +456,8 @@ final class CameraFrameService: NSObject {
 
         try applyDeviceControls(configuration.deviceControls, to: device)
         try applyPreferredFrameRate(configuration.preferredFrameRate, to: device)
+        applyVideoZoomFactor(currentDesiredVideoZoomFactor(), to: device)
+        applyManualFocusConfigurationIfNeeded(to: device)
 
         videoOutput.alwaysDiscardsLateVideoFrames = configuration.alwaysDiscardsLateFrames
         videoOutput.videoSettings = [
@@ -494,6 +547,112 @@ final class CameraFrameService: NSObject {
         }
     }
 
+    private func applyVideoZoomFactor(
+        _ requestedZoomFactor: CGFloat,
+        to device: AVCaptureDevice
+    ) {
+        let minimumZoomFactor = max(device.minAvailableVideoZoomFactor, 1.0)
+        let maximumZoomFactor = max(device.maxAvailableVideoZoomFactor, minimumZoomFactor)
+        let clampedZoomFactor = min(
+            max(requestedZoomFactor, minimumZoomFactor),
+            maximumZoomFactor
+        )
+
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+
+            device.videoZoomFactor = clampedZoomFactor
+            setDesiredVideoZoomFactor(clampedZoomFactor)
+            setCameraControlError(nil)
+        } catch {
+            setCameraControlError("Zoom falhou: \(error.localizedDescription)")
+        }
+    }
+
+    private func applyManualFocusConfigurationIfNeeded(to device: AVCaptureDevice) {
+        let state = cameraControlState()
+        guard state.manualFocusEnabled else {
+            return
+        }
+
+        applyManualFocus(to: device, lensPosition: state.manualLensPosition)
+    }
+
+    private func applyManualFocusToActiveDevice(lensPosition: Float) {
+        guard let device = activeDevice else {
+            setCameraControlError("Camera indisponivel")
+            return
+        }
+
+        applyManualFocus(to: device, lensPosition: lensPosition)
+    }
+
+    private func applyManualFocus(
+        to device: AVCaptureDevice,
+        lensPosition: Float
+    ) {
+        guard device.isLockingFocusWithCustomLensPositionSupported else {
+            setManualFocusState(
+                isEnabled: false,
+                lensPosition: lensPosition
+            )
+            setCameraControlError("Foco manual nao suportado")
+            return
+        }
+
+        let sanitizedLensPosition = min(max(lensPosition, 0.0), 1.0)
+
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+
+            device.setFocusModeLocked(lensPosition: sanitizedLensPosition) { _ in }
+            setManualFocusState(
+                isEnabled: true,
+                lensPosition: sanitizedLensPosition
+            )
+            setCameraControlError(nil)
+            resetFocusStabilityReference(forceSettle: true)
+        } catch {
+            setManualFocusState(
+                isEnabled: false,
+                lensPosition: sanitizedLensPosition
+            )
+            setCameraControlError("Foco manual falhou: \(error.localizedDescription)")
+        }
+    }
+
+    private func applyContinuousFocusToActiveDevice() {
+        guard let device = activeDevice else {
+            setCameraControlError("Camera indisponivel")
+            return
+        }
+
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+
+            if device.isFocusModeSupported(.continuousAutoFocus) {
+                device.focusMode = .continuousAutoFocus
+            } else if device.isFocusModeSupported(.autoFocus) {
+                device.focusMode = .autoFocus
+            } else {
+                setCameraControlError("Foco automatico nao suportado")
+                return
+            }
+
+            setManualFocusState(
+                isEnabled: false,
+                lensPosition: device.lensPosition
+            )
+            setCameraControlError(nil)
+            resetFocusStabilityReference(forceSettle: true)
+        } catch {
+            setCameraControlError("Foco automatico falhou: \(error.localizedDescription)")
+        }
+    }
+
     private func applyLockedCameraControlsToActiveDevice() {
         guard let device = activeDevice else {
             setCameraControlsLocked(false, error: "Camera indisponivel")
@@ -556,6 +715,10 @@ final class CameraFrameService: NSObject {
             } else {
                 unsupportedControls.append("foco continuo")
             }
+            setManualFocusState(
+                isEnabled: false,
+                lensPosition: device.lensPosition
+            )
 
             if device.isExposureModeSupported(.continuousAutoExposure) {
                 device.exposureMode = .continuousAutoExposure
@@ -611,6 +774,10 @@ final class CameraFrameService: NSObject {
             var appliedFocus = false
             var appliedExposure = false
             var warnings: [String] = []
+            setManualFocusState(
+                isEnabled: false,
+                lensPosition: device.lensPosition
+            )
 
             if device.isFocusPointOfInterestSupported {
                 device.focusPointOfInterest = normalizedPoint
@@ -708,7 +875,7 @@ final class CameraFrameService: NSObject {
             timestampSeconds: timestampSeconds,
             configuration: configuration
         )
-        let sharpness = estimateSharpness(in: pixelBuffer)
+        let sharpness = FrameSharpnessAnalyzer.varianceOfLaplacian(in: pixelBuffer)
         recordSharpness(sharpness)
         let sharpnessScore = qualityScoreForSharpness(
             sharpness,
@@ -785,6 +952,12 @@ final class CameraFrameService: NSObject {
                 rotationStabilityScore: cameraQuality?.rotationStabilityScore,
                 isCameraLocked: state.cameraControlsLocked,
                 automaticLockEnabled: state.automaticLockEnabled,
+                videoZoomFactor: nil,
+                minimumAvailableVideoZoomFactor: nil,
+                maximumAvailableVideoZoomFactor: nil,
+                manualFocusEnabled: state.manualFocusEnabled,
+                manualLensPosition: state.manualLensPosition,
+                isManualFocusSupported: nil,
                 lockError: state.lockError
             )
         }
@@ -823,6 +996,12 @@ final class CameraFrameService: NSObject {
             rotationStabilityScore: quality.rotationStabilityScore,
             isCameraLocked: state.cameraControlsLocked,
             automaticLockEnabled: state.automaticLockEnabled,
+            videoZoomFactor: Double(device.videoZoomFactor),
+            minimumAvailableVideoZoomFactor: Double(device.minAvailableVideoZoomFactor),
+            maximumAvailableVideoZoomFactor: Double(device.maxAvailableVideoZoomFactor),
+            manualFocusEnabled: state.manualFocusEnabled,
+            manualLensPosition: state.manualLensPosition,
+            isManualFocusSupported: device.isLockingFocusWithCustomLensPositionSupported,
             lockError: state.lockError
         )
     }
@@ -831,7 +1010,10 @@ final class CameraFrameService: NSObject {
         automaticLockEnabled: Bool,
         cameraControlsLocked: Bool,
         isAutomaticLockInFlight: Bool,
-        lockError: String?
+        lockError: String?,
+        manualFocusEnabled: Bool,
+        manualLensPosition: Float,
+        desiredVideoZoomFactor: CGFloat
     ) {
         cameraControlStateLock.lock()
         defer { cameraControlStateLock.unlock() }
@@ -840,7 +1022,10 @@ final class CameraFrameService: NSObject {
             automaticFocusExposureLockEnabled,
             cameraControlsLocked,
             isAutomaticLockInFlight,
-            lastCameraLockError
+            lastCameraLockError,
+            manualFocusEnabled,
+            manualLensPosition,
+            desiredVideoZoomFactor
         )
     }
 
@@ -857,6 +1042,36 @@ final class CameraFrameService: NSObject {
         cameraControlStateLock.lock()
         cameraControlsLocked = isLocked
         lastCameraLockError = error
+        cameraControlStateLock.unlock()
+    }
+
+    private func setCameraControlError(_ error: String?) {
+        cameraControlStateLock.lock()
+        lastCameraLockError = error
+        cameraControlStateLock.unlock()
+    }
+
+    private func setDesiredVideoZoomFactor(_ zoomFactor: CGFloat) {
+        cameraControlStateLock.lock()
+        desiredVideoZoomFactor = zoomFactor.isFinite ? max(zoomFactor, 1.0) : 1.0
+        cameraControlStateLock.unlock()
+    }
+
+    private func currentDesiredVideoZoomFactor() -> CGFloat {
+        cameraControlStateLock.lock()
+        defer { cameraControlStateLock.unlock() }
+        return desiredVideoZoomFactor
+    }
+
+    private func setManualFocusState(
+        isEnabled: Bool,
+        lensPosition: Float
+    ) {
+        cameraControlStateLock.lock()
+        manualFocusEnabled = isEnabled
+        manualLensPosition = lensPosition.isFinite
+            ? min(max(lensPosition, 0.0), 1.0)
+            : manualLensPosition
         cameraControlStateLock.unlock()
     }
 
@@ -991,70 +1206,6 @@ final class CameraFrameService: NSObject {
         )
         let progress = (sharpness - configuration.minimumAllowedSharpness) / range
         return min(max(0.35 + progress * 0.65, 0.35), 1.0)
-    }
-
-    private func estimateSharpness(in pixelBuffer: CVPixelBuffer) -> Double? {
-        guard CVPixelBufferGetPixelFormatType(pixelBuffer) == kCVPixelFormatType_32BGRA else {
-            return nil
-        }
-
-        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
-
-        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else {
-            return nil
-        }
-
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
-        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
-        guard width > 4, height > 4, bytesPerRow >= width * 4 else {
-            return nil
-        }
-
-        let pixels = baseAddress.assumingMemoryBound(to: UInt8.self)
-        let stepX = max(width / 96, 2)
-        let stepY = max(height / 72, 2)
-        var count = 0
-        var sum = 0.0
-        var sumSquares = 0.0
-
-        for y in stride(from: 1, to: height - 1, by: stepY) {
-            for x in stride(from: 1, to: width - 1, by: stepX) {
-                let center = luma(atX: x, y: y, pixels: pixels, bytesPerRow: bytesPerRow)
-                let left = luma(atX: x - 1, y: y, pixels: pixels, bytesPerRow: bytesPerRow)
-                let right = luma(atX: x + 1, y: y, pixels: pixels, bytesPerRow: bytesPerRow)
-                let up = luma(atX: x, y: y - 1, pixels: pixels, bytesPerRow: bytesPerRow)
-                let down = luma(atX: x, y: y + 1, pixels: pixels, bytesPerRow: bytesPerRow)
-                let laplacian = Double(4 * center - left - right - up - down)
-
-                sum += laplacian
-                sumSquares += laplacian * laplacian
-                count += 1
-            }
-        }
-
-        guard count > 8 else {
-            return nil
-        }
-
-        let mean = sum / Double(count)
-        let variance = sumSquares / Double(count) - mean * mean
-        return variance.isFinite ? max(variance, 0.0) : nil
-    }
-
-    private func luma(
-        atX x: Int,
-        y: Int,
-        pixels: UnsafePointer<UInt8>,
-        bytesPerRow: Int
-    ) -> Int {
-        let offset = y * bytesPerRow + x * 4
-        let blue = Int(pixels[offset])
-        let green = Int(pixels[offset + 1])
-        let red = Int(pixels[offset + 2])
-
-        return (77 * red + 150 * green + 29 * blue) >> 8
     }
 
     private func finiteSeconds(from time: CMTime) -> Double? {

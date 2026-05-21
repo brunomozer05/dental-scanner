@@ -48,6 +48,10 @@ final class ScannerViewModel: ObservableObject {
         static let focusSettleTimeStep: Double = 0.1
         static let sharpnessThresholdRange: ClosedRange<Double> = 0.0...500.0
         static let sharpnessThresholdStep: Double = 5.0
+        static let cameraZoomFactorRange: ClosedRange<Double> = 1.0...3.0
+        static let cameraZoomFactorStep: Double = 0.1
+        static let manualLensPositionRange: ClosedRange<Double> = 0.0...1.0
+        static let manualLensPositionStep: Double = 0.01
         static let minimumArucoFocusTargetAreaPixels: Double = 120.0
         static let minimumArucoFocusTargetConfidence: Double = 0.35
         static let minimumSecondsBetweenArucoFocusRequests: Double = 2.0
@@ -410,6 +414,9 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var currentCameraFrameQuality: CameraFrameQuality = .neutral
     @Published private(set) var currentCameraDebugSnapshot: CameraDebugSnapshot = .unavailable
     @Published private(set) var lockFocusAndExposureForScan: Bool = false
+    @Published private(set) var cameraZoomFactor: Double = 1.0
+    @Published private(set) var manualFocusEnabled: Bool = false
+    @Published private(set) var manualLensPosition: Double = 0.5
     @Published private(set) var cameraFocusAdjustingFrameCount: Int = 0
     @Published private(set) var cameraExposureAdjustingFrameCount: Int = 0
     @Published private(set) var cameraWhiteBalanceAdjustingFrameCount: Int = 0
@@ -611,6 +618,22 @@ final class ScannerViewModel: ObservableObject {
         CameraDiagnosticsConfiguration.sharpnessThresholdStep
     }
 
+    var cameraZoomFactorRange: ClosedRange<Double> {
+        CameraDiagnosticsConfiguration.cameraZoomFactorRange
+    }
+
+    var cameraZoomFactorStep: Double {
+        CameraDiagnosticsConfiguration.cameraZoomFactorStep
+    }
+
+    var manualLensPositionRange: ClosedRange<Double> {
+        CameraDiagnosticsConfiguration.manualLensPositionRange
+    }
+
+    var manualLensPositionStep: Double {
+        CameraDiagnosticsConfiguration.manualLensPositionStep
+    }
+
     var arucoFocusCooldownSeconds: Double {
         CameraDiagnosticsConfiguration.minimumSecondsBetweenArucoFocusRequests
     }
@@ -704,6 +727,7 @@ final class ScannerViewModel: ObservableObject {
                 cameraState = .ready
                 isTorchAvailable = torchState.isAvailable
                 currentCameraDebugSnapshot = cameraSnapshot
+                syncCameraControlState(from: cameraSnapshot)
                 cameraLockErrorMessage = cameraSnapshot.lockError
 
                 if torchState.isAvailable {
@@ -825,10 +849,56 @@ final class ScannerViewModel: ObservableObject {
             let snapshot = await self.cameraService.setAutomaticFocusExposureLockEnabled(isEnabled)
             await MainActor.run {
                 self.currentCameraDebugSnapshot = snapshot
+                self.syncCameraControlState(from: snapshot)
                 self.lockFocusAndExposureForScan = snapshot.automaticLockEnabled
                 self.cameraLockErrorMessage = snapshot.lockError
             }
         }
+    }
+
+    @MainActor
+    func setCameraZoomFactor(_ zoomFactor: Double) {
+        guard zoomFactor.isFinite else { return }
+        let clampedZoomFactor = min(
+            max(zoomFactor, CameraDiagnosticsConfiguration.cameraZoomFactorRange.lowerBound),
+            CameraDiagnosticsConfiguration.cameraZoomFactorRange.upperBound
+        )
+        cameraZoomFactor = clampedZoomFactor
+
+        Task { [weak self] in
+            guard let self else { return }
+            let snapshot = await self.cameraService.setVideoZoomFactor(CGFloat(clampedZoomFactor))
+            await MainActor.run {
+                self.currentCameraDebugSnapshot = snapshot
+                self.syncCameraControlState(from: snapshot)
+                self.cameraLockErrorMessage = snapshot.lockError
+            }
+        }
+    }
+
+    @MainActor
+    func setManualFocusEnabled(_ isEnabled: Bool) {
+        manualFocusEnabled = isEnabled
+        if isEnabled {
+            autoFocusOnDetectedAruco = false
+            arucoFocusSettleUntilTimestamp = nil
+        }
+        applyManualFocusSetting()
+    }
+
+    @MainActor
+    func setManualLensPosition(_ lensPosition: Double) {
+        guard lensPosition.isFinite else { return }
+        manualLensPosition = min(
+            max(lensPosition, CameraDiagnosticsConfiguration.manualLensPositionRange.lowerBound),
+            CameraDiagnosticsConfiguration.manualLensPositionRange.upperBound
+        )
+
+        guard manualFocusEnabled else {
+            return
+        }
+
+        applyManualFocusSetting()
     }
 
     @MainActor
@@ -839,6 +909,7 @@ final class ScannerViewModel: ObservableObject {
             let snapshot = await self.cameraService.lockFocusExposureWhiteBalanceNow()
             await MainActor.run {
                 self.currentCameraDebugSnapshot = snapshot
+                self.syncCameraControlState(from: snapshot)
                 self.lockFocusAndExposureForScan = snapshot.automaticLockEnabled
                 self.cameraLockErrorMessage = snapshot.lockError
             }
@@ -853,6 +924,7 @@ final class ScannerViewModel: ObservableObject {
             let snapshot = await self.cameraService.unlockContinuousCameraControls()
             await MainActor.run {
                 self.currentCameraDebugSnapshot = snapshot
+                self.syncCameraControlState(from: snapshot)
                 self.lockFocusAndExposureForScan = snapshot.automaticLockEnabled
                 self.cameraLockErrorMessage = snapshot.lockError
             }
@@ -871,6 +943,7 @@ final class ScannerViewModel: ObservableObject {
             let snapshot = await self.cameraService.calibrateFocusNow()
             await MainActor.run {
                 self.currentCameraDebugSnapshot = snapshot
+                self.syncCameraControlState(from: snapshot)
                 self.lockFocusAndExposureForScan = snapshot.automaticLockEnabled
                 self.cameraLockErrorMessage = snapshot.lockError
             }
@@ -929,6 +1002,10 @@ final class ScannerViewModel: ObservableObject {
     @MainActor
     func setAutoFocusOnDetectedAruco(_ isEnabled: Bool) {
         autoFocusOnDetectedAruco = isEnabled
+        if isEnabled, manualFocusEnabled {
+            manualFocusEnabled = false
+            applyManualFocusSetting()
+        }
         if !isEnabled {
             arucoFocusSettleUntilTimestamp = nil
         }
@@ -953,8 +1030,48 @@ final class ScannerViewModel: ObservableObject {
             let snapshot = await self.cameraService.updateCameraFrameQualityConfiguration(configuration)
             await MainActor.run {
                 self.currentCameraDebugSnapshot = snapshot
+                self.syncCameraControlState(from: snapshot)
                 self.cameraLockErrorMessage = snapshot.lockError
             }
+        }
+    }
+
+    @MainActor
+    private func applyManualFocusSetting() {
+        let isEnabled = manualFocusEnabled
+        let lensPosition = Float(manualLensPosition)
+
+        Task { [weak self] in
+            guard let self else { return }
+            let snapshot = await self.cameraService.setManualFocus(
+                enabled: isEnabled,
+                lensPosition: lensPosition
+            )
+            await MainActor.run {
+                self.currentCameraDebugSnapshot = snapshot
+                self.syncCameraControlState(from: snapshot)
+                self.cameraLockErrorMessage = snapshot.lockError
+            }
+        }
+    }
+
+    @MainActor
+    private func syncCameraControlState(from snapshot: CameraDebugSnapshot) {
+        if let zoomFactor = snapshot.videoZoomFactor,
+           zoomFactor.isFinite {
+            cameraZoomFactor = min(
+                max(zoomFactor, CameraDiagnosticsConfiguration.cameraZoomFactorRange.lowerBound),
+                CameraDiagnosticsConfiguration.cameraZoomFactorRange.upperBound
+            )
+        }
+
+        manualFocusEnabled = snapshot.manualFocusEnabled
+        if let lensPosition = snapshot.manualLensPosition,
+           lensPosition.isFinite {
+            manualLensPosition = min(
+                max(Double(lensPosition), CameraDiagnosticsConfiguration.manualLensPositionRange.lowerBound),
+                CameraDiagnosticsConfiguration.manualLensPositionRange.upperBound
+            )
         }
     }
 
@@ -1830,6 +1947,7 @@ final class ScannerViewModel: ObservableObject {
         timestamp: Double
     ) {
         guard autoFocusOnDetectedAruco,
+              !manualFocusEnabled,
               let target,
               timestamp.isFinite,
               target.areaPixels >= CameraDiagnosticsConfiguration.minimumArucoFocusTargetAreaPixels,
