@@ -42,6 +42,12 @@ final class ScannerViewModel: ObservableObject {
 
     private enum CameraDiagnosticsConfiguration {
         static let intrinsicsChangeTolerancePixels: Double = 1.0
+        static let lensPositionChangeThresholdRange: ClosedRange<Double> = 0.001...0.050
+        static let lensPositionChangeThresholdStep: Double = 0.001
+        static let focusSettleTimeRange: ClosedRange<Double> = 0.0...1.5
+        static let focusSettleTimeStep: Double = 0.1
+        static let sharpnessThresholdRange: ClosedRange<Double> = 0.0...500.0
+        static let sharpnessThresholdStep: Double = 5.0
     }
 
     private struct MarkerImagePositionDiagnostics {
@@ -410,6 +416,17 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var cameraFormatChangedDuringScan: Bool = false
     @Published private(set) var cameraResolutionChangedDuringScan: Bool = false
     @Published private(set) var cameraLockErrorMessage: String?
+    @Published private(set) var cameraFocusRejectedFrameCount: Int = 0
+    @Published private(set) var cameraBlurRejectedFrameCount: Int = 0
+    @Published private(set) var scanLastBadFrameReason: String?
+    @Published private(set) var cameraLensPositionChangeThreshold: Double =
+        Double(CameraFrameQualityConfiguration.scannerDefault.lensPositionChangeThreshold)
+    @Published private(set) var cameraFocusSettleTimeSeconds: Double =
+        CameraFrameQualityConfiguration.scannerDefault.focusSettleTimeSeconds
+    @Published private(set) var minimumAllowedSharpness: Double =
+        CameraFrameQualityConfiguration.scannerDefault.minimumAllowedSharpness
+    @Published private(set) var minimumPreferredSharpness: Double =
+        CameraFrameQualityConfiguration.scannerDefault.minimumPreferredSharpness
     @Published private(set) var staticPoseStabilityMode: Bool = false
     @Published private(set) var staticPoseStabilityWindowSeconds: Double =
         StaticPoseStabilityConfiguration.windowSeconds
@@ -559,8 +576,54 @@ final class ScannerViewModel: ObservableObject {
         ScanConfiguration.targetValidFrameStep
     }
 
+    var cameraLensPositionChangeThresholdRange: ClosedRange<Double> {
+        CameraDiagnosticsConfiguration.lensPositionChangeThresholdRange
+    }
+
+    var cameraLensPositionChangeThresholdStep: Double {
+        CameraDiagnosticsConfiguration.lensPositionChangeThresholdStep
+    }
+
+    var cameraFocusSettleTimeRange: ClosedRange<Double> {
+        CameraDiagnosticsConfiguration.focusSettleTimeRange
+    }
+
+    var cameraFocusSettleTimeStep: Double {
+        CameraDiagnosticsConfiguration.focusSettleTimeStep
+    }
+
+    var sharpnessThresholdRange: ClosedRange<Double> {
+        CameraDiagnosticsConfiguration.sharpnessThresholdRange
+    }
+
+    var sharpnessThresholdStep: Double {
+        CameraDiagnosticsConfiguration.sharpnessThresholdStep
+    }
+
     var scanTargetGoodFrameCount: Int {
         scanTargetValidFrameCount
+    }
+
+    var distanceGuideSourceReliable: Bool {
+        guard let poseDistanceMm,
+              poseDistanceMm.isFinite,
+              currentCameraFrameQuality.scanRejectionReason == nil,
+              currentCameraFrameQuality.cameraStabilityScore > 0,
+              currentCameraFrameQuality.isSharpnessAcceptable,
+              currentCameraFrameQuality.isFocusStable,
+              !cameraIntrinsicsChangedDuringScan,
+              !cameraDeviceChangedDuringScan,
+              !cameraFormatChangedDuringScan
+        else {
+            return false
+        }
+
+        if let poseReprojectionError,
+           poseReprojectionError.isFinite {
+            return poseReprojectionError <= scanReadinessConfiguration.maximumAverageReprojectionError
+        }
+
+        return scanCurrentFrameGood
     }
 
     var scanGlobalCoveragePercent: Double {
@@ -776,6 +839,92 @@ final class ScannerViewModel: ObservableObject {
             await MainActor.run {
                 self.currentCameraDebugSnapshot = snapshot
                 self.lockFocusAndExposureForScan = snapshot.automaticLockEnabled
+                self.cameraLockErrorMessage = snapshot.lockError
+            }
+        }
+    }
+
+    @MainActor
+    func calibrateFocusNow() {
+        lockFocusAndExposureForScan = true
+        cameraFocusRejectedFrameCount = 0
+        cameraBlurRejectedFrameCount = 0
+        scanLastBadFrameReason = "Aguardando foco estabilizar"
+
+        Task { [weak self] in
+            guard let self else { return }
+            let snapshot = await self.cameraService.calibrateFocusNow()
+            await MainActor.run {
+                self.currentCameraDebugSnapshot = snapshot
+                self.lockFocusAndExposureForScan = snapshot.automaticLockEnabled
+                self.cameraLockErrorMessage = snapshot.lockError
+            }
+        }
+    }
+
+    @MainActor
+    func setCameraLensPositionChangeThreshold(_ threshold: Double) {
+        guard threshold.isFinite else { return }
+        cameraLensPositionChangeThreshold = min(
+            max(threshold, CameraDiagnosticsConfiguration.lensPositionChangeThresholdRange.lowerBound),
+            CameraDiagnosticsConfiguration.lensPositionChangeThresholdRange.upperBound
+        )
+        updateCameraQualityConfiguration()
+    }
+
+    @MainActor
+    func setCameraFocusSettleTimeSeconds(_ seconds: Double) {
+        guard seconds.isFinite else { return }
+        cameraFocusSettleTimeSeconds = min(
+            max(seconds, CameraDiagnosticsConfiguration.focusSettleTimeRange.lowerBound),
+            CameraDiagnosticsConfiguration.focusSettleTimeRange.upperBound
+        )
+        updateCameraQualityConfiguration()
+    }
+
+    @MainActor
+    func setMinimumAllowedSharpness(_ sharpness: Double) {
+        guard sharpness.isFinite else { return }
+        minimumAllowedSharpness = min(
+            max(sharpness, CameraDiagnosticsConfiguration.sharpnessThresholdRange.lowerBound),
+            CameraDiagnosticsConfiguration.sharpnessThresholdRange.upperBound
+        )
+        if minimumPreferredSharpness < minimumAllowedSharpness {
+            minimumPreferredSharpness = minimumAllowedSharpness
+        }
+        updateCameraQualityConfiguration()
+    }
+
+    @MainActor
+    func setMinimumPreferredSharpness(_ sharpness: Double) {
+        guard sharpness.isFinite else { return }
+        minimumPreferredSharpness = min(
+            max(
+                sharpness,
+                max(
+                    minimumAllowedSharpness,
+                    CameraDiagnosticsConfiguration.sharpnessThresholdRange.lowerBound
+                )
+            ),
+            CameraDiagnosticsConfiguration.sharpnessThresholdRange.upperBound
+        )
+        updateCameraQualityConfiguration()
+    }
+
+    @MainActor
+    private func updateCameraQualityConfiguration() {
+        let configuration = CameraFrameQualityConfiguration(
+            lensPositionChangeThreshold: Float(cameraLensPositionChangeThreshold),
+            focusSettleTimeSeconds: cameraFocusSettleTimeSeconds,
+            minimumAllowedSharpness: minimumAllowedSharpness,
+            minimumPreferredSharpness: minimumPreferredSharpness
+        )
+
+        Task { [weak self] in
+            guard let self else { return }
+            let snapshot = await self.cameraService.updateCameraFrameQualityConfiguration(configuration)
+            await MainActor.run {
+                self.currentCameraDebugSnapshot = snapshot
                 self.cameraLockErrorMessage = snapshot.lockError
             }
         }
@@ -1397,6 +1546,8 @@ final class ScannerViewModel: ObservableObject {
                     consolidatedPoseResults: consolidatedPoseResults,
                     finalPoseObservations: frameFinalPoseObservations,
                     dualTagRejectionReasons: poseMetrics.dualTagRejectionReasons,
+                    cameraQuality: frame.cameraQuality,
+                    hasIntrinsics: frame.metadata.intrinsicMatrix != nil,
                     timestamp: metrics.lastFrameTimestamp,
                     frameIndex: metrics.totalFramesReceived
                 )
@@ -1462,6 +1613,9 @@ final class ScannerViewModel: ObservableObject {
         cameraDeviceChangedDuringScan = false
         cameraFormatChangedDuringScan = false
         cameraResolutionChangedDuringScan = false
+        cameraFocusRejectedFrameCount = 0
+        cameraBlurRejectedFrameCount = 0
+        scanLastBadFrameReason = nil
         scanCameraDiagnosticsBaseline = nil
         scanTagCoverages = [:]
         scanReprojectionErrors = []
@@ -1512,6 +1666,8 @@ final class ScannerViewModel: ObservableObject {
         consolidatedPoseResults: [PoseResult],
         finalPoseObservations: [FinalPoseObservation],
         dualTagRejectionReasons: [Int: String],
+        cameraQuality: CameraFrameQuality,
+        hasIntrinsics: Bool,
         timestamp: Double,
         frameIndex: Int
     ) {
@@ -1522,6 +1678,27 @@ final class ScannerViewModel: ObservableObject {
         scanAverageDistanceMm = averageDistance(in: rawPoseResults)
 
         let frameReprojectionError = averageReprojectionError(in: rawPoseResults)
+        if let cameraBlocker = cameraFrameQualityBlocker(
+            cameraQuality,
+            hasIntrinsics: hasIntrinsics
+        ) {
+            rebuildScanTagCoverages()
+            scanCurrentFrameIsGood = false
+            scanCurrentFrameReadinessBlocker = cameraBlocker
+            scanLastBadFrameReason = cameraBlocker
+
+            if cameraBlocker.contains("fora de foco") {
+                cameraBlurRejectedFrameCount += 1
+            } else if cameraBlocker.contains("foco") {
+                cameraFocusRejectedFrameCount += 1
+            }
+
+            updateScanProgressAndState(
+                timestamp: timestamp
+            )
+            return
+        }
+
         let goodPoseResults = rawPoseResults.filter {
             isGoodFrame($0, timestamp: timestamp, frameIndex: frameIndex)
         }
@@ -1537,6 +1714,7 @@ final class ScannerViewModel: ObservableObject {
                 averageDistanceMm: scanAverageDistanceMm,
                 averageReprojectionError: frameReprojectionError
             )
+            scanLastBadFrameReason = scanCurrentFrameReadinessBlocker
             updateScanProgressAndState(
                 timestamp: timestamp
             )
@@ -1545,6 +1723,7 @@ final class ScannerViewModel: ObservableObject {
 
         scanCurrentFrameIsGood = true
         scanCurrentFrameReadinessBlocker = nil
+        scanLastBadFrameReason = nil
         scanAverageDistanceMm = averageDistance(in: goodPoseResults) ?? scanAverageDistanceMm
 
         let goodFinalPoseObservations = finalPoseObservations.filter {
@@ -1586,6 +1765,17 @@ final class ScannerViewModel: ObservableObject {
             timestamp: timestamp
         )
         updateExportDiagnostics()
+    }
+
+    private func cameraFrameQualityBlocker(
+        _ quality: CameraFrameQuality,
+        hasIntrinsics: Bool
+    ) -> String? {
+        if !hasIntrinsics {
+            return "Frame rejeitado: intrinsics indisponiveis"
+        }
+
+        return quality.scanRejectionReason
     }
 
     @MainActor
@@ -1983,12 +2173,16 @@ final class ScannerViewModel: ObservableObject {
             return "Aproxime para detectar a tag inferior"
         }
 
-        if !hasStableDuration {
-            return "Aguardando estabilidade"
+        if let cameraWarning = cameraReadinessWarning() {
+            return cameraWarning
         }
 
         if !evaluation.hasCurrentGoodFrame {
             return scanCurrentFrameReadinessBlocker ?? "Aguardando frame bom"
+        }
+
+        if !hasStableDuration {
+            return "Aguardando estabilidade"
         }
 
         if !evaluation.hasAcceptableDistance {
@@ -2003,10 +2197,6 @@ final class ScannerViewModel: ObservableObject {
 
         if !evaluation.hasStablePosition || !evaluation.hasStableRotation {
             return "Mantenha estavel"
-        }
-
-        if let cameraWarning = cameraReadinessWarning() {
-            return cameraWarning
         }
 
         if let imageEdgeFramingWarning = imageEdgeFramingWarning() {
@@ -2052,6 +2242,14 @@ final class ScannerViewModel: ObservableObject {
             return "Bloqueio principal: poses exportaveis"
         }
 
+        if cameraReadinessWarning() != nil {
+            return "Bloqueio principal: camera/foco"
+        }
+
+        if !evaluation.hasCurrentGoodFrame {
+            return "Bloqueio principal: frame atual ruim"
+        }
+
         if !hasStableDuration {
             return "Bloqueio principal: aguardando estabilidade"
         }
@@ -2072,16 +2270,8 @@ final class ScannerViewModel: ObservableObject {
             return "Aviso: jitter alto"
         }
 
-        if cameraReadinessWarning() != nil {
-            return "Aviso: camera ajustando"
-        }
-
         if imageEdgeFramingWarning() != nil {
             return "Aviso: enquadramento"
-        }
-
-        if !evaluation.hasCurrentGoodFrame {
-            return "Aviso: frame atual ruim"
         }
 
         return "Pronto: gerando STL"
@@ -2117,6 +2307,14 @@ final class ScannerViewModel: ObservableObject {
     func cameraReadinessWarning() -> String? {
         if currentCameraFrameQuality.isAdjustingFocus {
             return "Aguardando foco estabilizar"
+        }
+
+        if currentCameraFrameQuality.isFocusSettling {
+            return "Aguardando foco estabilizar"
+        }
+
+        if !currentCameraFrameQuality.isSharpnessAcceptable {
+            return "Imagem fora de foco"
         }
 
         if currentCameraFrameQuality.isAdjustingExposure {
@@ -5261,7 +5459,8 @@ final class ScannerViewModel: ObservableObject {
         let hasExportableTagPoses: Bool
 
         var isReadyCandidate: Bool {
-            hasTags &&
+            hasCurrentGoodFrame &&
+                hasTags &&
                 hasCompleteTagCoverage &&
                 hasEnoughGoodFrames &&
                 hasPerTagGoodFrames &&

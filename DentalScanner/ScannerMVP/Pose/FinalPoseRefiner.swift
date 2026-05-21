@@ -418,9 +418,16 @@ final class FinalPoseRefiner {
             return true
         }
         let validIndexedObservations: [(offset: Int, element: FinalPoseObservation)]
+        let cameraFilteredIndexedObservations = indexedObservationsAfterConditionalRejection(
+            from: structurallyValidIndexedObservations,
+            qualitiesByOffset: qualitiesByOffset,
+            reason: "camera instavel",
+            shouldReject: { $0.wasRejectedByCamera },
+            discardReasonCounts: &discardReasonCounts
+        )
         if preferDualTagForFinalExport {
             let edgeFilteredIndexedObservations = indexedObservationsAfterConditionalRejection(
-                from: structurallyValidIndexedObservations,
+                from: cameraFilteredIndexedObservations,
                 qualitiesByOffset: qualitiesByOffset,
                 reason: "borda da imagem",
                 shouldReject: { $0.wasHardRejectedByEdge },
@@ -441,7 +448,7 @@ final class FinalPoseRefiner {
                 discardReasonCounts: &discardReasonCounts
             )
         } else {
-            validIndexedObservations = structurallyValidIndexedObservations
+            validIndexedObservations = cameraFilteredIndexedObservations
         }
         let candidateIndexedObservations = preferredIndexedObservations(
             from: validIndexedObservations,
@@ -553,7 +560,8 @@ final class FinalPoseRefiner {
     ) -> ObservationSelection {
         let selectedObservations = observations.filter {
             $0.reprojectionError.isFinite &&
-                $0.reprojectionError <= configuration.maximumObservationReprojectionError
+                $0.reprojectionError <= configuration.maximumObservationReprojectionError &&
+                ($0.cameraQuality?.scanRejectionReason == nil)
         }
         let discardedObservationCount = max(observations.count - selectedObservations.count, 0)
         let selectedQualities = selectedObservations.map { observationQuality(for: $0) }
@@ -1448,7 +1456,8 @@ final class FinalPoseRefiner {
         let cameraStabilityScore = observation.cameraQuality?.cameraStabilityScore ?? 1.0
         let cameraRotationStabilityScore =
             observation.cameraQuality?.rotationStabilityScore ?? cameraStabilityScore
-        let wasRejectedByCamera = cameraStabilityScore < 0.999
+        let cameraRejectionReason = observation.cameraQuality?.scanRejectionReason
+        let wasRejectedByCamera = cameraRejectionReason != nil || cameraStabilityScore < 0.999
         let rawScore = sourceScore *
             reprojectionScore *
             areaScore *
@@ -1469,7 +1478,7 @@ final class FinalPoseRefiner {
         } else if wasRejectedByMotion {
             rejectionReason = "movimento alto"
         } else if wasRejectedByCamera {
-            rejectionReason = "camera ajustando"
+            rejectionReason = cameraRejectionReason ?? "camera ajustando"
         } else {
             rejectionReason = nil
         }

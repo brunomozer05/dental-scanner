@@ -18,6 +18,7 @@ struct ScanDistanceGuideConfiguration: Equatable {
 struct ScanDistanceGuideView: View {
     let distanceMm: Double?
     let configuration: ScanDistanceGuideConfiguration
+    let isSourceReliable: Bool
 
     private let trackHeight: CGFloat = 170
     private let trackWidth: CGFloat = 14
@@ -31,14 +32,14 @@ struct ScanDistanceGuideView: View {
             VStack(alignment: .trailing, spacing: 3) {
                 Text(formattedDistance)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(distanceMm == nil ? 0.54 : 0.92))
+                    .foregroundStyle(.white.opacity(effectiveDistanceMm == nil ? 0.54 : 0.92))
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
 
                 Text(distanceState.title)
                     .font(.caption2.weight(.medium))
-                    .foregroundStyle(indicatorColor.opacity(distanceMm == nil ? 0.62 : 0.95))
+                    .foregroundStyle(indicatorColor.opacity(effectiveDistanceMm == nil ? 0.62 : 0.95))
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
@@ -76,7 +77,7 @@ struct ScanDistanceGuideView: View {
                     }
                     .overlay {
                         RoundedRectangle(cornerRadius: trackWidth / 2, style: .continuous)
-                            .fill(Color.black.opacity(distanceMm == nil ? 0.30 : 0.08))
+                            .fill(Color.black.opacity(effectiveDistanceMm == nil ? 0.30 : 0.08))
                     }
 
                 Circle()
@@ -87,7 +88,7 @@ struct ScanDistanceGuideView: View {
                             .stroke(Color.white.opacity(0.72), lineWidth: 1.2)
                     }
                     .shadow(
-                        color: indicatorColor.opacity(distanceMm == nil ? 0.0 : 0.42),
+                        color: indicatorColor.opacity(effectiveDistanceMm == nil ? 0.0 : 0.42),
                         radius: 6,
                         x: 0,
                         y: 0
@@ -100,7 +101,7 @@ struct ScanDistanceGuideView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(width: indicatorDiameter, height: trackHeight)
-        .animation(.easeOut(duration: 0.18), value: distanceMm ?? -1)
+        .animation(.easeOut(duration: 0.18), value: effectiveDistanceMm ?? -1)
     }
 
     private var trackGradient: LinearGradient {
@@ -128,14 +129,18 @@ struct ScanDistanceGuideView: View {
     }
 
     private var formattedDistance: String {
-        guard let distanceMm, distanceMm.isFinite else {
+        guard let effectiveDistanceMm, effectiveDistanceMm.isFinite else {
             return "-- mm"
         }
 
-        return String(format: "%.0f mm", distanceMm)
+        return String(format: "%.0f mm", effectiveDistanceMm)
     }
 
     private var distanceState: DistanceState {
+        guard isSourceReliable else {
+            return .unreliable
+        }
+
         guard let distanceMm, distanceMm.isFinite else {
             return .unavailable
         }
@@ -161,10 +166,16 @@ struct ScanDistanceGuideView: View {
             return farColor
         case .unavailable:
             return .white.opacity(0.34)
+        case .unreliable:
+            return .white.opacity(0.34)
         }
     }
 
     private var accessibilityText: String {
+        guard isSourceReliable else {
+            return "Distancia do scan sem confianca porque o frame atual esta ruim"
+        }
+
         guard let distanceMm, distanceMm.isFinite else {
             return "Distancia do scan indisponivel"
         }
@@ -180,12 +191,20 @@ struct ScanDistanceGuideView: View {
     }
 
     private var normalizedDistance: CGFloat {
-        guard let distanceMm, distanceMm.isFinite else {
+        guard let effectiveDistanceMm, effectiveDistanceMm.isFinite else {
             return 0.5
         }
 
-        let clampedDistance = min(max(distanceMm, minimumDistance), maximumDistance)
+        let clampedDistance = min(max(effectiveDistanceMm, minimumDistance), maximumDistance)
         return CGFloat((clampedDistance - minimumDistance) / distanceRange)
+    }
+
+    private var effectiveDistanceMm: Double? {
+        guard isSourceReliable else {
+            return nil
+        }
+
+        return distanceMm
     }
 
     private func yLocation(for distanceMm: Double) -> CGFloat {
@@ -212,6 +231,7 @@ struct ScanDistanceGuideView: View {
         case ideal
         case tooFar
         case unavailable
+        case unreliable
 
         var title: String {
             switch self {
@@ -223,6 +243,8 @@ struct ScanDistanceGuideView: View {
                 return "Muito longe"
             case .unavailable:
                 return "Sem pose"
+            case .unreliable:
+                return "Qualidade ruim"
             }
         }
     }
@@ -235,7 +257,8 @@ struct ScanDistanceGuideView: View {
 
         ScanDistanceGuideView(
             distanceMm: 118,
-            configuration: .default
+            configuration: .default,
+            isSourceReliable: true
         )
     }
 }

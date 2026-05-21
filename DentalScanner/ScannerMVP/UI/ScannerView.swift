@@ -52,7 +52,8 @@ struct ScannerView: View {
 
                     ScanDistanceGuideView(
                         distanceMm: viewModel.poseDistanceMm,
-                        configuration: .default
+                        configuration: .default,
+                        isSourceReliable: viewModel.distanceGuideSourceReliable
                     )
                     .padding(.trailing, 16)
                 }
@@ -107,6 +108,12 @@ struct ScannerView: View {
                             minimumDualTagFrameRange: viewModel.scanMinimumDualTagFrameRange,
                             dualAngularCoverageRange: viewModel.scanRequiredDualAngularCoverageRange,
                             dualAngularCoverageStep: viewModel.scanAngularCoverageStepPercent,
+                            lensPositionChangeThresholdRange: viewModel.cameraLensPositionChangeThresholdRange,
+                            lensPositionChangeThresholdStep: viewModel.cameraLensPositionChangeThresholdStep,
+                            focusSettleTimeRange: viewModel.cameraFocusSettleTimeRange,
+                            focusSettleTimeStep: viewModel.cameraFocusSettleTimeStep,
+                            sharpnessThresholdRange: viewModel.sharpnessThresholdRange,
+                            sharpnessThresholdStep: viewModel.sharpnessThresholdStep,
                             markerProfile: markerProfileBinding,
                             requiredCoveragePercent: scanRequiredCoverageBinding,
                             minimumGoodFrames: scanMinimumGoodFrameBinding,
@@ -118,8 +125,15 @@ struct ScannerView: View {
                             showDistanceGuide: showDistanceGuideBinding,
                             staticPoseStabilityMode: staticPoseStabilityModeBinding,
                             lockFocusAndExposureForScan: lockFocusAndExposureForScanBinding,
+                            lensPositionChangeThreshold: cameraLensPositionChangeThresholdBinding,
+                            focusSettleTimeSeconds: cameraFocusSettleTimeBinding,
+                            minimumAllowedSharpness: minimumAllowedSharpnessBinding,
+                            minimumPreferredSharpness: minimumPreferredSharpnessBinding,
                             onLockCameraNow: {
                                 viewModel.lockCameraNow()
+                            },
+                            onCalibrateFocusNow: {
+                                viewModel.calibrateFocusNow()
                             },
                             onUnlockContinuousCamera: {
                                 viewModel.unlockContinuousCamera()
@@ -486,6 +500,34 @@ struct ScannerView: View {
         Binding(
             get: { viewModel.lockFocusAndExposureForScan },
             set: { viewModel.setLockFocusAndExposureForScan($0) }
+        )
+    }
+
+    private var cameraLensPositionChangeThresholdBinding: Binding<Double> {
+        Binding(
+            get: { viewModel.cameraLensPositionChangeThreshold },
+            set: { viewModel.setCameraLensPositionChangeThreshold($0) }
+        )
+    }
+
+    private var cameraFocusSettleTimeBinding: Binding<Double> {
+        Binding(
+            get: { viewModel.cameraFocusSettleTimeSeconds },
+            set: { viewModel.setCameraFocusSettleTimeSeconds($0) }
+        )
+    }
+
+    private var minimumAllowedSharpnessBinding: Binding<Double> {
+        Binding(
+            get: { viewModel.minimumAllowedSharpness },
+            set: { viewModel.setMinimumAllowedSharpness($0) }
+        )
+    }
+
+    private var minimumPreferredSharpnessBinding: Binding<Double> {
+        Binding(
+            get: { viewModel.minimumPreferredSharpness },
+            set: { viewModel.setMinimumPreferredSharpness($0) }
         )
     }
 

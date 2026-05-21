@@ -13,6 +13,12 @@ struct ScannerDebugPanelView: View {
     let minimumDualTagFrameRange: ClosedRange<Int>
     let dualAngularCoverageRange: ClosedRange<Double>
     let dualAngularCoverageStep: Double
+    let lensPositionChangeThresholdRange: ClosedRange<Double>
+    let lensPositionChangeThresholdStep: Double
+    let focusSettleTimeRange: ClosedRange<Double>
+    let focusSettleTimeStep: Double
+    let sharpnessThresholdRange: ClosedRange<Double>
+    let sharpnessThresholdStep: Double
     @Binding var markerProfile: MarkerProfile
     @Binding var requiredCoveragePercent: Double
     @Binding var minimumGoodFrames: Int
@@ -24,7 +30,12 @@ struct ScannerDebugPanelView: View {
     @Binding var showDistanceGuide: Bool
     @Binding var staticPoseStabilityMode: Bool
     @Binding var lockFocusAndExposureForScan: Bool
+    @Binding var lensPositionChangeThreshold: Double
+    @Binding var focusSettleTimeSeconds: Double
+    @Binding var minimumAllowedSharpness: Double
+    @Binding var minimumPreferredSharpness: Double
     let onLockCameraNow: () -> Void
+    let onCalibrateFocusNow: () -> Void
     let onUnlockContinuousCamera: () -> Void
     let onClose: () -> Void
 
@@ -84,6 +95,13 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "fx/fy", value: "\(snapshot.camera.fx) / \(snapshot.camera.fy)")
                         debugRow(title: "cx/cy", value: "\(snapshot.camera.cx) / \(snapshot.camera.cy)")
                         debugRow(title: "Lens position", value: snapshot.camera.lensPosition)
+                        debugRow(title: "Focus stable", value: snapshot.camera.cameraFocusStable)
+                        debugRow(title: "Focus settling", value: snapshot.camera.focusSettling)
+                        debugRow(title: "Lens change age", value: snapshot.camera.lastLensPositionChangeAge)
+                        debugRow(title: "Sharpness", value: snapshot.camera.sharpness)
+                        debugRow(title: "Sharpness medio", value: snapshot.camera.averageSharpness)
+                        debugRow(title: "Sharpness min", value: snapshot.camera.minimumAllowedSharpness)
+                        debugRow(title: "Sharpness pref", value: snapshot.camera.minimumPreferredSharpness)
                         debugRow(title: "Adjusting focus", value: snapshot.camera.isAdjustingFocus)
                         debugRow(title: "Adjusting exposure", value: snapshot.camera.isAdjustingExposure)
                         debugRow(title: "Adjusting WB", value: snapshot.camera.isAdjustingWhiteBalance)
@@ -95,6 +113,8 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Camera locked", value: snapshot.camera.cameraLocked)
                         debugRow(title: "Lock error", value: snapshot.camera.lockError)
                         debugRow(title: "Focus adjusting frames", value: snapshot.camera.focusAdjustingFrames)
+                        debugRow(title: "Frames rejeitados foco", value: snapshot.camera.focusRejectedFrames)
+                        debugRow(title: "Frames rejeitados blur", value: snapshot.camera.blurRejectedFrames)
                         debugRow(title: "Exposure adjusting frames", value: snapshot.camera.exposureAdjustingFrames)
                         debugRow(title: "WB adjusting frames", value: snapshot.camera.whiteBalanceAdjustingFrames)
                         debugRow(title: "Unstable frames", value: snapshot.camera.unstableFrames)
@@ -103,6 +123,10 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Format changed", value: snapshot.camera.formatChanged)
                         debugRow(title: "Resolution changed", value: snapshot.camera.resolutionChanged)
                         debugRow(title: "Warning", value: snapshot.camera.warning)
+                        debugRow(title: "Ultimo frame ruim", value: snapshot.camera.lastBadFrameReason)
+                        debugRow(title: "Distancia confiavel", value: snapshot.camera.distanceGuideSourceReliable)
+                        debugRow(title: "Distancia", value: snapshot.camera.distanceMm)
+                        debugRow(title: "distanceReady", value: snapshot.camera.distanceReady)
                     }
 
                     debugSection(title: "Config") {
@@ -134,10 +158,52 @@ struct ScannerDebugPanelView: View {
                             Button("Lock camera now", action: onLockCameraNow)
                                 .buttonStyle(.bordered)
 
+                            Button("Calibrar foco agora", action: onCalibrateFocusNow)
+                                .buttonStyle(.bordered)
+                        }
+                        .font(.caption2.weight(.semibold))
+
+                        HStack(spacing: 8) {
                             Button("Unlock continuous camera", action: onUnlockContinuousCamera)
                                 .buttonStyle(.bordered)
                         }
                         .font(.caption2.weight(.semibold))
+
+                        debugDoubleStepper(
+                            title: "Lens delta foco",
+                            value: $lensPositionChangeThreshold,
+                            range: lensPositionChangeThresholdRange,
+                            step: lensPositionChangeThresholdStep,
+                            decimals: 3,
+                            suffix: ""
+                        )
+
+                        debugDoubleStepper(
+                            title: "Focus settle",
+                            value: $focusSettleTimeSeconds,
+                            range: focusSettleTimeRange,
+                            step: focusSettleTimeStep,
+                            decimals: 1,
+                            suffix: "s"
+                        )
+
+                        debugDoubleStepper(
+                            title: "Sharpness minimo",
+                            value: $minimumAllowedSharpness,
+                            range: sharpnessThresholdRange,
+                            step: sharpnessThresholdStep,
+                            decimals: 0,
+                            suffix: ""
+                        )
+
+                        debugDoubleStepper(
+                            title: "Sharpness preferido",
+                            value: $minimumPreferredSharpness,
+                            range: sharpnessThresholdRange,
+                            step: sharpnessThresholdStep,
+                            decimals: 0,
+                            suffix: ""
+                        )
 
                         debugIntStepper(
                             title: "Minimum good frames",
@@ -313,11 +379,43 @@ struct ScannerDebugPanelView: View {
         .font(.caption2.weight(.semibold))
     }
 
+    private func debugDoubleStepper(
+        title: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        step: Double,
+        decimals: Int,
+        suffix: String
+    ) -> some View {
+        Stepper(value: value, in: range, step: step) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title)
+                    .foregroundStyle(.white.opacity(0.58))
+
+                Spacer(minLength: 8)
+
+                Text(numberText(value.wrappedValue, decimals: decimals, suffix: suffix))
+                    .monospacedDigit()
+            }
+        }
+        .font(.caption2.weight(.semibold))
+    }
+
     private func percentText(_ value: Double) -> String {
         guard value.isFinite else {
             return ScannerDebugSnapshot.missingValue
         }
 
         return "\(Int(round(value)))%"
+    }
+
+    private func numberText(_ value: Double, decimals: Int, suffix: String) -> String {
+        guard value.isFinite else {
+            return ScannerDebugSnapshot.missingValue
+        }
+
+        let safeDecimals = min(max(decimals, 0), 6)
+        let text = String(format: "%.\(safeDecimals)f", value)
+        return suffix.isEmpty ? text : "\(text) \(suffix)"
     }
 }

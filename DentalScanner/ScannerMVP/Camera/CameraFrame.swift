@@ -3,11 +3,31 @@ import CoreMedia
 import CoreVideo
 import simd
 
+struct CameraFrameQualityConfiguration: Equatable {
+    var lensPositionChangeThreshold: Float
+    var focusSettleTimeSeconds: Double
+    var minimumAllowedSharpness: Double
+    var minimumPreferredSharpness: Double
+
+    static let scannerDefault = CameraFrameQualityConfiguration(
+        lensPositionChangeThreshold: 0.015,
+        focusSettleTimeSeconds: 0.5,
+        minimumAllowedSharpness: 25.0,
+        minimumPreferredSharpness: 80.0
+    )
+}
+
 struct CameraFrameQuality: Equatable {
     let isAdjustingFocus: Bool
     let isAdjustingExposure: Bool
     let isAdjustingWhiteBalance: Bool
+    let isFocusSettling: Bool
+    let isFocusStable: Bool
     let lensPosition: Float?
+    let lastLensPositionChangeAgeSeconds: Double?
+    let sharpness: Double?
+    let isSharpnessAcceptable: Bool
+    let sharpnessScore: Double
     let iso: Float?
     let exposureDurationSeconds: Double?
     let cameraStabilityScore: Double
@@ -16,15 +36,39 @@ struct CameraFrameQuality: Equatable {
     var isUnstable: Bool {
         cameraStabilityScore < 0.999 ||
             isAdjustingFocus ||
+            isFocusSettling ||
+            !isSharpnessAcceptable ||
             isAdjustingExposure ||
             isAdjustingWhiteBalance
+    }
+
+    var scanRejectionReason: String? {
+        if isAdjustingFocus {
+            return "Frame rejeitado: foco ajustando"
+        }
+
+        if isFocusSettling {
+            return "Frame rejeitado: foco estabilizando"
+        }
+
+        if !isSharpnessAcceptable {
+            return "Frame rejeitado: imagem fora de foco"
+        }
+
+        return nil
     }
 
     static let neutral = CameraFrameQuality(
         isAdjustingFocus: false,
         isAdjustingExposure: false,
         isAdjustingWhiteBalance: false,
+        isFocusSettling: false,
+        isFocusStable: true,
         lensPosition: nil,
+        lastLensPositionChangeAgeSeconds: nil,
+        sharpness: nil,
+        isSharpnessAcceptable: true,
+        sharpnessScore: 1.0,
         iso: nil,
         exposureDurationSeconds: nil,
         cameraStabilityScore: 1.0,
@@ -45,6 +89,13 @@ struct CameraDebugSnapshot: Equatable {
     let cx: Double?
     let cy: Double?
     let lensPosition: Float?
+    let lastLensPositionChangeAgeSeconds: Double?
+    let isFocusStable: Bool?
+    let isFocusSettling: Bool?
+    let sharpness: Double?
+    let averageSharpness: Double?
+    let minimumAllowedSharpness: Double?
+    let minimumPreferredSharpness: Double?
     let isAdjustingFocus: Bool?
     let isAdjustingExposure: Bool?
     let isAdjustingWhiteBalance: Bool?
@@ -69,6 +120,13 @@ struct CameraDebugSnapshot: Equatable {
         cx: nil,
         cy: nil,
         lensPosition: nil,
+        lastLensPositionChangeAgeSeconds: nil,
+        isFocusStable: nil,
+        isFocusSettling: nil,
+        sharpness: nil,
+        averageSharpness: nil,
+        minimumAllowedSharpness: nil,
+        minimumPreferredSharpness: nil,
         isAdjustingFocus: nil,
         isAdjustingExposure: nil,
         isAdjustingWhiteBalance: nil,

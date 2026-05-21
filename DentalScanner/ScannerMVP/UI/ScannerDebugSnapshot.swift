@@ -59,6 +59,13 @@ struct ScannerDebugSnapshot: Equatable {
         let cx: String
         let cy: String
         let lensPosition: String
+        let lastLensPositionChangeAge: String
+        let cameraFocusStable: String
+        let focusSettling: String
+        let sharpness: String
+        let averageSharpness: String
+        let minimumAllowedSharpness: String
+        let minimumPreferredSharpness: String
         let isAdjustingFocus: String
         let isAdjustingExposure: String
         let isAdjustingWhiteBalance: String
@@ -70,6 +77,8 @@ struct ScannerDebugSnapshot: Equatable {
         let cameraLocked: String
         let lockError: String
         let focusAdjustingFrames: String
+        let focusRejectedFrames: String
+        let blurRejectedFrames: String
         let exposureAdjustingFrames: String
         let whiteBalanceAdjustingFrames: String
         let unstableFrames: String
@@ -78,6 +87,10 @@ struct ScannerDebugSnapshot: Equatable {
         let formatChanged: String
         let resolutionChanged: String
         let warning: String
+        let lastBadFrameReason: String
+        let distanceGuideSourceReliable: String
+        let distanceMm: String
+        let distanceReady: String
     }
 
     struct MarkerV2Row: Equatable, Identifiable {
@@ -154,7 +167,13 @@ extension ScannerViewModel {
                 deviceChanged: cameraDeviceChangedDuringScan,
                 formatChanged: cameraFormatChangedDuringScan,
                 resolutionChanged: cameraResolutionChangedDuringScan,
-                warning: cameraReadinessWarning()
+                warning: cameraReadinessWarning(),
+                focusRejectedFrames: cameraFocusRejectedFrameCount,
+                blurRejectedFrames: cameraBlurRejectedFrameCount,
+                lastBadFrameReason: scanLastBadFrameReason,
+                distanceGuideSourceReliable: distanceGuideSourceReliable,
+                distanceMm: poseDistanceMm,
+                distanceReady: scanDistanceReady
             ),
             isDualArucoV2: markerProfile == .dualArucoV2,
             markerV2Rows: markerProfile == .dualArucoV2
@@ -175,7 +194,13 @@ extension ScannerViewModel {
         deviceChanged: Bool,
         formatChanged: Bool,
         resolutionChanged: Bool,
-        warning: String?
+        warning: String?,
+        focusRejectedFrames: Int,
+        blurRejectedFrames: Int,
+        lastBadFrameReason: String?,
+        distanceGuideSourceReliable: Bool,
+        distanceMm: Double?,
+        distanceReady: Bool
     ) -> ScannerDebugSnapshot.CameraSection {
         ScannerDebugSnapshot.CameraSection(
             deviceName: debugText(snapshot.deviceName),
@@ -190,6 +215,13 @@ extension ScannerViewModel {
             cx: debugNumber(snapshot.cx, decimals: 1),
             cy: debugNumber(snapshot.cy, decimals: 1),
             lensPosition: debugNumber(snapshot.lensPosition.map(Double.init), decimals: 3),
+            lastLensPositionChangeAge: debugSeconds(snapshot.lastLensPositionChangeAgeSeconds),
+            cameraFocusStable: debugOptionalBool(snapshot.isFocusStable),
+            focusSettling: debugOptionalBool(snapshot.isFocusSettling),
+            sharpness: debugNumber(snapshot.sharpness, decimals: 1),
+            averageSharpness: debugNumber(snapshot.averageSharpness, decimals: 1),
+            minimumAllowedSharpness: debugNumber(snapshot.minimumAllowedSharpness, decimals: 1),
+            minimumPreferredSharpness: debugNumber(snapshot.minimumPreferredSharpness, decimals: 1),
             isAdjustingFocus: debugOptionalBool(snapshot.isAdjustingFocus),
             isAdjustingExposure: debugOptionalBool(snapshot.isAdjustingExposure),
             isAdjustingWhiteBalance: debugOptionalBool(snapshot.isAdjustingWhiteBalance),
@@ -201,6 +233,8 @@ extension ScannerViewModel {
             cameraLocked: snapshot.isCameraLocked ? "Sim" : "Nao",
             lockError: debugText(snapshot.lockError ?? "Nenhum"),
             focusAdjustingFrames: "\(focusAdjustingFrames)",
+            focusRejectedFrames: "\(focusRejectedFrames)",
+            blurRejectedFrames: "\(blurRejectedFrames)",
             exposureAdjustingFrames: "\(exposureAdjustingFrames)",
             whiteBalanceAdjustingFrames: "\(whiteBalanceAdjustingFrames)",
             unstableFrames: "\(unstableFrames)",
@@ -208,7 +242,11 @@ extension ScannerViewModel {
             deviceChanged: deviceChanged ? "Sim" : "Nao",
             formatChanged: formatChanged ? "Sim" : "Nao",
             resolutionChanged: resolutionChanged ? "Sim" : "Nao",
-            warning: debugText(warning)
+            warning: debugText(warning),
+            lastBadFrameReason: debugText(lastBadFrameReason),
+            distanceGuideSourceReliable: distanceGuideSourceReliable ? "Sim" : "Nao",
+            distanceMm: debugMillimeters(distanceMm),
+            distanceReady: distanceReady ? "Sim" : "Nao"
         )
     }
 
@@ -287,6 +325,22 @@ extension ScannerViewModel {
         }
 
         return String(format: "%.3f s", seconds)
+    }
+
+    private static func debugSeconds(_ seconds: Double?) -> String {
+        guard let seconds, seconds.isFinite else {
+            return ScannerDebugSnapshot.missingValue
+        }
+
+        return "\(String(format: "%.2f", seconds)) s"
+    }
+
+    private static func debugMillimeters(_ value: Double?) -> String {
+        guard let value, value.isFinite else {
+            return ScannerDebugSnapshot.missingValue
+        }
+
+        return "\(String(format: "%.1f", value)) mm"
     }
 
     private static func debugOptionalBool(_ value: Bool?) -> String {

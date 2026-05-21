@@ -55,6 +55,11 @@ final class CameraFrameService: NSObject {
     private var cameraControlsLocked = false
     private var isAutomaticLockInFlight = false
     private var lastCameraLockError: String?
+    private var cameraQualityConfiguration: CameraFrameQualityConfiguration = .scannerDefault
+    private var previousLensPosition: Float?
+    private var lastLensPositionChangeTimestamp: Double?
+    private var forceFocusSettleOnNextFrame = false
+    private var recentSharpnessValues: [Double] = []
 
     var onFrame: ((CameraFrame) -> Void)?
     var onError: ((Error) -> Void)?
@@ -204,6 +209,38 @@ final class CameraFrameService: NSObject {
         await withCheckedContinuation { continuation in
             sessionQueue.async { [weak self] in
                 continuation.resume(returning: self?.makeCameraDebugSnapshot() ?? .unavailable)
+            }
+        }
+    }
+
+    func updateCameraFrameQualityConfiguration(
+        _ configuration: CameraFrameQualityConfiguration
+    ) async -> CameraDebugSnapshot {
+        await withCheckedContinuation { continuation in
+            sessionQueue.async { [weak self] in
+                guard let self else {
+                    continuation.resume(returning: .unavailable)
+                    return
+                }
+
+                self.setCameraQualityConfiguration(configuration)
+                continuation.resume(returning: self.makeCameraDebugSnapshot())
+            }
+        }
+    }
+
+    func calibrateFocusNow() async -> CameraDebugSnapshot {
+        await withCheckedContinuation { continuation in
+            sessionQueue.async { [weak self] in
+                guard let self else {
+                    continuation.resume(returning: .unavailable)
+                    return
+                }
+
+                self.setAutomaticLockEnabled(true)
+                self.applyLockedCameraControlsToActiveDevice()
+                self.resetFocusStabilityReference(forceSettle: true)
+                continuation.resume(returning: self.makeCameraDebugSnapshot())
             }
         }
     }
@@ -536,21 +573,42 @@ final class CameraFrameService: NSObject {
         }
     }
 
-    private func makeCameraFrameQuality(for device: AVCaptureDevice?) -> CameraFrameQuality {
+    private func makeCameraFrameQuality(
+        for device: AVCaptureDevice?,
+        pixelBuffer: CVPixelBuffer,
+        timestampSeconds: Double
+    ) -> CameraFrameQuality {
         guard let device else {
             return .neutral
         }
 
+        let configuration = currentCameraQualityConfiguration()
         let exposureDurationSeconds = finiteSeconds(from: device.exposureDuration)
-        let focusScore = device.isAdjustingFocus ? 0.35 : 1.0
+        let lensPosition = device.lensPosition.isFinite ? device.lensPosition : nil
+        let focusState = updateFocusStabilityState(
+            lensPosition: lensPosition,
+            timestampSeconds: timestampSeconds,
+            configuration: configuration
+        )
+        let sharpness = estimateSharpness(in: pixelBuffer)
+        recordSharpness(sharpness)
+        let sharpnessScore = qualityScoreForSharpness(
+            sharpness,
+            configuration: configuration
+        )
+        let isSharpnessAcceptable = sharpness.map {
+            $0.isFinite && $0 >= configuration.minimumAllowedSharpness
+        } ?? true
+        let isFocusStable = !device.isAdjustingFocus && !focusState.isSettling
+        let focusScore = isFocusStable ? 1.0 : 0.0
         let exposureScore = device.isAdjustingExposure ? 0.50 : 1.0
         let whiteBalanceScore = device.isAdjustingWhiteBalance ? 0.75 : 1.0
-        let cameraScore = min(focusScore, min(exposureScore, whiteBalanceScore))
+        let cameraScore = min(focusScore, min(exposureScore, min(whiteBalanceScore, sharpnessScore)))
         let rotationScore = min(
-            device.isAdjustingFocus ? 0.25 : 1.0,
+            isFocusStable ? 1.0 : 0.0,
             min(
                 device.isAdjustingExposure ? 0.40 : 1.0,
-                device.isAdjustingWhiteBalance ? 0.65 : 1.0
+                min(device.isAdjustingWhiteBalance ? 0.65 : 1.0, sharpnessScore)
             )
         )
 
@@ -558,7 +616,13 @@ final class CameraFrameService: NSObject {
             isAdjustingFocus: device.isAdjustingFocus,
             isAdjustingExposure: device.isAdjustingExposure,
             isAdjustingWhiteBalance: device.isAdjustingWhiteBalance,
-            lensPosition: device.lensPosition.isFinite ? device.lensPosition : nil,
+            isFocusSettling: focusState.isSettling,
+            isFocusStable: isFocusStable,
+            lensPosition: lensPosition,
+            lastLensPositionChangeAgeSeconds: focusState.lastChangeAgeSeconds,
+            sharpness: sharpness,
+            isSharpnessAcceptable: isSharpnessAcceptable,
+            sharpnessScore: sharpnessScore,
             iso: device.iso.isFinite ? device.iso : nil,
             exposureDurationSeconds: exposureDurationSeconds,
             cameraStabilityScore: cameraScore,
@@ -587,6 +651,13 @@ final class CameraFrameService: NSObject {
                 cx: cx(from: intrinsicMatrix),
                 cy: cy(from: intrinsicMatrix),
                 lensPosition: nil,
+                lastLensPositionChangeAgeSeconds: nil,
+                isFocusStable: nil,
+                isFocusSettling: nil,
+                sharpness: nil,
+                averageSharpness: averageSharpness(),
+                minimumAllowedSharpness: currentCameraQualityConfiguration().minimumAllowedSharpness,
+                minimumPreferredSharpness: currentCameraQualityConfiguration().minimumPreferredSharpness,
                 isAdjustingFocus: nil,
                 isAdjustingExposure: nil,
                 isAdjustingWhiteBalance: nil,
@@ -600,7 +671,8 @@ final class CameraFrameService: NSObject {
             )
         }
 
-        let quality = cameraQuality ?? makeCameraFrameQuality(for: device)
+        let quality = cameraQuality ?? .neutral
+        let configuration = currentCameraQualityConfiguration()
         let formatDimensions = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
         let dimensions = sampleBufferDimensions ?? formatDimensions
 
@@ -617,6 +689,13 @@ final class CameraFrameService: NSObject {
             cx: cx(from: intrinsicMatrix),
             cy: cy(from: intrinsicMatrix),
             lensPosition: quality.lensPosition,
+            lastLensPositionChangeAgeSeconds: quality.lastLensPositionChangeAgeSeconds,
+            isFocusStable: quality.isFocusStable,
+            isFocusSettling: quality.isFocusSettling,
+            sharpness: quality.sharpness,
+            averageSharpness: averageSharpness(),
+            minimumAllowedSharpness: configuration.minimumAllowedSharpness,
+            minimumPreferredSharpness: configuration.minimumPreferredSharpness,
             isAdjustingFocus: quality.isAdjustingFocus,
             isAdjustingExposure: quality.isAdjustingExposure,
             isAdjustingWhiteBalance: quality.isAdjustingWhiteBalance,
@@ -667,6 +746,197 @@ final class CameraFrameService: NSObject {
         cameraControlStateLock.lock()
         isAutomaticLockInFlight = isInFlight
         cameraControlStateLock.unlock()
+    }
+
+    private func setCameraQualityConfiguration(_ configuration: CameraFrameQualityConfiguration) {
+        let sanitized = CameraFrameQualityConfiguration(
+            lensPositionChangeThreshold: min(
+                max(configuration.lensPositionChangeThreshold, 0.001),
+                0.10
+            ),
+            focusSettleTimeSeconds: min(
+                max(configuration.focusSettleTimeSeconds, 0.0),
+                2.0
+            ),
+            minimumAllowedSharpness: min(
+                max(configuration.minimumAllowedSharpness, 0.0),
+                2_000.0
+            ),
+            minimumPreferredSharpness: min(
+                max(configuration.minimumPreferredSharpness, configuration.minimumAllowedSharpness),
+                4_000.0
+            )
+        )
+
+        cameraControlStateLock.lock()
+        cameraQualityConfiguration = sanitized
+        cameraControlStateLock.unlock()
+    }
+
+    private func currentCameraQualityConfiguration() -> CameraFrameQualityConfiguration {
+        cameraControlStateLock.lock()
+        defer { cameraControlStateLock.unlock() }
+        return cameraQualityConfiguration
+    }
+
+    private func resetFocusStabilityReference(forceSettle: Bool) {
+        cameraControlStateLock.lock()
+        previousLensPosition = activeDevice?.lensPosition
+        lastLensPositionChangeTimestamp = nil
+        forceFocusSettleOnNextFrame = forceSettle
+        cameraControlStateLock.unlock()
+    }
+
+    private func updateFocusStabilityState(
+        lensPosition: Float?,
+        timestampSeconds: Double,
+        configuration: CameraFrameQualityConfiguration
+    ) -> (isSettling: Bool, lastChangeAgeSeconds: Double?) {
+        guard timestampSeconds.isFinite else {
+            return (false, nil)
+        }
+
+        cameraControlStateLock.lock()
+        defer { cameraControlStateLock.unlock() }
+
+        if forceFocusSettleOnNextFrame {
+            lastLensPositionChangeTimestamp = timestampSeconds
+            previousLensPosition = lensPosition
+            forceFocusSettleOnNextFrame = false
+        } else if let lensPosition, lensPosition.isFinite {
+            if let previousLensPosition,
+               abs(lensPosition - previousLensPosition) >= configuration.lensPositionChangeThreshold {
+                lastLensPositionChangeTimestamp = timestampSeconds
+            }
+
+            previousLensPosition = lensPosition
+        }
+
+        guard let lastLensPositionChangeTimestamp,
+              lastLensPositionChangeTimestamp.isFinite
+        else {
+            return (false, nil)
+        }
+
+        let age = max(timestampSeconds - lastLensPositionChangeTimestamp, 0)
+        return (
+            age < configuration.focusSettleTimeSeconds,
+            age.isFinite ? age : nil
+        )
+    }
+
+    private func recordSharpness(_ sharpness: Double?) {
+        guard let sharpness, sharpness.isFinite else {
+            return
+        }
+
+        cameraControlStateLock.lock()
+        recentSharpnessValues.append(sharpness)
+        if recentSharpnessValues.count > 60 {
+            recentSharpnessValues.removeFirst(recentSharpnessValues.count - 60)
+        }
+        cameraControlStateLock.unlock()
+    }
+
+    private func averageSharpness() -> Double? {
+        cameraControlStateLock.lock()
+        defer { cameraControlStateLock.unlock() }
+
+        guard !recentSharpnessValues.isEmpty else {
+            return nil
+        }
+
+        let sum = recentSharpnessValues.reduce(0, +)
+        let average = sum / Double(recentSharpnessValues.count)
+        return average.isFinite ? average : nil
+    }
+
+    private func qualityScoreForSharpness(
+        _ sharpness: Double?,
+        configuration: CameraFrameQualityConfiguration
+    ) -> Double {
+        guard let sharpness, sharpness.isFinite else {
+            return 1.0
+        }
+
+        if sharpness < configuration.minimumAllowedSharpness {
+            return 0.0
+        }
+
+        if sharpness >= configuration.minimumPreferredSharpness {
+            return 1.0
+        }
+
+        let range = max(
+            configuration.minimumPreferredSharpness - configuration.minimumAllowedSharpness,
+            1.0
+        )
+        let progress = (sharpness - configuration.minimumAllowedSharpness) / range
+        return min(max(0.35 + progress * 0.65, 0.35), 1.0)
+    }
+
+    private func estimateSharpness(in pixelBuffer: CVPixelBuffer) -> Double? {
+        guard CVPixelBufferGetPixelFormatType(pixelBuffer) == kCVPixelFormatType_32BGRA else {
+            return nil
+        }
+
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+
+        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+            return nil
+        }
+
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        guard width > 4, height > 4, bytesPerRow >= width * 4 else {
+            return nil
+        }
+
+        let pixels = baseAddress.assumingMemoryBound(to: UInt8.self)
+        let stepX = max(width / 96, 2)
+        let stepY = max(height / 72, 2)
+        var count = 0
+        var sum = 0.0
+        var sumSquares = 0.0
+
+        for y in stride(from: 1, to: height - 1, by: stepY) {
+            for x in stride(from: 1, to: width - 1, by: stepX) {
+                let center = luma(atX: x, y: y, pixels: pixels, bytesPerRow: bytesPerRow)
+                let left = luma(atX: x - 1, y: y, pixels: pixels, bytesPerRow: bytesPerRow)
+                let right = luma(atX: x + 1, y: y, pixels: pixels, bytesPerRow: bytesPerRow)
+                let up = luma(atX: x, y: y - 1, pixels: pixels, bytesPerRow: bytesPerRow)
+                let down = luma(atX: x, y: y + 1, pixels: pixels, bytesPerRow: bytesPerRow)
+                let laplacian = Double(4 * center - left - right - up - down)
+
+                sum += laplacian
+                sumSquares += laplacian * laplacian
+                count += 1
+            }
+        }
+
+        guard count > 8 else {
+            return nil
+        }
+
+        let mean = sum / Double(count)
+        let variance = sumSquares / Double(count) - mean * mean
+        return variance.isFinite ? max(variance, 0.0) : nil
+    }
+
+    private func luma(
+        atX x: Int,
+        y: Int,
+        pixels: UnsafePointer<UInt8>,
+        bytesPerRow: Int
+    ) -> Int {
+        let offset = y * bytesPerRow + x * 4
+        let blue = Int(pixels[offset])
+        let green = Int(pixels[offset + 1])
+        let red = Int(pixels[offset + 2])
+
+        return (77 * red + 150 * green + 29 * blue) >> 8
     }
 
     private func finiteSeconds(from time: CMTime) -> Double? {
@@ -806,7 +1076,11 @@ final class CameraFrameService: NSObject {
             )
 
         let intrinsicMatrix = extractIntrinsicMatrix(from: sampleBuffer)
-        let cameraQuality = makeCameraFrameQuality(for: activeDevice)
+        let cameraQuality = makeCameraFrameQuality(
+            for: activeDevice,
+            pixelBuffer: pixelBuffer,
+            timestampSeconds: CMTimeGetSeconds(timestamp)
+        )
         let cameraDebugSnapshot = makeCameraDebugSnapshot(
             sampleBufferDimensions: dimensions,
             intrinsicMatrix: intrinsicMatrix,
