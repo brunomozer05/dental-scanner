@@ -1,0 +1,114 @@
+# 09 — Next Tasks
+
+## Prioridade 1 — Bloquear export com menos de 4 markers
+
+Problema:
+
+```txt
+às vezes o app exporta STL com 3 markers mesmo parecendo ter escaneado 4.
+```
+
+Tarefa:
+
+* separar visual markers de exportable markers;
+* definir `expectedPhysicalMarkerCount = 4`;
+* bloquear export se `exportableMarkers.count < 4`;
+* mostrar erro claro;
+* mostrar markers faltando;
+* atualizar report JSON.
+
+Commit sugerido:
+
+```txt
+Block STL export when markers are missing
+```
+
+## Prioridade 2 — Atualizar comparador Python para ler `_report.json`
+
+Tarefa:
+
+* carregar reports junto com STLs;
+* comparar poses por marker;
+* mostrar qualidade por scan;
+* mostrar missing markers;
+* mostrar focus/sharpness;
+* cruzar erro STL com qualidade reportada.
+
+## Prioridade 3 — Melhorar câmera/foco/sharpness
+
+Tarefa:
+
+* wide física fixa;
+* zoom digital controlado;
+* foco manual;
+* foco guiado por ArUco;
+* lock after focus;
+* sharpness/blur score;
+* rejeitar frames fora de foco;
+* debug camera/focus.
+
+## Prioridade 4 — Testes iPhone 11 vs iPhone 16
+
+Fazer pastas:
+
+```txt
+tests/iphone11_perto
+tests/iphone11_longe
+tests/iphone16_auto_focus
+tests/iphone16_focus_locked
+```
+
+Para cada teste:
+
+* 3 a 5 scans;
+* guardar STL;
+* guardar report JSON;
+* rodar comparador;
+* anotar distância/foco/zoom/configs.
+
+## Prioridade 5 — Comparar v1 vs v2
+
+Objetivo:
+
+Decidir se o `dualArucoV2` realmente melhora.
+
+Se v1 for mais consistente, considerar voltar foco para v1 ou criar v3 híbrido.
+
+## Prioridade 6 — ARKit Assist experimental
+
+Adicionar ARKit como diagnóstico/quality score, não substituição.
+
+Padrão desligado.
+
+Usar para:
+
+* tracking state;
+* camera transform;
+* intrinsics;
+* motion;
+* light estimate;
+* penalizar frames ruins.
+
+## Prioridade 7 — Final refinement mais rígido
+
+Tarefa:
+
+* usar quality score centralizado;
+* rejeitar blur/foco;
+* rejeitar missing markers;
+* normal outlier;
+* pesos separados posição/rotação;
+* confiança final por marker.
+
+## Prioridade 8 — Marker v3 híbrido
+
+Futuro:
+
+```txt
+1 ArUco maior
++ bolinhas/pontos
++ fundo branco
++ elementos pretos
+```
+
+Não implementar antes de estabilizar v1/v2 e câmera.
