@@ -17,6 +17,7 @@ struct FinalPoseObservation {
     let bottomTagAreaPixels: Double?
     let distanceMm: Double
     let motionQuality: MotionFrameQuality?
+    let cameraQuality: CameraFrameQuality?
 
     static func markerObjectPoints(markerSizeMillimeters: Double) -> [SIMD3<Double>] {
         let halfSize = markerSizeMillimeters / 2.0
@@ -43,10 +44,13 @@ struct PoseObservationQuality: Equatable {
     let markerNormal: SIMD3<Double>?
     let motionStabilityScore: Double
     let motionRotationStabilityScore: Double
+    let cameraStabilityScore: Double
+    let cameraRotationStabilityScore: Double
     let wasNearImageEdge: Bool
     let wasHardRejectedByEdge: Bool
     let wasRejectedByBottomArea: Bool
     let wasRejectedByMotion: Bool
+    let wasRejectedByCamera: Bool
     let rejectionReason: String?
 }
 
@@ -1327,11 +1331,15 @@ final class FinalPoseRefiner {
         let motionAdjustment = quality.motionStabilityScore > 0
             ? quality.motionRotationStabilityScore / quality.motionStabilityScore
             : quality.motionRotationStabilityScore
+        let cameraAdjustment = quality.cameraStabilityScore > 0
+            ? quality.cameraRotationStabilityScore / quality.cameraStabilityScore
+            : quality.cameraRotationStabilityScore
         let weight = quality.qualityScore /
             positionSourceWeight *
             rotationSourceWeight *
             bottomRotationConfidence *
-            min(max(motionAdjustment, 0.05), 1.0)
+            min(max(motionAdjustment, 0.05), 1.0) *
+            min(max(cameraAdjustment, 0.05), 1.0)
 
         return weight.isFinite ? max(weight, 0.0) : 0.0
     }
@@ -1409,10 +1417,14 @@ final class FinalPoseRefiner {
                 motionStabilityScore: observation.motionQuality?.stabilityScore ?? 1.0,
                 motionRotationStabilityScore:
                     observation.motionQuality?.rotationStabilityScore ?? 1.0,
+                cameraStabilityScore: observation.cameraQuality?.cameraStabilityScore ?? 1.0,
+                cameraRotationStabilityScore:
+                    observation.cameraQuality?.rotationStabilityScore ?? 1.0,
                 wasNearImageEdge: false,
                 wasHardRejectedByEdge: false,
                 wasRejectedByBottomArea: false,
                 wasRejectedByMotion: false,
+                wasRejectedByCamera: false,
                 rejectionReason: "pose invalida"
             )
         }
@@ -1433,13 +1445,18 @@ final class FinalPoseRefiner {
             observation.motionQuality?.rotationStabilityScore ?? motionStabilityScore
         let wasRejectedByMotion = motionStabilityScore <
             configuration.minimumMotionStabilityScoreForFinalUse
+        let cameraStabilityScore = observation.cameraQuality?.cameraStabilityScore ?? 1.0
+        let cameraRotationStabilityScore =
+            observation.cameraQuality?.rotationStabilityScore ?? cameraStabilityScore
+        let wasRejectedByCamera = cameraStabilityScore < 0.999
         let rawScore = sourceScore *
             reprojectionScore *
             areaScore *
             distanceScore *
             imageCenterScore *
             bottomConfidenceScore *
-            motionStabilityScore
+            motionStabilityScore *
+            cameraStabilityScore
         let rejectionReason: String?
         if reprojectionScore <= 0 {
             rejectionReason = "reprojection error alto"
@@ -1451,6 +1468,8 @@ final class FinalPoseRefiner {
             rejectionReason = "bottom pequena"
         } else if wasRejectedByMotion {
             rejectionReason = "movimento alto"
+        } else if wasRejectedByCamera {
+            rejectionReason = "camera ajustando"
         } else {
             rejectionReason = nil
         }
@@ -1470,10 +1489,15 @@ final class FinalPoseRefiner {
             motionRotationStabilityScore: motionRotationStabilityScore.isFinite
                 ? motionRotationStabilityScore
                 : 1.0,
+            cameraStabilityScore: cameraStabilityScore.isFinite ? cameraStabilityScore : 1.0,
+            cameraRotationStabilityScore: cameraRotationStabilityScore.isFinite
+                ? cameraRotationStabilityScore
+                : 1.0,
             wasNearImageEdge: wasNearImageEdge,
             wasHardRejectedByEdge: wasHardRejectedByEdge,
             wasRejectedByBottomArea: wasRejectedByBottomArea,
             wasRejectedByMotion: wasRejectedByMotion,
+            wasRejectedByCamera: wasRejectedByCamera,
             rejectionReason: rejectionReason
         )
     }

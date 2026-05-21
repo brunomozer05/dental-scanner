@@ -116,7 +116,14 @@ struct ScannerView: View {
                             precisionModeV2: precisionModeV2Binding,
                             preferDualTagForFinalExport: preferDualTagForFinalExportBinding,
                             showDistanceGuide: showDistanceGuideBinding,
-                            staticPoseStabilityMode: staticPoseStabilityModeBinding
+                            staticPoseStabilityMode: staticPoseStabilityModeBinding,
+                            lockFocusAndExposureForScan: lockFocusAndExposureForScanBinding,
+                            onLockCameraNow: {
+                                viewModel.lockCameraNow()
+                            },
+                            onUnlockContinuousCamera: {
+                                viewModel.unlockContinuousCamera()
+                            }
                         ) {
                             print("[DEBUG_GEAR] scanner debug panel close tapped")
                             scannerDebugPanelVisible = false
@@ -472,6 +479,13 @@ struct ScannerView: View {
         Binding(
             get: { viewModel.staticPoseStabilityMode },
             set: { viewModel.setStaticPoseStabilityMode($0) }
+        )
+    }
+
+    private var lockFocusAndExposureForScanBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.lockFocusAndExposureForScan },
+            set: { viewModel.setLockFocusAndExposureForScan($0) }
         )
     }
 

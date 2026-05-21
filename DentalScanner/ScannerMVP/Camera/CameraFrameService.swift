@@ -46,10 +46,15 @@ final class CameraFrameService: NSObject {
     private let callbackQueue: DispatchQueue?
     private let session = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
+    private let cameraControlStateLock = NSLock()
 
     private var isPrepared = false
     private var currentVideoOrientation: AVCaptureVideoOrientation
     private var activeDevice: AVCaptureDevice?
+    private var automaticFocusExposureLockEnabled = false
+    private var cameraControlsLocked = false
+    private var isAutomaticLockInFlight = false
+    private var lastCameraLockError: String?
 
     var onFrame: ((CameraFrame) -> Void)?
     var onError: ((Error) -> Void)?
@@ -140,6 +145,65 @@ final class CameraFrameService: NSObject {
                 } catch {
                     continuation.resume(throwing: error)
                 }
+            }
+        }
+    }
+
+    func setAutomaticFocusExposureLockEnabled(_ isEnabled: Bool) async -> CameraDebugSnapshot {
+        await withCheckedContinuation { continuation in
+            sessionQueue.async { [weak self] in
+                guard let self else {
+                    continuation.resume(returning: .unavailable)
+                    return
+                }
+
+                self.setAutomaticLockEnabled(isEnabled)
+
+                if isEnabled {
+                    self.setCameraControlsLocked(false, error: nil)
+                } else {
+                    self.applyContinuousCameraControlsToActiveDevice()
+                }
+
+                continuation.resume(returning: self.makeCameraDebugSnapshot())
+            }
+        }
+    }
+
+    func lockFocusExposureWhiteBalanceNow() async -> CameraDebugSnapshot {
+        await withCheckedContinuation { continuation in
+            sessionQueue.async { [weak self] in
+                guard let self else {
+                    continuation.resume(returning: .unavailable)
+                    return
+                }
+
+                self.setAutomaticLockEnabled(true)
+                self.applyLockedCameraControlsToActiveDevice()
+                continuation.resume(returning: self.makeCameraDebugSnapshot())
+            }
+        }
+    }
+
+    func unlockContinuousCameraControls() async -> CameraDebugSnapshot {
+        await withCheckedContinuation { continuation in
+            sessionQueue.async { [weak self] in
+                guard let self else {
+                    continuation.resume(returning: .unavailable)
+                    return
+                }
+
+                self.setAutomaticLockEnabled(false)
+                self.applyContinuousCameraControlsToActiveDevice()
+                continuation.resume(returning: self.makeCameraDebugSnapshot())
+            }
+        }
+    }
+
+    func currentCameraDebugSnapshot() async -> CameraDebugSnapshot {
+        await withCheckedContinuation { continuation in
+            sessionQueue.async { [weak self] in
+                continuation.resume(returning: self?.makeCameraDebugSnapshot() ?? .unavailable)
             }
         }
     }
@@ -366,6 +430,325 @@ final class CameraFrameService: NSObject {
         }
     }
 
+    private func applyLockedCameraControlsToActiveDevice() {
+        guard let device = activeDevice else {
+            setCameraControlsLocked(false, error: "Camera indisponivel")
+            return
+        }
+
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+
+            var lockedControlCount = 0
+            var unsupportedControls: [String] = []
+
+            if device.isFocusModeSupported(.locked) {
+                device.focusMode = .locked
+                lockedControlCount += 1
+            } else {
+                unsupportedControls.append("foco")
+            }
+
+            if device.isExposureModeSupported(.locked) {
+                device.exposureMode = .locked
+                lockedControlCount += 1
+            } else {
+                unsupportedControls.append("exposicao")
+            }
+
+            if device.isWhiteBalanceModeSupported(.locked) {
+                device.whiteBalanceMode = .locked
+                lockedControlCount += 1
+            } else {
+                unsupportedControls.append("white balance")
+            }
+
+            let error = unsupportedControls.isEmpty
+                ? nil
+                : "Lock nao suportado: \(unsupportedControls.joined(separator: ", "))"
+            setCameraControlsLocked(lockedControlCount > 0, error: error)
+        } catch {
+            setCameraControlsLocked(false, error: error.localizedDescription)
+        }
+    }
+
+    private func applyContinuousCameraControlsToActiveDevice() {
+        guard let device = activeDevice else {
+            setCameraControlsLocked(false, error: "Camera indisponivel")
+            return
+        }
+
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+
+            var unsupportedControls: [String] = []
+
+            if device.isFocusModeSupported(.continuousAutoFocus) {
+                device.focusMode = .continuousAutoFocus
+            } else if device.isFocusModeSupported(.autoFocus) {
+                device.focusMode = .autoFocus
+            } else {
+                unsupportedControls.append("foco continuo")
+            }
+
+            if device.isExposureModeSupported(.continuousAutoExposure) {
+                device.exposureMode = .continuousAutoExposure
+            } else if device.isExposureModeSupported(.autoExpose) {
+                device.exposureMode = .autoExpose
+            } else {
+                unsupportedControls.append("exposicao continua")
+            }
+
+            if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
+                device.whiteBalanceMode = .continuousAutoWhiteBalance
+            } else if device.isWhiteBalanceModeSupported(.autoWhiteBalance) {
+                device.whiteBalanceMode = .autoWhiteBalance
+            } else {
+                unsupportedControls.append("white balance continuo")
+            }
+
+            let error = unsupportedControls.isEmpty
+                ? nil
+                : "Auto nao suportado: \(unsupportedControls.joined(separator: ", "))"
+            setCameraControlsLocked(false, error: error)
+        } catch {
+            setCameraControlsLocked(false, error: error.localizedDescription)
+        }
+    }
+
+    private func scheduleAutomaticCameraLockIfNeeded(quality: CameraFrameQuality) {
+        let state = cameraControlState()
+        guard state.automaticLockEnabled,
+              !state.cameraControlsLocked,
+              !state.isAutomaticLockInFlight,
+              !quality.isUnstable
+        else {
+            return
+        }
+
+        setAutomaticLockInFlight(true)
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            self.applyLockedCameraControlsToActiveDevice()
+            self.setAutomaticLockInFlight(false)
+        }
+    }
+
+    private func makeCameraFrameQuality(for device: AVCaptureDevice?) -> CameraFrameQuality {
+        guard let device else {
+            return .neutral
+        }
+
+        let exposureDurationSeconds = finiteSeconds(from: device.exposureDuration)
+        let focusScore = device.isAdjustingFocus ? 0.35 : 1.0
+        let exposureScore = device.isAdjustingExposure ? 0.50 : 1.0
+        let whiteBalanceScore = device.isAdjustingWhiteBalance ? 0.75 : 1.0
+        let cameraScore = min(focusScore, min(exposureScore, whiteBalanceScore))
+        let rotationScore = min(
+            device.isAdjustingFocus ? 0.25 : 1.0,
+            min(
+                device.isAdjustingExposure ? 0.40 : 1.0,
+                device.isAdjustingWhiteBalance ? 0.65 : 1.0
+            )
+        )
+
+        return CameraFrameQuality(
+            isAdjustingFocus: device.isAdjustingFocus,
+            isAdjustingExposure: device.isAdjustingExposure,
+            isAdjustingWhiteBalance: device.isAdjustingWhiteBalance,
+            lensPosition: device.lensPosition.isFinite ? device.lensPosition : nil,
+            iso: device.iso.isFinite ? device.iso : nil,
+            exposureDurationSeconds: exposureDurationSeconds,
+            cameraStabilityScore: cameraScore,
+            rotationStabilityScore: rotationScore
+        )
+    }
+
+    private func makeCameraDebugSnapshot(
+        sampleBufferDimensions: CMVideoDimensions? = nil,
+        intrinsicMatrix: simd_double3x3? = nil,
+        cameraQuality: CameraFrameQuality? = nil
+    ) -> CameraDebugSnapshot {
+        let state = cameraControlState()
+
+        guard let device = activeDevice else {
+            return CameraDebugSnapshot(
+                deviceName: nil,
+                deviceType: nil,
+                uniqueID: nil,
+                activeFormatDescription: nil,
+                resolutionText: nil,
+                fpsText: nil,
+                hasIntrinsics: intrinsicMatrix != nil,
+                fx: fx(from: intrinsicMatrix),
+                fy: fy(from: intrinsicMatrix),
+                cx: cx(from: intrinsicMatrix),
+                cy: cy(from: intrinsicMatrix),
+                lensPosition: nil,
+                isAdjustingFocus: nil,
+                isAdjustingExposure: nil,
+                isAdjustingWhiteBalance: nil,
+                iso: nil,
+                exposureDurationSeconds: nil,
+                cameraStabilityScore: cameraQuality?.cameraStabilityScore,
+                rotationStabilityScore: cameraQuality?.rotationStabilityScore,
+                isCameraLocked: state.cameraControlsLocked,
+                automaticLockEnabled: state.automaticLockEnabled,
+                lockError: state.lockError
+            )
+        }
+
+        let quality = cameraQuality ?? makeCameraFrameQuality(for: device)
+        let formatDimensions = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
+        let dimensions = sampleBufferDimensions ?? formatDimensions
+
+        return CameraDebugSnapshot(
+            deviceName: device.localizedName,
+            deviceType: device.deviceType.rawValue,
+            uniqueID: device.uniqueID,
+            activeFormatDescription: activeFormatDescription(for: device),
+            resolutionText: resolutionText(for: dimensions),
+            fpsText: fpsText(for: device),
+            hasIntrinsics: intrinsicMatrix != nil,
+            fx: fx(from: intrinsicMatrix),
+            fy: fy(from: intrinsicMatrix),
+            cx: cx(from: intrinsicMatrix),
+            cy: cy(from: intrinsicMatrix),
+            lensPosition: quality.lensPosition,
+            isAdjustingFocus: quality.isAdjustingFocus,
+            isAdjustingExposure: quality.isAdjustingExposure,
+            isAdjustingWhiteBalance: quality.isAdjustingWhiteBalance,
+            iso: quality.iso,
+            exposureDurationSeconds: quality.exposureDurationSeconds,
+            cameraStabilityScore: quality.cameraStabilityScore,
+            rotationStabilityScore: quality.rotationStabilityScore,
+            isCameraLocked: state.cameraControlsLocked,
+            automaticLockEnabled: state.automaticLockEnabled,
+            lockError: state.lockError
+        )
+    }
+
+    private func cameraControlState() -> (
+        automaticLockEnabled: Bool,
+        cameraControlsLocked: Bool,
+        isAutomaticLockInFlight: Bool,
+        lockError: String?
+    ) {
+        cameraControlStateLock.lock()
+        defer { cameraControlStateLock.unlock() }
+
+        return (
+            automaticFocusExposureLockEnabled,
+            cameraControlsLocked,
+            isAutomaticLockInFlight,
+            lastCameraLockError
+        )
+    }
+
+    private func setAutomaticLockEnabled(_ isEnabled: Bool) {
+        cameraControlStateLock.lock()
+        automaticFocusExposureLockEnabled = isEnabled
+        if !isEnabled {
+            cameraControlsLocked = false
+        }
+        cameraControlStateLock.unlock()
+    }
+
+    private func setCameraControlsLocked(_ isLocked: Bool, error: String?) {
+        cameraControlStateLock.lock()
+        cameraControlsLocked = isLocked
+        lastCameraLockError = error
+        cameraControlStateLock.unlock()
+    }
+
+    private func setAutomaticLockInFlight(_ isInFlight: Bool) {
+        cameraControlStateLock.lock()
+        isAutomaticLockInFlight = isInFlight
+        cameraControlStateLock.unlock()
+    }
+
+    private func finiteSeconds(from time: CMTime) -> Double? {
+        let seconds = CMTimeGetSeconds(time)
+        return seconds.isFinite && seconds >= 0 ? seconds : nil
+    }
+
+    private func resolutionText(for dimensions: CMVideoDimensions) -> String? {
+        guard dimensions.width > 0, dimensions.height > 0 else {
+            return nil
+        }
+
+        return "\(dimensions.width)x\(dimensions.height)"
+    }
+
+    private func fpsText(for device: AVCaptureDevice) -> String? {
+        let activeDuration = finiteSeconds(from: device.activeVideoMinFrameDuration)
+        if let activeDuration, activeDuration > 0 {
+            let fps = 1.0 / activeDuration
+            if fps.isFinite {
+                return String(format: "%.1f fps", fps)
+            }
+        }
+
+        guard let range = device.activeFormat.videoSupportedFrameRateRanges.first else {
+            return nil
+        }
+
+        if range.minFrameRate == range.maxFrameRate {
+            return String(format: "%.1f fps", range.maxFrameRate)
+        }
+
+        return String(format: "%.1f-%.1f fps", range.minFrameRate, range.maxFrameRate)
+    }
+
+    private func activeFormatDescription(for device: AVCaptureDevice) -> String {
+        let formatDescription = device.activeFormat.formatDescription
+        let dimensions = CMVideoFormatDescriptionGetDimensions(formatDescription)
+        let mediaSubType = CMFormatDescriptionGetMediaSubType(formatDescription)
+
+        return "\(dimensions.width)x\(dimensions.height) \(fourCCString(mediaSubType))"
+    }
+
+    private func fourCCString(_ value: OSType) -> String {
+        let characters: [UnicodeScalar] = [
+            UnicodeScalar((value >> 24) & 0xff),
+            UnicodeScalar((value >> 16) & 0xff),
+            UnicodeScalar((value >> 8) & 0xff),
+            UnicodeScalar(value & 0xff)
+        ].compactMap { $0 }
+
+        guard characters.count == 4 else {
+            return "\(value)"
+        }
+
+        return String(characters.map { Character($0) })
+    }
+
+    private func fx(from matrix: simd_double3x3?) -> Double? {
+        guard let matrix else { return nil }
+        let value = matrix.columns.0.x
+        return value.isFinite ? value : nil
+    }
+
+    private func fy(from matrix: simd_double3x3?) -> Double? {
+        guard let matrix else { return nil }
+        let value = matrix.columns.1.y
+        return value.isFinite ? value : nil
+    }
+
+    private func cx(from matrix: simd_double3x3?) -> Double? {
+        guard let matrix else { return nil }
+        let value = matrix.columns.2.x
+        return value.isFinite ? value : nil
+    }
+
+    private func cy(from matrix: simd_double3x3?) -> Double? {
+        guard let matrix else { return nil }
+        let value = matrix.columns.2.y
+        return value.isFinite ? value : nil
+    }
+
     private func isTorchSupported(on device: AVCaptureDevice) -> Bool {
         device.hasTorch && device.isTorchModeSupported(.on) && device.isTorchModeSupported(.off)
     }
@@ -422,6 +805,15 @@ final class CameraFrameService: NSObject {
                 height: Int32(CVPixelBufferGetHeight(pixelBuffer))
             )
 
+        let intrinsicMatrix = extractIntrinsicMatrix(from: sampleBuffer)
+        let cameraQuality = makeCameraFrameQuality(for: activeDevice)
+        let cameraDebugSnapshot = makeCameraDebugSnapshot(
+            sampleBufferDimensions: dimensions,
+            intrinsicMatrix: intrinsicMatrix,
+            cameraQuality: cameraQuality
+        )
+        scheduleAutomaticCameraLockIfNeeded(quality: cameraQuality)
+
         let metadata = CameraFrame.Metadata(
             dimensions: dimensions,
             pixelFormat: CVPixelBufferGetPixelFormatType(pixelBuffer),
@@ -431,14 +823,16 @@ final class CameraFrameService: NSObject {
             lensAperture: activeDevice?.lensAperture,
             exposureDuration: activeDevice?.exposureDuration,
             iso: activeDevice?.iso,
-            intrinsicMatrix: extractIntrinsicMatrix(from: sampleBuffer)
+            intrinsicMatrix: intrinsicMatrix
         )
 
         return CameraFrame(
             pixelBuffer: pixelBuffer,
             timestamp: timestamp,
             orientation: connection.videoOrientation,
-            metadata: metadata
+            metadata: metadata,
+            cameraQuality: cameraQuality,
+            cameraDebugSnapshot: cameraDebugSnapshot
         )
     }
 

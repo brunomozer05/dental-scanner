@@ -40,6 +40,10 @@ final class ScannerViewModel: ObservableObject {
         static let minimumBottomTagAreaForHighConfidenceDual: Double = 120.0
     }
 
+    private enum CameraDiagnosticsConfiguration {
+        static let intrinsicsChangeTolerancePixels: Double = 1.0
+    }
+
     private struct MarkerImagePositionDiagnostics {
         let normalizedX: Double
         let normalizedY: Double
@@ -394,6 +398,18 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var currentMotionFrameQuality: MotionFrameQuality = .neutral
     @Published private(set) var scanMotionPenalizedFrameCount: Int = 0
     @Published private(set) var scanMotionDiscardedObservationCount: Int = 0
+    @Published private(set) var currentCameraFrameQuality: CameraFrameQuality = .neutral
+    @Published private(set) var currentCameraDebugSnapshot: CameraDebugSnapshot = .unavailable
+    @Published private(set) var lockFocusAndExposureForScan: Bool = false
+    @Published private(set) var cameraFocusAdjustingFrameCount: Int = 0
+    @Published private(set) var cameraExposureAdjustingFrameCount: Int = 0
+    @Published private(set) var cameraWhiteBalanceAdjustingFrameCount: Int = 0
+    @Published private(set) var cameraUnstableFrameCount: Int = 0
+    @Published private(set) var cameraIntrinsicsChangedDuringScan: Bool = false
+    @Published private(set) var cameraDeviceChangedDuringScan: Bool = false
+    @Published private(set) var cameraFormatChangedDuringScan: Bool = false
+    @Published private(set) var cameraResolutionChangedDuringScan: Bool = false
+    @Published private(set) var cameraLockErrorMessage: String?
     @Published private(set) var staticPoseStabilityMode: Bool = false
     @Published private(set) var staticPoseStabilityWindowSeconds: Double =
         StaticPoseStabilityConfiguration.windowSeconds
@@ -466,6 +482,7 @@ final class ScannerViewModel: ObservableObject {
     private var precisionValidationErrorHistory: [Double] = []
     private var finalPoseObservations: [FinalPoseObservation] = []
     private var finalObservationDiagnosticsByMarkerId: [Int: FinalPoseObservationSelectionDiagnostics] = [:]
+    private var scanCameraDiagnosticsBaseline: CameraDiagnosticsBaseline?
     private var staticPoseSamples: [StaticPoseSample] = []
     private var staticPosePairDistanceSamples: [StaticPosePairDistanceSample] = []
     private var staticPosePlaneSamples: [StaticPosePlaneSample] = []
@@ -604,9 +621,12 @@ final class ScannerViewModel: ObservableObject {
         do {
             try await cameraService.prepare()
             let torchState = await cameraService.fetchTorchState()
+            let cameraSnapshot = await cameraService.currentCameraDebugSnapshot()
             await MainActor.run {
                 cameraState = .ready
                 isTorchAvailable = torchState.isAvailable
+                currentCameraDebugSnapshot = cameraSnapshot
+                cameraLockErrorMessage = cameraSnapshot.lockError
 
                 if torchState.isAvailable {
                     desiredTorchEnabled = desiredTorchEnabled || torchState.isEnabled
@@ -657,6 +677,7 @@ final class ScannerViewModel: ObservableObject {
         cameraService.stopRunning()
         motionFrameQualityService.stop()
         currentMotionFrameQuality = .neutral
+        currentCameraFrameQuality = .neutral
         turnOffTorchForInactiveCamera()
         guard cameraState != .failed else { return }
         cameraState = .ready
@@ -710,6 +731,52 @@ final class ScannerViewModel: ObservableObject {
                 await MainActor.run {
                     self.errorMessage = self.makeErrorMessage(from: error)
                 }
+            }
+        }
+    }
+
+    @MainActor
+    func setLockFocusAndExposureForScan(_ isEnabled: Bool) {
+        guard lockFocusAndExposureForScan != isEnabled else {
+            return
+        }
+
+        lockFocusAndExposureForScan = isEnabled
+        Task { [weak self] in
+            guard let self else { return }
+            let snapshot = await self.cameraService.setAutomaticFocusExposureLockEnabled(isEnabled)
+            await MainActor.run {
+                self.currentCameraDebugSnapshot = snapshot
+                self.lockFocusAndExposureForScan = snapshot.automaticLockEnabled
+                self.cameraLockErrorMessage = snapshot.lockError
+            }
+        }
+    }
+
+    @MainActor
+    func lockCameraNow() {
+        lockFocusAndExposureForScan = true
+        Task { [weak self] in
+            guard let self else { return }
+            let snapshot = await self.cameraService.lockFocusExposureWhiteBalanceNow()
+            await MainActor.run {
+                self.currentCameraDebugSnapshot = snapshot
+                self.lockFocusAndExposureForScan = snapshot.automaticLockEnabled
+                self.cameraLockErrorMessage = snapshot.lockError
+            }
+        }
+    }
+
+    @MainActor
+    func unlockContinuousCamera() {
+        lockFocusAndExposureForScan = false
+        Task { [weak self] in
+            guard let self else { return }
+            let snapshot = await self.cameraService.unlockContinuousCameraControls()
+            await MainActor.run {
+                self.currentCameraDebugSnapshot = snapshot
+                self.lockFocusAndExposureForScan = snapshot.automaticLockEnabled
+                self.cameraLockErrorMessage = snapshot.lockError
             }
         }
     }
@@ -1272,6 +1339,9 @@ final class ScannerViewModel: ObservableObject {
             self.estimatedFPS = metrics.estimatedFPS
             self.lastFrameTimestamp = metrics.lastFrameTimestamp
             self.currentMotionFrameQuality = motionQuality
+            self.currentCameraFrameQuality = frame.cameraQuality
+            self.currentCameraDebugSnapshot = frame.cameraDebugSnapshot
+            self.cameraLockErrorMessage = frame.cameraDebugSnapshot.lockError
             self.frameResolution = metrics.frameResolution
             self.isIntrinsicMatrixAvailable = metrics.isIntrinsicMatrixAvailable
             self.isOpenCVAvailable = arucoMetrics.isOpenCVAvailable
@@ -1310,6 +1380,10 @@ final class ScannerViewModel: ObservableObject {
             }
 
             if shouldCollectScanFrame && self.scanState.isCollectingFrames {
+                self.recordCameraFrameDiagnostics(
+                    snapshot: frame.cameraDebugSnapshot,
+                    quality: frame.cameraQuality
+                )
                 self.fusedPoseResults = fusedPoseResults
                 self.implantPoseResults = implantMetrics.implantPoseResults
                 self.implantPoseResult = implantMetrics.implantPoseResults.first
@@ -1380,6 +1454,15 @@ final class ScannerViewModel: ObservableObject {
         scanFinalMainIssueSummary = "-"
         scanMotionPenalizedFrameCount = 0
         scanMotionDiscardedObservationCount = 0
+        cameraFocusAdjustingFrameCount = 0
+        cameraExposureAdjustingFrameCount = 0
+        cameraWhiteBalanceAdjustingFrameCount = 0
+        cameraUnstableFrameCount = 0
+        cameraIntrinsicsChangedDuringScan = false
+        cameraDeviceChangedDuringScan = false
+        cameraFormatChangedDuringScan = false
+        cameraResolutionChangedDuringScan = false
+        scanCameraDiagnosticsBaseline = nil
         scanTagCoverages = [:]
         scanReprojectionErrors = []
         scanPoseHistoryByMarkerId = [:]
@@ -1503,6 +1586,89 @@ final class ScannerViewModel: ObservableObject {
             timestamp: timestamp
         )
         updateExportDiagnostics()
+    }
+
+    @MainActor
+    private func recordCameraFrameDiagnostics(
+        snapshot: CameraDebugSnapshot,
+        quality: CameraFrameQuality
+    ) {
+        if quality.isAdjustingFocus {
+            cameraFocusAdjustingFrameCount += 1
+        }
+
+        if quality.isAdjustingExposure {
+            cameraExposureAdjustingFrameCount += 1
+        }
+
+        if quality.isAdjustingWhiteBalance {
+            cameraWhiteBalanceAdjustingFrameCount += 1
+        }
+
+        if quality.isUnstable {
+            cameraUnstableFrameCount += 1
+        }
+
+        let currentBaseline = CameraDiagnosticsBaseline(
+            deviceUniqueID: snapshot.uniqueID,
+            activeFormatDescription: snapshot.activeFormatDescription,
+            resolutionText: snapshot.resolutionText,
+            hasIntrinsics: snapshot.hasIntrinsics,
+            fx: snapshot.fx,
+            fy: snapshot.fy,
+            cx: snapshot.cx,
+            cy: snapshot.cy
+        )
+
+        guard let baseline = scanCameraDiagnosticsBaseline else {
+            scanCameraDiagnosticsBaseline = currentBaseline
+            return
+        }
+
+        if let baselineDevice = baseline.deviceUniqueID,
+           let currentDevice = currentBaseline.deviceUniqueID,
+           baselineDevice != currentDevice {
+            cameraDeviceChangedDuringScan = true
+        }
+
+        if let baselineFormat = baseline.activeFormatDescription,
+           let currentFormat = currentBaseline.activeFormatDescription,
+           baselineFormat != currentFormat {
+            cameraFormatChangedDuringScan = true
+        }
+
+        if let baselineResolution = baseline.resolutionText,
+           let currentResolution = currentBaseline.resolutionText,
+           baselineResolution != currentResolution {
+            cameraResolutionChangedDuringScan = true
+        }
+
+        if baseline.hasIntrinsics != currentBaseline.hasIntrinsics ||
+            hasCameraIntrinsicsChanged(from: baseline, to: currentBaseline) {
+            cameraIntrinsicsChangedDuringScan = true
+        }
+    }
+
+    private func hasCameraIntrinsicsChanged(
+        from baseline: CameraDiagnosticsBaseline,
+        to current: CameraDiagnosticsBaseline
+    ) -> Bool {
+        hasCameraIntrinsicValueChanged(baseline.fx, current.fx) ||
+            hasCameraIntrinsicValueChanged(baseline.fy, current.fy) ||
+            hasCameraIntrinsicValueChanged(baseline.cx, current.cx) ||
+            hasCameraIntrinsicValueChanged(baseline.cy, current.cy)
+    }
+
+    private func hasCameraIntrinsicValueChanged(_ baseline: Double?, _ current: Double?) -> Bool {
+        guard let baseline,
+              let current,
+              baseline.isFinite,
+              current.isFinite
+        else {
+            return false
+        }
+
+        return abs(current - baseline) > CameraDiagnosticsConfiguration.intrinsicsChangeTolerancePixels
     }
 
     @MainActor
@@ -1839,6 +2005,10 @@ final class ScannerViewModel: ObservableObject {
             return "Mantenha estavel"
         }
 
+        if let cameraWarning = cameraReadinessWarning() {
+            return cameraWarning
+        }
+
         if let imageEdgeFramingWarning = imageEdgeFramingWarning() {
             return imageEdgeFramingWarning
         }
@@ -1902,6 +2072,10 @@ final class ScannerViewModel: ObservableObject {
             return "Aviso: jitter alto"
         }
 
+        if cameraReadinessWarning() != nil {
+            return "Aviso: camera ajustando"
+        }
+
         if imageEdgeFramingWarning() != nil {
             return "Aviso: enquadramento"
         }
@@ -1938,6 +2112,26 @@ final class ScannerViewModel: ObservableObject {
         }
 
         return "Capturando"
+    }
+
+    func cameraReadinessWarning() -> String? {
+        if currentCameraFrameQuality.isAdjustingFocus {
+            return "Aguardando foco estabilizar"
+        }
+
+        if currentCameraFrameQuality.isAdjustingExposure {
+            return "Mantenha a camera estavel"
+        }
+
+        if cameraIntrinsicsChangedDuringScan {
+            return "Camera intrinsics mudou"
+        }
+
+        if cameraDeviceChangedDuringScan || cameraFormatChangedDuringScan {
+            return "Camera mudou durante o scan"
+        }
+
+        return nil
     }
 
     private func updateStableReadinessDuration(
@@ -4290,7 +4484,8 @@ final class ScannerViewModel: ObservableObject {
                     topTagAreaPixels: detection.markerAreaPixels,
                     bottomTagAreaPixels: nil,
                     distanceMm: poseResult.distanceMm,
-                    motionQuality: motionQuality
+                    motionQuality: motionQuality,
+                    cameraQuality: frame.cameraQuality
                 )
             }
         case .dualArucoV2:
@@ -4331,7 +4526,8 @@ final class ScannerViewModel: ObservableObject {
                     topTagAreaPixels: observationPoints.topTagAreaPixels,
                     bottomTagAreaPixels: observationPoints.bottomTagAreaPixels,
                     distanceMm: poseResult.distanceMm,
-                    motionQuality: motionQuality
+                    motionQuality: motionQuality,
+                    cameraQuality: frame.cameraQuality
                 )
             }
         }
@@ -5085,6 +5281,17 @@ final class ScannerViewModel: ObservableObject {
         let lastFrameTimestamp: Double
         let frameResolution: FrameResolution
         let isIntrinsicMatrixAvailable: Bool
+    }
+
+    private struct CameraDiagnosticsBaseline {
+        let deviceUniqueID: String?
+        let activeFormatDescription: String?
+        let resolutionText: String?
+        let hasIntrinsics: Bool
+        let fx: Double?
+        let fy: Double?
+        let cx: Double?
+        let cy: Double?
     }
 
     private struct ArucoMetrics {

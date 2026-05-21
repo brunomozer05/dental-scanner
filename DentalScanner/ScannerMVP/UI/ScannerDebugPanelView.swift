@@ -23,6 +23,9 @@ struct ScannerDebugPanelView: View {
     @Binding var preferDualTagForFinalExport: Bool
     @Binding var showDistanceGuide: Bool
     @Binding var staticPoseStabilityMode: Bool
+    @Binding var lockFocusAndExposureForScan: Bool
+    let onLockCameraNow: () -> Void
+    let onUnlockContinuousCamera: () -> Void
     let onClose: () -> Void
 
     private let enableMotionDebugSection = false
@@ -70,9 +73,42 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "dualAngularReady", value: snapshot.readiness.dualAngularReady)
                     }
 
+                    debugSection(title: "Camera") {
+                        debugRow(title: "Device", value: snapshot.camera.deviceName)
+                        debugRow(title: "Type", value: snapshot.camera.deviceType)
+                        debugRow(title: "Unique ID", value: snapshot.camera.uniqueID)
+                        debugRow(title: "Resolution", value: snapshot.camera.resolution)
+                        debugRow(title: "FPS", value: snapshot.camera.fps)
+                        debugRow(title: "Format", value: snapshot.camera.activeFormatDescription)
+                        debugRow(title: "Intrinsics", value: snapshot.camera.hasIntrinsics)
+                        debugRow(title: "fx/fy", value: "\(snapshot.camera.fx) / \(snapshot.camera.fy)")
+                        debugRow(title: "cx/cy", value: "\(snapshot.camera.cx) / \(snapshot.camera.cy)")
+                        debugRow(title: "Lens position", value: snapshot.camera.lensPosition)
+                        debugRow(title: "Adjusting focus", value: snapshot.camera.isAdjustingFocus)
+                        debugRow(title: "Adjusting exposure", value: snapshot.camera.isAdjustingExposure)
+                        debugRow(title: "Adjusting WB", value: snapshot.camera.isAdjustingWhiteBalance)
+                        debugRow(title: "ISO", value: snapshot.camera.iso)
+                        debugRow(title: "Exposure", value: snapshot.camera.exposureDuration)
+                        debugRow(title: "Camera score", value: snapshot.camera.cameraStabilityScore)
+                        debugRow(title: "Rotation score", value: snapshot.camera.rotationStabilityScore)
+                        debugRow(title: "Auto lock", value: snapshot.camera.automaticLockEnabled)
+                        debugRow(title: "Camera locked", value: snapshot.camera.cameraLocked)
+                        debugRow(title: "Lock error", value: snapshot.camera.lockError)
+                        debugRow(title: "Focus adjusting frames", value: snapshot.camera.focusAdjustingFrames)
+                        debugRow(title: "Exposure adjusting frames", value: snapshot.camera.exposureAdjustingFrames)
+                        debugRow(title: "WB adjusting frames", value: snapshot.camera.whiteBalanceAdjustingFrames)
+                        debugRow(title: "Unstable frames", value: snapshot.camera.unstableFrames)
+                        debugRow(title: "Intrinsics changed", value: snapshot.camera.intrinsicsChanged)
+                        debugRow(title: "Device changed", value: snapshot.camera.deviceChanged)
+                        debugRow(title: "Format changed", value: snapshot.camera.formatChanged)
+                        debugRow(title: "Resolution changed", value: snapshot.camera.resolutionChanged)
+                        debugRow(title: "Warning", value: snapshot.camera.warning)
+                    }
+
                     debugSection(title: "Config") {
                         debugRow(title: "Perfil marker", value: snapshot.configuration.markerProfile)
                         debugRow(title: "Barra distancia", value: snapshot.configuration.showDistanceGuide)
+                        debugRow(title: "Travar camera", value: snapshot.configuration.lockFocusAndExposureForScan)
                         debugRow(title: "Frames min", value: snapshot.configuration.minimumGoodFrames)
                         debugRow(title: "Frames alvo", value: snapshot.configuration.targetValidFrames)
                         debugRow(title: "Cobertura angular", value: snapshot.configuration.requiredAngularCoverage)
@@ -92,6 +128,16 @@ struct ScannerDebugPanelView: View {
                         .pickerStyle(.segmented)
 
                         Toggle("Mostrar barra de distancia", isOn: $showDistanceGuide)
+                        Toggle("Travar foco/exposicao", isOn: $lockFocusAndExposureForScan)
+
+                        HStack(spacing: 8) {
+                            Button("Lock camera now", action: onLockCameraNow)
+                                .buttonStyle(.bordered)
+
+                            Button("Unlock continuous camera", action: onUnlockContinuousCamera)
+                                .buttonStyle(.bordered)
+                        }
+                        .font(.caption2.weight(.semibold))
 
                         debugIntStepper(
                             title: "Minimum good frames",
