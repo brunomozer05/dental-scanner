@@ -6,6 +6,7 @@ struct ScanListView: View {
     @State private var selectedScan: ScanItem?
 
     private let storageManager = ScanStorageManager()
+    private let fileManager = FileManager.default
 
     var body: some View {
         NavigationStack {
@@ -20,24 +21,19 @@ struct ScanListView: View {
                         Button {
                             selectedScan = scan
                         } label: {
-                            ScanRowView(scan: scan)
+                            ScanRowView(
+                                scan: scan,
+                                hasReport: reportURLIfAvailable(for: scan) != nil
+                            )
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            scanContextMenu(for: scan)
+                        }
                         .listRowBackground(Color.black)
                         .listRowSeparatorTint(Color.white.opacity(0.08))
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                deleteScan(scan)
-                            } label: {
-                                Label("Deletar", systemImage: "trash")
-                            }
-
-                            Button {
-                                shareFile(url: scan.fileURL)
-                            } label: {
-                                Label("Compartilhar", systemImage: "square.and.arrow.up")
-                            }
-                            .tint(Color(red: 0.23, green: 0.51, blue: 0.96))
+                            scanSwipeActions(for: scan)
                         }
                     }
                     .listStyle(.plain)
@@ -95,10 +91,100 @@ struct ScanListView: View {
         storageManager.deleteScan(scan)
         reloadScans()
     }
+
+    private func reportURLIfAvailable(for scan: ScanItem) -> URL? {
+        if let reportURL = scan.reportURL,
+           fileManager.fileExists(atPath: reportURL.path) {
+            return reportURL
+        }
+
+        let inferredReportURL = scan.fileURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("\(scan.fileURL.deletingPathExtension().lastPathComponent)_report.json")
+
+        guard fileManager.fileExists(atPath: inferredReportURL.path) else {
+            return nil
+        }
+
+        return inferredReportURL
+    }
+
+    @ViewBuilder
+    private func scanContextMenu(for scan: ScanItem) -> some View {
+        Button {
+            selectedScan = scan
+        } label: {
+            Label("Abrir STL", systemImage: "cube.transparent")
+        }
+
+        if let reportURL = reportURLIfAvailable(for: scan) {
+            Button {
+                shareFiles(urls: [scan.fileURL, reportURL])
+            } label: {
+                Label("Compartilhar STL + Report", systemImage: "doc.on.doc")
+            }
+
+            Button {
+                shareFile(url: reportURL)
+            } label: {
+                Label("Compartilhar Report JSON", systemImage: "doc.text")
+            }
+        } else {
+            Button {} label: {
+                Label("Report indisponivel", systemImage: "doc.text")
+            }
+            .disabled(true)
+        }
+
+        Button {
+            shareFile(url: scan.fileURL)
+        } label: {
+            Label("Compartilhar STL", systemImage: "square.and.arrow.up")
+        }
+
+        Button(role: .destructive) {
+            deleteScan(scan)
+        } label: {
+            Label("Deletar", systemImage: "trash")
+        }
+    }
+
+    @ViewBuilder
+    private func scanSwipeActions(for scan: ScanItem) -> some View {
+        Button(role: .destructive) {
+            deleteScan(scan)
+        } label: {
+            Label("Deletar", systemImage: "trash")
+        }
+
+        if let reportURL = reportURLIfAvailable(for: scan) {
+            Button {
+                shareFiles(urls: [scan.fileURL, reportURL])
+            } label: {
+                Label("STL + Report", systemImage: "doc.on.doc")
+            }
+            .tint(Color(red: 0.23, green: 0.51, blue: 0.96))
+
+            Button {
+                shareFile(url: reportURL)
+            } label: {
+                Label("Report", systemImage: "doc.text")
+            }
+            .tint(Color(red: 0.19, green: 0.66, blue: 0.44))
+        } else {
+            Button {
+                shareFile(url: scan.fileURL)
+            } label: {
+                Label("STL", systemImage: "square.and.arrow.up")
+            }
+            .tint(Color(red: 0.23, green: 0.51, blue: 0.96))
+        }
+    }
 }
 
 private struct ScanRowView: View {
     let scan: ScanItem
+    let hasReport: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -118,6 +204,10 @@ private struct ScanRowView: View {
                 Text(Self.dateFormatter.string(from: scan.date))
                     .font(.caption)
                     .foregroundStyle(Color.white.opacity(0.62))
+
+                Text(hasReport ? "Report JSON disponivel" : "Report indisponivel")
+                    .font(.caption2)
+                    .foregroundStyle(hasReport ? Color.green.opacity(0.82) : Color.white.opacity(0.38))
             }
 
             Spacer()

@@ -16,8 +16,17 @@ struct ActivityView: UIViewControllerRepresentable {
 
 @MainActor
 func shareFile(url: URL) {
+    shareFiles(urls: [url])
+}
+
+@MainActor
+func shareFiles(urls: [URL]) {
+    guard !urls.isEmpty else {
+        return
+    }
+
     let activityVC = UIActivityViewController(
-        activityItems: [url],
+        activityItems: urls.map { $0 as Any },
         applicationActivities: nil
     )
 
