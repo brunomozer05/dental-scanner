@@ -4,6 +4,9 @@ struct ScanListView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var scans: [ScanItem] = []
     @State private var selectedScan: ScanItem?
+    @State private var isSelectionModeActive = false
+    @State private var selectedScanIDs: Set<ScanItem.ID> = []
+    @State private var shareStatusText: String?
 
     private let storageManager = ScanStorageManager()
     private let fileManager = FileManager.default
@@ -19,11 +22,13 @@ struct ScanListView: View {
                 } else {
                     List(scans) { scan in
                         Button {
-                            selectedScan = scan
+                            handleScanTap(scan)
                         } label: {
                             ScanRowView(
                                 scan: scan,
-                                hasReport: reportURLIfAvailable(for: scan) != nil
+                                hasReport: reportURLIfAvailable(for: scan) != nil,
+                                isSelectionModeActive: isSelectionModeActive,
+                                isSelected: selectedScanIDs.contains(scan.id)
                             )
                         }
                         .buttonStyle(.plain)
@@ -33,7 +38,9 @@ struct ScanListView: View {
                         .listRowBackground(Color.black)
                         .listRowSeparatorTint(Color.white.opacity(0.08))
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            scanSwipeActions(for: scan)
+                            if !isSelectionModeActive {
+                                scanSwipeActions(for: scan)
+                            }
                         }
                     }
                     .listStyle(.plain)
@@ -52,6 +59,21 @@ struct ScanListView: View {
                     }
                     .accessibilityLabel("Fechar")
                 }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !scans.isEmpty {
+                        Button {
+                            if isSelectionModeActive {
+                                exitSelectionMode()
+                            } else {
+                                enterSelectionMode()
+                            }
+                        } label: {
+                            Text(isSelectionModeActive ? "Cancelar" : "Selecionar")
+                                .font(.body.weight(.semibold))
+                        }
+                    }
+                }
             }
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbarBackground(Color.black, for: .navigationBar)
@@ -60,6 +82,11 @@ struct ScanListView: View {
         .preferredColorScheme(.dark)
         .supportedInterfaceOrientations(.portrait)
         .onAppear(perform: reloadScans)
+        .safeAreaInset(edge: .bottom) {
+            if !scans.isEmpty {
+                bulkShareBar
+            }
+        }
         .fullScreenCover(item: $selectedScan) { scan in
             STLViewerView(stlFileURL: scan.fileURL)
         }
@@ -83,13 +110,190 @@ struct ScanListView: View {
         }
     }
 
+    private var bulkShareBar: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if isSelectionModeActive {
+                selectionSummary
+
+                HStack(spacing: 10) {
+                    Button {
+                        selectAllScans()
+                    } label: {
+                        Label("Selecionar todos", systemImage: "checklist")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.white)
+
+                    Button {
+                        clearSelection()
+                    } label: {
+                        Label("Limpar", systemImage: "xmark.circle")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.white)
+                    .disabled(selectedScanIDs.isEmpty)
+                }
+
+                Button {
+                    shareSelectedScans()
+                } label: {
+                    Label("Compartilhar selecionados", systemImage: "square.and.arrow.up")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color(red: 0.23, green: 0.51, blue: 0.96))
+                .disabled(selectedScanIDs.isEmpty)
+            } else {
+                allScansSummary
+
+                Button {
+                    shareAllScans()
+                } label: {
+                    Label("Compartilhar todos STL + Reports", systemImage: "square.and.arrow.up")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color(red: 0.23, green: 0.51, blue: 0.96))
+
+                Menu {
+                    Button {
+                        shareAllSTLs()
+                    } label: {
+                        Label("Compartilhar todos STLs", systemImage: "shippingbox")
+                    }
+
+                    Button {
+                        shareAllReports()
+                    } label: {
+                        Label("Compartilhar todos Reports JSON", systemImage: "doc.text")
+                    }
+                    .disabled(allReportURLs.isEmpty)
+                } label: {
+                    Label("Mais opcoes de lote", systemImage: "ellipsis.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.white)
+            }
+
+            if let shareStatusText {
+                Text(shareStatusText)
+                    .font(.caption2)
+                    .foregroundStyle(Color.white.opacity(0.62))
+            }
+        }
+        .padding(12)
+        .background(Color.black.opacity(0.92))
+        .overlay(
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 1),
+            alignment: .top
+        )
+    }
+
+    private var selectionSummary: some View {
+        HStack(spacing: 12) {
+            Text("\(selectedScanIDs.count) scans selecionados")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+
+            Spacer()
+
+            Text("\(selectedShareURLs.count) arquivos para compartilhar")
+                .font(.caption)
+                .foregroundStyle(Color.white.opacity(0.7))
+        }
+    }
+
+    private var allScansSummary: some View {
+        HStack(spacing: 12) {
+            Text("\(scans.count) scans salvos")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+
+            Spacer()
+
+            Text("\(allShareURLs.count) arquivos disponiveis")
+                .font(.caption)
+                .foregroundStyle(Color.white.opacity(0.7))
+        }
+    }
+
+    private var selectedScans: [ScanItem] {
+        scans.filter { selectedScanIDs.contains($0.id) }
+    }
+
+    private var selectedShareURLs: [URL] {
+        shareURLs(for: selectedScans)
+    }
+
+    private var allShareURLs: [URL] {
+        shareURLs(for: scans)
+    }
+
+    private var allSTLURLs: [URL] {
+        uniqueURLs(scans.map(\.fileURL))
+    }
+
+    private var allReportURLs: [URL] {
+        reportURLs(for: scans)
+    }
+
     private func reloadScans() {
         scans = storageManager.loadScans()
+
+        let availableScanIDs = Set(scans.map(\.id))
+        selectedScanIDs.formIntersection(availableScanIDs)
+
+        if scans.isEmpty {
+            exitSelectionMode()
+        }
     }
 
     private func deleteScan(_ scan: ScanItem) {
         storageManager.deleteScan(scan)
+        selectedScanIDs.remove(scan.id)
         reloadScans()
+    }
+
+    private func handleScanTap(_ scan: ScanItem) {
+        if isSelectionModeActive {
+            toggleSelection(for: scan)
+        } else {
+            selectedScan = scan
+        }
+    }
+
+    private func enterSelectionMode() {
+        isSelectionModeActive = true
+        shareStatusText = nil
+    }
+
+    private func exitSelectionMode() {
+        isSelectionModeActive = false
+        selectedScanIDs.removeAll()
+        shareStatusText = nil
+    }
+
+    private func toggleSelection(for scan: ScanItem) {
+        if selectedScanIDs.contains(scan.id) {
+            selectedScanIDs.remove(scan.id)
+        } else {
+            selectedScanIDs.insert(scan.id)
+        }
+
+        shareStatusText = nil
+    }
+
+    private func selectAllScans() {
+        selectedScanIDs = Set(scans.map(\.id))
+        shareStatusText = nil
+    }
+
+    private func clearSelection() {
+        selectedScanIDs.removeAll()
+        shareStatusText = nil
     }
 
     private func reportURLIfAvailable(for scan: ScanItem) -> URL? {
@@ -107,6 +311,89 @@ struct ScanListView: View {
         }
 
         return inferredReportURL
+    }
+
+    private func shareURLs(for scans: [ScanItem]) -> [URL] {
+        let urls = scans.flatMap { scan -> [URL] in
+            var scanURLs = [scan.fileURL]
+
+            if let reportURL = reportURLIfAvailable(for: scan) {
+                scanURLs.append(reportURL)
+            }
+
+            return scanURLs
+        }
+
+        return uniqueURLs(urls)
+    }
+
+    private func reportURLs(for scans: [ScanItem]) -> [URL] {
+        uniqueURLs(scans.compactMap { reportURLIfAvailable(for: $0) })
+    }
+
+    private func uniqueURLs(_ urls: [URL]) -> [URL] {
+        var seenPaths = Set<String>()
+        var uniqueURLs: [URL] = []
+
+        for url in urls {
+            let path = url.standardizedFileURL.path
+
+            guard seenPaths.insert(path).inserted else {
+                continue
+            }
+
+            uniqueURLs.append(url)
+        }
+
+        return uniqueURLs
+    }
+
+    private func shareSelectedScans() {
+        shareScanFiles(
+            urls: selectedShareURLs,
+            emptyMessage: "Nenhum scan selecionado",
+            statusPrefix: "Compartilhando selecionados"
+        )
+    }
+
+    private func shareAllScans() {
+        shareScanFiles(
+            urls: allShareURLs,
+            emptyMessage: "Nenhum arquivo para compartilhar",
+            statusPrefix: "Compartilhando todos"
+        )
+    }
+
+    private func shareAllSTLs() {
+        shareScanFiles(
+            urls: allSTLURLs,
+            emptyMessage: "Nenhum STL para compartilhar",
+            statusPrefix: "Compartilhando STLs"
+        )
+    }
+
+    private func shareAllReports() {
+        shareScanFiles(
+            urls: allReportURLs,
+            emptyMessage: "Nenhum report para compartilhar",
+            statusPrefix: "Compartilhando reports"
+        )
+    }
+
+    private func shareScanFiles(
+        urls: [URL],
+        emptyMessage: String,
+        statusPrefix: String
+    ) {
+        let uniqueURLs = uniqueURLs(urls)
+
+        guard !uniqueURLs.isEmpty else {
+            shareStatusText = emptyMessage
+            return
+        }
+
+        shareStatusText = "\(statusPrefix): \(uniqueURLs.count) arquivos"
+        shareFiles(urls: uniqueURLs)
     }
 
     @ViewBuilder
@@ -185,9 +472,18 @@ struct ScanListView: View {
 private struct ScanRowView: View {
     let scan: ScanItem
     let hasReport: Bool
+    let isSelectionModeActive: Bool
+    let isSelected: Bool
 
     var body: some View {
         HStack(spacing: 12) {
+            if isSelectionModeActive {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(isSelected ? Color.green : Color.white.opacity(0.52))
+                    .frame(width: 24, height: 24)
+            }
+
             Image(systemName: "shippingbox.fill")
                 .font(.title3)
                 .foregroundStyle(Color(red: 0.23, green: 0.51, blue: 0.96))
@@ -212,9 +508,11 @@ private struct ScanRowView: View {
 
             Spacer()
 
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(Color.white.opacity(0.34))
+            if !isSelectionModeActive {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color.white.opacity(0.34))
+            }
         }
         .padding(.vertical, 8)
     }
