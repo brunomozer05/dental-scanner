@@ -38,6 +38,38 @@ struct ExportableMarkerValidation: Equatable, Identifiable {
     }
 }
 
+enum FocusRecoveryState: String, Equatable {
+    case idle
+    case arucoVisible
+    case focusingOnAruco
+    case focusLocked
+    case arucoLost
+    case recoveringFocus
+    case waitingForAruco
+    case focusUnavailable
+
+    var debugTitle: String {
+        switch self {
+        case .idle:
+            return "idle"
+        case .arucoVisible:
+            return "aruco visivel"
+        case .focusingOnAruco:
+            return "focando ArUco"
+        case .focusLocked:
+            return "foco travado"
+        case .arucoLost:
+            return "ArUco perdida"
+        case .recoveringFocus:
+            return "recuperando foco"
+        case .waitingForAruco:
+            return "aguardando ArUco"
+        case .focusUnavailable:
+            return "foco indisponivel"
+        }
+    }
+}
+
 final class ScannerViewModel: ObservableObject {
     private enum OverlayStabilization {
         static let timeout: Double = 0.35
@@ -88,6 +120,7 @@ final class ScannerViewModel: ObservableObject {
         static let minimumArucoFocusTargetAreaPixels: Double = 120.0
         static let minimumArucoFocusTargetConfidence: Double = 0.35
         static let minimumSecondsBetweenArucoFocusRequests: Double = 2.0
+        static let arucoFocusRecoveryDelaySeconds: Double = 0.75
     }
 
     private struct MarkerImagePositionDiagnostics {
@@ -526,6 +559,16 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var lastArucoFocusPoint: CGPoint?
     @Published private(set) var lastArucoFocusRequestTimestamp: Double?
     @Published private(set) var lastArucoFocusErrorMessage: String?
+    @Published private(set) var focusRecoveryState: FocusRecoveryState = .idle
+    @Published private(set) var lastFocusTarget: String = "none"
+    @Published private(set) var lastFocusPoint: CGPoint?
+    @Published private(set) var lastFocusRequestTimestamp: Double?
+    @Published private(set) var isArucoVisibleForFocus: Bool = false
+    @Published private(set) var lastArucoVisibleTimestamp: Double?
+    @Published private(set) var arucoLostCount: Int = 0
+    @Published private(set) var centerFocusRecoveryCount: Int = 0
+    @Published private(set) var distanceGuideStateTitle: String = "Sem marker confiavel"
+    @Published private(set) var lastDistanceGuideDistanceMm: Double?
     @Published private(set) var staticPoseStabilityMode: Bool = false
     @Published private(set) var staticPoseStabilityWindowSeconds: Double =
         StaticPoseStabilityConfiguration.windowSeconds
@@ -616,6 +659,7 @@ final class ScannerViewModel: ObservableObject {
     private var finalObservationDiagnosticsByMarkerId: [Int: FinalPoseObservationSelectionDiagnostics] = [:]
     private var scanCameraDiagnosticsBaseline: CameraDiagnosticsBaseline?
     private var arucoFocusSettleUntilTimestamp: Double?
+    private var didCountCurrentArucoLoss = false
     private var lastExportDiagnosticsUpdateTimestamp: Double?
     private var lastFinalObservationDiagnosticsUpdateTimestamp: Double?
     private var lastStaticPoseDiagnosticsUpdateTimestamp: Double?
@@ -1019,6 +1063,12 @@ final class ScannerViewModel: ObservableObject {
         if isEnabled {
             autoFocusOnDetectedAruco = false
             arucoFocusSettleUntilTimestamp = nil
+            focusRecoveryState = .focusLocked
+            lastFocusTarget = "manual"
+            lastFocusPoint = nil
+        } else if !autoFocusOnDetectedAruco {
+            focusRecoveryState = .idle
+            lastFocusTarget = "none"
         }
         applyManualFocusSetting()
     }
@@ -1041,6 +1091,8 @@ final class ScannerViewModel: ObservableObject {
     @MainActor
     func lockCameraNow() {
         lockFocusAndExposureForScan = true
+        focusRecoveryState = .focusLocked
+        lastFocusTarget = "manual"
         Task { [weak self] in
             guard let self else { return }
             let snapshot = await self.cameraService.lockFocusExposureWhiteBalanceNow()
@@ -1056,6 +1108,9 @@ final class ScannerViewModel: ObservableObject {
     @MainActor
     func unlockContinuousCamera() {
         lockFocusAndExposureForScan = false
+        if !autoFocusOnDetectedAruco {
+            focusRecoveryState = .idle
+        }
         Task { [weak self] in
             guard let self else { return }
             let snapshot = await self.cameraService.unlockContinuousCameraControls()
@@ -1074,6 +1129,8 @@ final class ScannerViewModel: ObservableObject {
         cameraFocusRejectedFrameCount = 0
         cameraBlurRejectedFrameCount = 0
         scanLastBadFrameReason = "Aguardando foco estabilizar"
+        focusRecoveryState = .focusLocked
+        lastFocusTarget = "manual"
 
         Task { [weak self] in
             guard let self else { return }
@@ -1145,6 +1202,14 @@ final class ScannerViewModel: ObservableObject {
         }
         if !isEnabled {
             arucoFocusSettleUntilTimestamp = nil
+            focusRecoveryState = .idle
+            lastFocusTarget = "none"
+            lastFocusPoint = nil
+            lastFocusRequestTimestamp = nil
+            isArucoVisibleForFocus = false
+            didCountCurrentArucoLoss = false
+        } else {
+            focusRecoveryState = .waitingForAruco
         }
     }
 
@@ -1814,11 +1879,22 @@ final class ScannerViewModel: ObservableObject {
             self.stablePoseResult = poseMetrics.stablePoseResult
             self.poseStabilityStatus = poseMetrics.stabilityStatus
             self.poseMarkerId = poseMetrics.stablePoseResult?.markerId ?? poseMetrics.rawPoseResult?.markerId
-            self.poseDistanceMm = poseMetrics.stablePoseResult?.distanceMm
-            self.poseReprojectionError = poseMetrics.rawPoseResult?.reprojectionError
+            let distanceGuidePose = self.realtimeDistanceGuidePose(
+                stablePose: poseMetrics.stablePoseResult,
+                rawPoseResult: poseMetrics.rawPoseResult,
+                rawPoseResults: poseMetrics.rawPoseResults,
+                consolidatedPoseResults: consolidatedPoseResults
+            )
+            self.poseDistanceMm = distanceGuidePose?.distanceMm
+            self.poseReprojectionError = distanceGuidePose?.reprojectionError ??
+                poseMetrics.rawPoseResult?.reprojectionError
+            self.updateDistanceGuideState(
+                pose: distanceGuidePose,
+                cameraQuality: frame.cameraQuality
+            )
             self.poseErrorMessage = poseMetrics.errorMessage
             self.dualMarkerDebugStates = dualMarkerDebugStates
-            self.requestArucoFocusIfNeeded(
+            self.updateFocusRecovery(
                 target: arucoFocusTarget,
                 cameraQuality: frame.cameraQuality,
                 timestamp: metrics.lastFrameTimestamp
@@ -1965,6 +2041,22 @@ final class ScannerViewModel: ObservableObject {
         scanLastBadFrameReason = nil
         scanCameraDiagnosticsBaseline = nil
         arucoFocusSettleUntilTimestamp = nil
+        focusRecoveryState = autoFocusOnDetectedAruco ? .waitingForAruco : .idle
+        lastFocusTarget = "none"
+        lastFocusPoint = nil
+        lastFocusRequestTimestamp = nil
+        isArucoVisibleForFocus = false
+        lastArucoVisibleTimestamp = nil
+        arucoLostCount = 0
+        centerFocusRecoveryCount = 0
+        didCountCurrentArucoLoss = false
+        lastArucoFocusTagId = nil
+        lastArucoFocusMarkerId = nil
+        lastArucoFocusPoint = nil
+        lastArucoFocusRequestTimestamp = nil
+        lastArucoFocusErrorMessage = nil
+        distanceGuideStateTitle = "Sem marker confiavel"
+        lastDistanceGuideDistanceMm = nil
         scanTagCoverages = [:]
         scanReprojectionErrors = []
         scanPoseHistoryByMarkerId = [:]
@@ -2133,6 +2225,146 @@ final class ScannerViewModel: ObservableObject {
     }
 
     @MainActor
+    private func realtimeDistanceGuidePose(
+        stablePose: PoseResult?,
+        rawPoseResult: PoseResult?,
+        rawPoseResults: [PoseResult],
+        consolidatedPoseResults: [PoseResult]
+    ) -> PoseResult? {
+        let directCandidates = [stablePose, rawPoseResult].compactMap { $0 }
+        if let directPose = directCandidates.first(where: isDistanceGuidePoseCandidate) {
+            return directPose
+        }
+
+        let rankedCandidates = (rawPoseResults + consolidatedPoseResults)
+            .filter(isDistanceGuidePoseCandidate)
+            .sorted { lhs, rhs in
+                if lhs.reprojectionError != rhs.reprojectionError {
+                    return lhs.reprojectionError < rhs.reprojectionError
+                }
+
+                return lhs.markerAreaPixels > rhs.markerAreaPixels
+            }
+
+        return rankedCandidates.first
+    }
+
+    private func isDistanceGuidePoseCandidate(_ pose: PoseResult) -> Bool {
+        guard pose.markerProfile == markerProfile,
+              pose.markerId >= 0,
+              pose.distanceMm.isFinite,
+              pose.distanceMm > 0,
+              pose.reprojectionError.isFinite,
+              pose.reprojectionError <= scanReadinessConfiguration.maximumAverageReprojectionError * 3.0,
+              PoseMath.isFinite(pose.rotationVector),
+              PoseMath.isFinite(pose.rotationMatrix),
+              PoseMath.isFinite(pose.translationVector),
+              !isDefaultSuspiciousPose(pose)
+        else {
+            return false
+        }
+
+        if markerProfile == .dualArucoV2 {
+            let physicalMarkerIds = Set(MarkerConfiguration.dualMarkers.map(\.physicalMarkerId))
+            return physicalMarkerIds.contains(pose.markerId)
+        }
+
+        return true
+    }
+
+    @MainActor
+    private func updateDistanceGuideState(
+        pose: PoseResult?,
+        cameraQuality: CameraFrameQuality
+    ) {
+        let distanceMm = pose?.distanceMm
+        lastDistanceGuideDistanceMm = distanceMm?.isFinite == true ? distanceMm : nil
+
+        if cameraQuality.isAdjustingFocus ||
+            cameraQuality.isFocusSettling ||
+            !cameraQuality.isSharpnessAcceptable {
+            distanceGuideStateTitle = "Foco ruim"
+            return
+        }
+
+        guard let distanceMm,
+              distanceMm.isFinite
+        else {
+            distanceGuideStateTitle = detectedMarkerCount > 0 ? "Pose instavel" : "Sem marker confiavel"
+            return
+        }
+
+        if let pose,
+           pose.reprojectionError.isFinite,
+           pose.reprojectionError > scanReadinessConfiguration.maximumAverageReprojectionError {
+            distanceGuideStateTitle = "Pose instavel"
+            return
+        }
+
+        if distanceMm < scanReadinessConfiguration.idealMinimumDistanceMm {
+            distanceGuideStateTitle = "Afaste"
+        } else if distanceMm > scanReadinessConfiguration.idealMaximumDistanceMm {
+            distanceGuideStateTitle = "Aproxime"
+        } else {
+            distanceGuideStateTitle = "Distancia ideal"
+        }
+    }
+
+    @MainActor
+    private func updateFocusRecovery(
+        target: ArUcoFocusTarget?,
+        cameraQuality: CameraFrameQuality,
+        timestamp: Double
+    ) {
+        guard timestamp.isFinite else {
+            return
+        }
+
+        guard autoFocusOnDetectedAruco else {
+            isArucoVisibleForFocus = target != nil
+            focusRecoveryState = manualFocusEnabled || currentCameraDebugSnapshot.isCameraLocked
+                ? .focusLocked
+                : .idle
+            return
+        }
+
+        if let target {
+            isArucoVisibleForFocus = true
+            lastArucoVisibleTimestamp = timestamp
+            didCountCurrentArucoLoss = false
+            if focusRecoveryState != .focusingOnAruco {
+                focusRecoveryState = currentCameraDebugSnapshot.isCameraLocked
+                    ? .focusLocked
+                    : .arucoVisible
+            }
+            requestArucoFocusIfNeeded(
+                target: target,
+                cameraQuality: cameraQuality,
+                timestamp: timestamp
+            )
+            return
+        }
+
+        isArucoVisibleForFocus = false
+        let lostAge = arucoLostAge(at: timestamp)
+        guard lostAge >= CameraDiagnosticsConfiguration.arucoFocusRecoveryDelaySeconds else {
+            focusRecoveryState = .arucoLost
+            return
+        }
+
+        if !didCountCurrentArucoLoss {
+            arucoLostCount += 1
+            didCountCurrentArucoLoss = true
+        }
+
+        requestCenterFocusRecoveryIfNeeded(
+            cameraQuality: cameraQuality,
+            timestamp: timestamp,
+            lostAge: lostAge
+        )
+    }
+
+    @MainActor
     private func requestArucoFocusIfNeeded(
         target: ArUcoFocusTarget?,
         cameraQuality: CameraFrameQuality,
@@ -2149,13 +2381,8 @@ final class ScannerViewModel: ObservableObject {
             return
         }
 
-        if let lastArucoFocusRequestTimestamp {
-            let elapsed = timestamp - lastArucoFocusRequestTimestamp
-            if elapsed.isFinite,
-               elapsed >= 0.0,
-               elapsed < CameraDiagnosticsConfiguration.minimumSecondsBetweenArucoFocusRequests {
-                return
-            }
+        guard canRequestFocus(at: timestamp) else {
+            return
         }
 
         let needsFocus = !cameraQuality.isFocusStable ||
@@ -2170,8 +2397,12 @@ final class ScannerViewModel: ObservableObject {
         lastArucoFocusMarkerId = target.markerId
         lastArucoFocusPoint = target.centerNormalized
         lastArucoFocusRequestTimestamp = timestamp
+        lastFocusRequestTimestamp = timestamp
+        lastFocusTarget = "ArUco"
+        lastFocusPoint = target.centerNormalized
         lastArucoFocusErrorMessage = nil
         arucoFocusSettleUntilTimestamp = timestamp + cameraFocusSettleTimeSeconds
+        focusRecoveryState = .focusingOnAruco
         scanLastBadFrameReason = "Focando na tag..."
 
         let focusPoint = target.centerNormalized
@@ -2188,10 +2419,145 @@ final class ScannerViewModel: ObservableObject {
 
             await MainActor.run {
                 self.currentCameraDebugSnapshot = snapshot
+                self.syncCameraControlState(from: snapshot)
                 self.cameraLockErrorMessage = snapshot.lockError
                 self.lastArucoFocusErrorMessage = snapshot.lockError
+                if self.isBlockingFocusError(snapshot.lockError) {
+                    self.focusRecoveryState = .focusUnavailable
+                } else if snapshot.isCameraLocked {
+                    self.focusRecoveryState = .focusLocked
+                } else {
+                    self.focusRecoveryState = .waitingForAruco
+                }
             }
         }
+    }
+
+    @MainActor
+    private func requestCenterFocusRecoveryIfNeeded(
+        cameraQuality: CameraFrameQuality,
+        timestamp: Double,
+        lostAge: Double
+    ) {
+        guard autoFocusOnDetectedAruco,
+              timestamp.isFinite
+        else {
+            return
+        }
+
+        if !canRequestFocus(at: timestamp) {
+            focusRecoveryState = .waitingForAruco
+            scanLastBadFrameReason = "Aguardando ArUco para foco"
+            return
+        }
+
+        let shouldRecover = lostAge >= CameraDiagnosticsConfiguration.arucoFocusRecoveryDelaySeconds ||
+            !cameraQuality.isFocusStable ||
+            !cameraQuality.isSharpnessAcceptable
+        guard shouldRecover else {
+            focusRecoveryState = .waitingForAruco
+            return
+        }
+
+        let centerPoint = CGPoint(x: 0.5, y: 0.5)
+        guard isValidNormalizedFocusPoint(centerPoint) else {
+            focusRecoveryState = .focusUnavailable
+            lastArucoFocusErrorMessage = "Ponto central invalido"
+            return
+        }
+
+        centerFocusRecoveryCount += 1
+        manualFocusEnabled = false
+        lockFocusAndExposureForScan = false
+        lastFocusRequestTimestamp = timestamp
+        lastFocusTarget = "center"
+        lastFocusPoint = centerPoint
+        arucoFocusSettleUntilTimestamp = timestamp + cameraFocusSettleTimeSeconds
+        focusRecoveryState = .recoveringFocus
+        scanLastBadFrameReason = "Recuperando foco no centro..."
+
+        let settleTimeSeconds = cameraFocusSettleTimeSeconds
+        Task { [weak self] in
+            guard let self else { return }
+
+            let snapshot = await self.cameraService.recoverContinuousFocus(
+                at: centerPoint,
+                settleTimeSeconds: settleTimeSeconds
+            )
+
+            await MainActor.run {
+                self.currentCameraDebugSnapshot = snapshot
+                self.syncCameraControlState(from: snapshot)
+                self.lockFocusAndExposureForScan = snapshot.automaticLockEnabled
+                self.cameraLockErrorMessage = snapshot.lockError
+                self.lastArucoFocusErrorMessage = snapshot.lockError
+                if self.isBlockingFocusError(snapshot.lockError) {
+                    self.focusRecoveryState = .focusUnavailable
+                } else {
+                    self.focusRecoveryState = .waitingForAruco
+                }
+            }
+        }
+    }
+
+    private func canRequestFocus(at timestamp: Double) -> Bool {
+        guard let lastFocusRequestTimestamp,
+              lastFocusRequestTimestamp.isFinite,
+              timestamp.isFinite
+        else {
+            return true
+        }
+
+        let elapsed = timestamp - lastFocusRequestTimestamp
+        guard elapsed.isFinite, elapsed >= 0 else {
+            return true
+        }
+
+        return elapsed >= CameraDiagnosticsConfiguration.minimumSecondsBetweenArucoFocusRequests
+    }
+
+    private func isBlockingFocusError(_ error: String?) -> Bool {
+        guard let error,
+              !error.isEmpty,
+              error != "Nenhum"
+        else {
+            return false
+        }
+
+        let lowercased = error.lowercased()
+        return lowercased.contains("indisponivel") ||
+            lowercased.contains("falhou") ||
+            lowercased.contains("nao suportado")
+    }
+
+    func focusCooldownRemaining(at timestamp: Double?) -> Double? {
+        guard let timestamp,
+              timestamp.isFinite,
+              let lastFocusRequestTimestamp,
+              lastFocusRequestTimestamp.isFinite
+        else {
+            return nil
+        }
+
+        let elapsed = timestamp - lastFocusRequestTimestamp
+        guard elapsed.isFinite, elapsed >= 0 else {
+            return nil
+        }
+
+        let remaining = CameraDiagnosticsConfiguration.minimumSecondsBetweenArucoFocusRequests - elapsed
+        return remaining > 0 ? remaining : 0
+    }
+
+    func arucoLostAge(at timestamp: Double?) -> Double {
+        guard let timestamp,
+              timestamp.isFinite,
+              let lastArucoVisibleTimestamp,
+              lastArucoVisibleTimestamp.isFinite
+        else {
+            return .infinity
+        }
+
+        return max(timestamp - lastArucoVisibleTimestamp, 0)
     }
 
     private func makeArucoFocusTarget(
@@ -2921,6 +3287,19 @@ final class ScannerViewModel: ObservableObject {
     }
 
     func cameraReadinessWarning() -> String? {
+        if autoFocusOnDetectedAruco {
+            switch focusRecoveryState {
+            case .focusingOnAruco:
+                return "Focando na tag..."
+            case .recoveringFocus:
+                return "Recuperando foco..."
+            case .waitingForAruco where !isArucoVisibleForFocus:
+                return "Aguardando ArUco para foco"
+            default:
+                break
+            }
+        }
+
         if isArucoFocusSettling(at: lastFrameTimestamp) {
             return "Focando na tag..."
         }
@@ -6872,7 +7251,14 @@ final class ScannerViewModel: ObservableObject {
                         finalObservationsUsed: $0.finalObservationsUsed
                     )
                 },
-            scanConfiguration: technicalReportScanConfiguration(markerProfile: markerProfile)
+            scanConfiguration: technicalReportScanConfiguration(markerProfile: markerProfile),
+            focusRecoveryState: focusRecoveryState.rawValue,
+            lastFocusTarget: lastFocusTarget == "none" ? nil : lastFocusTarget,
+            arucoLostCount: arucoLostCount,
+            centerFocusRecoveryCount: centerFocusRecoveryCount,
+            distanceGuideState: distanceGuideStateTitle,
+            lastDistanceMm: finiteReportDouble(lastDistanceGuideDistanceMm ?? poseDistanceMm),
+            tagAreaPixelsMean: finiteReportDouble(averageTagAreaPixelsForReport())
         )
     }
 
@@ -6947,6 +7333,30 @@ final class ScannerViewModel: ObservableObject {
 
             return sharpness
         }
+
+        guard !values.isEmpty else {
+            return nil
+        }
+
+        return values.reduce(0.0, +) / Double(values.count)
+    }
+
+    private func averageTagAreaPixelsForReport() -> Double? {
+        let observationAreas = finalPoseObservations.compactMap { observation -> Double? in
+            guard observation.markerAreaPixels.isFinite,
+                  observation.markerAreaPixels > 0
+            else {
+                return nil
+            }
+
+            return observation.markerAreaPixels
+        }
+        let values = observationAreas.isEmpty
+            ? detectedMarkers.compactMap { detection -> Double? in
+                let area = detection.markerAreaPixels
+                return area.isFinite && area > 0 ? area : nil
+            }
+            : observationAreas
 
         guard !values.isEmpty else {
             return nil

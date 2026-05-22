@@ -53,7 +53,8 @@ struct ScannerView: View {
                     ScanDistanceGuideView(
                         distanceMm: viewModel.poseDistanceMm,
                         configuration: .default,
-                        isSourceReliable: viewModel.distanceGuideSourceReliable
+                        isSourceReliable: viewModel.distanceGuideSourceReliable,
+                        statusText: viewModel.distanceGuideStateTitle
                     )
                     .padding(.trailing, 16)
                 }

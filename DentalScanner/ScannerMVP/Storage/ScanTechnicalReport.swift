@@ -16,6 +16,13 @@ struct ScanTechnicalReport: Codable {
     var exportGateProfile: String?
     var markerExportValidations: [MarkerExportValidation]?
     var scanConfiguration: ScanConfiguration?
+    var focusRecoveryState: String?
+    var lastFocusTarget: String?
+    var arucoLostCount: Int?
+    var centerFocusRecoveryCount: Int?
+    var distanceGuideState: String?
+    var lastDistanceMm: Double?
+    var tagAreaPixelsMean: Double?
 
     struct Device: Codable {
         var model: String?

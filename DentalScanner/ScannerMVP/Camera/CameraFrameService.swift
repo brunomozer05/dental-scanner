@@ -323,6 +323,27 @@ final class CameraFrameService: NSObject {
         }
     }
 
+    func recoverContinuousFocus(
+        at normalizedPoint: CGPoint,
+        settleTimeSeconds: Double
+    ) async -> CameraDebugSnapshot {
+        await withCheckedContinuation { continuation in
+            sessionQueue.async { [weak self] in
+                guard let self else {
+                    continuation.resume(returning: .unavailable)
+                    return
+                }
+
+                self.focusRequestGeneration += 1
+                self.applyContinuousFocusRecoveryPoint(
+                    normalizedPoint,
+                    settleTimeSeconds: settleTimeSeconds
+                )
+                continuation.resume(returning: self.makeCameraDebugSnapshot())
+            }
+        }
+    }
+
     func fetchTorchState() async -> TorchState {
         await withCheckedContinuation { continuation in
             sessionQueue.async { [weak self] in
@@ -740,6 +761,93 @@ final class CameraFrameService: NSObject {
                 ? nil
                 : "Auto nao suportado: \(unsupportedControls.joined(separator: ", "))"
             setCameraControlsLocked(false, error: error)
+        } catch {
+            setCameraControlsLocked(false, error: error.localizedDescription)
+        }
+    }
+
+    private func applyContinuousFocusRecoveryPoint(
+        _ normalizedPoint: CGPoint,
+        settleTimeSeconds: Double
+    ) {
+        guard normalizedPoint.x.isFinite,
+              normalizedPoint.y.isFinite,
+              normalizedPoint.x >= 0,
+              normalizedPoint.x <= 1,
+              normalizedPoint.y >= 0,
+              normalizedPoint.y <= 1
+        else {
+            setCameraControlsLocked(false, error: "Ponto de recuperacao invalido")
+            return
+        }
+
+        guard let device = activeDevice else {
+            setCameraControlsLocked(false, error: "Camera indisponivel")
+            return
+        }
+
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+
+            var appliedFocus = false
+            var warnings: [String] = []
+            setAutomaticLockEnabled(false)
+            setCameraControlsLocked(false, error: nil)
+            setManualFocusState(
+                isEnabled: false,
+                lensPosition: device.lensPosition
+            )
+
+            if device.isFocusPointOfInterestSupported {
+                device.focusPointOfInterest = normalizedPoint
+            } else {
+                warnings.append("ponto foco")
+            }
+
+            if device.isFocusModeSupported(.continuousAutoFocus) {
+                device.focusMode = .continuousAutoFocus
+                appliedFocus = true
+            } else if device.isFocusModeSupported(.autoFocus) {
+                device.focusMode = .autoFocus
+                appliedFocus = true
+            } else {
+                warnings.append("foco continuo")
+            }
+
+            if device.isExposurePointOfInterestSupported {
+                device.exposurePointOfInterest = normalizedPoint
+            } else {
+                warnings.append("ponto exposicao")
+            }
+
+            if device.isExposureModeSupported(.continuousAutoExposure) {
+                device.exposureMode = .continuousAutoExposure
+            } else if device.isExposureModeSupported(.autoExpose) {
+                device.exposureMode = .autoExpose
+            } else {
+                warnings.append("exposicao continua")
+            }
+
+            if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
+                device.whiteBalanceMode = .continuousAutoWhiteBalance
+            } else if device.isWhiteBalanceModeSupported(.autoWhiteBalance) {
+                device.whiteBalanceMode = .autoWhiteBalance
+            } else {
+                warnings.append("white balance continuo")
+            }
+
+            let message: String?
+            if appliedFocus {
+                message = warnings.isEmpty
+                    ? nil
+                    : "Recuperacao foco parcial: \(warnings.joined(separator: ", "))"
+            } else {
+                message = "Recuperacao foco indisponivel: \(warnings.joined(separator: ", "))"
+            }
+
+            setCameraControlsLocked(false, error: message)
+            resetFocusStabilityReference(forceSettle: settleTimeSeconds > 0.0)
         } catch {
             setCameraControlsLocked(false, error: error.localizedDescription)
         }

@@ -99,6 +99,16 @@ struct ScannerDebugSnapshot: Equatable {
         let lastArucoFocusPoint: String
         let lastArucoFocusRequestAge: String
         let arucoFocusCooldown: String
+        let focusRecoveryState: String
+        let lastFocusTarget: String
+        let lastFocusPoint: String
+        let focusCooldownRemaining: String
+        let arucoVisible: String
+        let arucoLostAge: String
+        let recoveringFocus: String
+        let arucoLostCount: String
+        let centerFocusRecoveryCount: String
+        let distanceGuideState: String
         let lastArucoFocusError: String
         let focusAdjustingFrames: String
         let focusRejectedFrames: String
@@ -294,6 +304,16 @@ extension ScannerViewModel {
                 lastArucoFocusPoint: lastArucoFocusPoint,
                 lastArucoFocusRequestAge: lastArucoFocusRequestAge(),
                 arucoFocusCooldown: arucoFocusCooldownSeconds,
+                focusRecoveryState: focusRecoveryState.debugTitle,
+                lastFocusTarget: lastFocusTarget,
+                lastFocusPoint: lastFocusPoint,
+                focusCooldownRemaining: focusCooldownRemaining(at: lastFrameTimestamp),
+                arucoVisible: isArucoVisibleForFocus,
+                arucoLostAge: arucoLostAge(at: lastFrameTimestamp),
+                recoveringFocus: focusRecoveryState == .recoveringFocus,
+                arucoLostCount: arucoLostCount,
+                centerFocusRecoveryCount: centerFocusRecoveryCount,
+                distanceGuideState: distanceGuideStateTitle,
                 lastArucoFocusError: lastArucoFocusErrorMessage
             ),
             arkit: Self.debugARKitSection(
@@ -385,6 +405,16 @@ extension ScannerViewModel {
         lastArucoFocusPoint: CGPoint?,
         lastArucoFocusRequestAge: Double?,
         arucoFocusCooldown: Double,
+        focusRecoveryState: String,
+        lastFocusTarget: String,
+        lastFocusPoint: CGPoint?,
+        focusCooldownRemaining: Double?,
+        arucoVisible: Bool,
+        arucoLostAge: Double,
+        recoveringFocus: Bool,
+        arucoLostCount: Int,
+        centerFocusRecoveryCount: Int,
+        distanceGuideState: String,
         lastArucoFocusError: String?
     ) -> ScannerDebugSnapshot.CameraSection {
         ScannerDebugSnapshot.CameraSection(
@@ -434,6 +464,16 @@ extension ScannerViewModel {
             lastArucoFocusPoint: debugPoint(lastArucoFocusPoint),
             lastArucoFocusRequestAge: debugSeconds(lastArucoFocusRequestAge),
             arucoFocusCooldown: debugSeconds(arucoFocusCooldown),
+            focusRecoveryState: debugText(focusRecoveryState),
+            lastFocusTarget: debugText(lastFocusTarget),
+            lastFocusPoint: debugPoint(lastFocusPoint),
+            focusCooldownRemaining: debugSeconds(focusCooldownRemaining),
+            arucoVisible: arucoVisible ? "Sim" : "Nao",
+            arucoLostAge: arucoLostAge.isFinite ? debugSeconds(arucoLostAge) : ScannerDebugSnapshot.missingValue,
+            recoveringFocus: recoveringFocus ? "Sim" : "Nao",
+            arucoLostCount: "\(arucoLostCount)",
+            centerFocusRecoveryCount: "\(centerFocusRecoveryCount)",
+            distanceGuideState: debugText(distanceGuideState),
             lastArucoFocusError: debugText(lastArucoFocusError ?? "Nenhum"),
             focusAdjustingFrames: "\(focusAdjustingFrames)",
             focusRejectedFrames: "\(focusRejectedFrames)",
