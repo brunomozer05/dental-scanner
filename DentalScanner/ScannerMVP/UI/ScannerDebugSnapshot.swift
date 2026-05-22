@@ -44,6 +44,7 @@ struct ScannerDebugSnapshot: Equatable {
         let autoFocusOnDetectedAruco: String
         let lockAfterArucoFocus: String
         let arkitAssistedCaptureEnabled: String
+        let staticPoseStabilityMode: String
         let requiredAngularCoverage: String
         let minimumDualTagFrames: String
         let minimumDualAngularCoverage: String
@@ -51,6 +52,10 @@ struct ScannerDebugSnapshot: Equatable {
         let preferDualTagForFinalExport: String
         let minimumGoodFrames: String
         let targetValidFrames: String
+        let minimumAllowedSharpness: String
+        let minimumPreferredSharpness: String
+        let lensPositionChangeThreshold: String
+        let focusSettleTimeSeconds: String
     }
 
     struct CameraSection: Equatable {
@@ -146,6 +151,26 @@ struct ScannerDebugSnapshot: Equatable {
         let penalizedByARKit: String
     }
 
+    struct ExportGateSection: Equatable {
+        let scanConfidence: String
+        let expectedMarkerCount: String
+        let exportableMarkerCount: String
+        let markerCountSummary: String
+        let missingMarkerIds: String
+        let invalidMarkerIds: String
+        let lastBlockedReason: String
+    }
+
+    struct MarkerExportGateRow: Equatable, Identifiable {
+        let markerId: Int
+        let status: String
+        let reason: String
+
+        var id: Int {
+            markerId
+        }
+    }
+
     struct MarkerV2Row: Equatable, Identifiable {
         let markerId: Int
         let dualFrames: String
@@ -166,8 +191,10 @@ struct ScannerDebugSnapshot: Equatable {
     let camera: CameraSection
     let arkit: ARKitSection
     let exportQuality: ExportQualitySection
+    let exportGate: ExportGateSection
     let isDualArucoV2: Bool
     let markerV2Rows: [MarkerV2Row]
+    let markerExportGateRows: [MarkerExportGateRow]
 }
 
 extension ScannerViewModel {
@@ -210,13 +237,18 @@ extension ScannerViewModel {
                 autoFocusOnDetectedAruco: debugBool(autoFocusOnDetectedAruco),
                 lockAfterArucoFocus: debugBool(lockAfterArucoFocus),
                 arkitAssistedCaptureEnabled: debugBool(arkitAssistedCaptureEnabled),
+                staticPoseStabilityMode: debugBool(staticPoseStabilityMode),
                 requiredAngularCoverage: Self.debugPercent(scanRequiredAngularCoveragePercent),
                 minimumDualTagFrames: "\(scanMinimumDualTagFrameCount)",
                 minimumDualAngularCoverage: Self.debugPercent(scanRequiredDualAngularCoveragePercent),
                 precisionModeV2: debugBool(precisionModeV2),
                 preferDualTagForFinalExport: debugBool(preferDualTagForFinalExport),
                 minimumGoodFrames: "\(scanMinimumGoodFrameCount)",
-                targetValidFrames: "\(scanTargetValidFrameCount)"
+                targetValidFrames: "\(scanTargetValidFrameCount)",
+                minimumAllowedSharpness: Self.debugNumber(minimumAllowedSharpness, decimals: 1),
+                minimumPreferredSharpness: Self.debugNumber(minimumPreferredSharpness, decimals: 1),
+                lensPositionChangeThreshold: Self.debugNumber(cameraLensPositionChangeThreshold, decimals: 3),
+                focusSettleTimeSeconds: Self.debugSeconds(cameraFocusSettleTimeSeconds)
             ),
             camera: Self.debugCameraSection(
                 currentCameraDebugSnapshot,
@@ -263,12 +295,28 @@ extension ScannerViewModel {
                 rejectedByMotion: "\(scanFinalRejectedByMotionCount)",
                 penalizedByARKit: "\(scanFinalPenalizedByARKitCount)"
             ),
+            exportGate: ScannerDebugSnapshot.ExportGateSection(
+                scanConfidence: debugString(scanFinalConfidenceSummary),
+                expectedMarkerCount: exportGateExpectedMarkerCount > 0
+                    ? "\(exportGateExpectedMarkerCount)"
+                    : ScannerDebugSnapshot.missingValue,
+                exportableMarkerCount: "\(exportGateExportableMarkerCount)",
+                markerCountSummary: exportGateExpectedMarkerCount > 0
+                    ? "\(exportGateExportableMarkerCount)/\(exportGateExpectedMarkerCount)"
+                    : "\(exportGateExportableMarkerCount)",
+                missingMarkerIds: Self.debugIntList(exportGateMissingMarkerIds),
+                invalidMarkerIds: Self.debugIntList(exportGateInvalidMarkerIds),
+                lastBlockedReason: debugString(exportGateBlockedReason ?? "Nenhum")
+            ),
             isDualArucoV2: markerProfile == .dualArucoV2,
             markerV2Rows: markerProfile == .dualArucoV2
                 ? dualMarkerDebugStates
                     .sorted { $0.physicalMarkerId < $1.physicalMarkerId }
                     .map(Self.debugMarkerV2Row)
-                : []
+                : [],
+            markerExportGateRows: exportGateMarkerValidations
+                .sorted { $0.markerId < $1.markerId }
+                .map(Self.debugMarkerExportGateRow)
         )
     }
 
@@ -370,6 +418,16 @@ extension ScannerViewModel {
             bottomFallbackFrames: "\(state.scanBottomFallbackFrameCount)",
             dualPercent: debugPercent(state.scanDualTagPosePercent),
             dominantMode: state.scanDominantPoseSource?.debugTitle ?? ScannerDebugSnapshot.missingValue
+        )
+    }
+
+    private static func debugMarkerExportGateRow(
+        _ validation: ExportableMarkerValidation
+    ) -> ScannerDebugSnapshot.MarkerExportGateRow {
+        ScannerDebugSnapshot.MarkerExportGateRow(
+            markerId: validation.markerId,
+            status: validation.isExportable ? "exportavel" : "nao exportavel",
+            reason: debugText(validation.reason ?? "ok")
         )
     }
 

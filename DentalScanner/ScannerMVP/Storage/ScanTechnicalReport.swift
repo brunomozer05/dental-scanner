@@ -8,6 +8,13 @@ struct ScanTechnicalReport: Codable {
     var cameraQuality: CameraQuality
     var markers: [Marker]
     var scanQuality: ScanQuality
+    var expectedMarkerCount: Int?
+    var exportedMarkerCount: Int?
+    var missingMarkerIds: [Int]?
+    var invalidMarkerIds: [Int]?
+    var exportBlockedReason: String?
+    var markerExportValidations: [MarkerExportValidation]?
+    var scanConfiguration: ScanConfiguration?
 
     struct Device: Codable {
         var model: String?
@@ -45,5 +52,35 @@ struct ScanTechnicalReport: Codable {
         var mainIssue: String?
         var planeAverageErrorMm: Double?
         var planeMaxErrorMm: Double?
+    }
+
+    struct MarkerExportValidation: Codable {
+        var markerId: Int
+        var isExportable: Bool
+        var reason: String?
+    }
+
+    struct ScanConfiguration: Codable {
+        var markerProfile: String?
+        var minimumCoveragePercentPerTag: Double?
+        var minimumGoodFrames: Int?
+        var targetGoodFrames: Int?
+        var minimumDualTagFramesPerMarker: Int?
+        var minimumDualAngularCoveragePercentPerMarker: Double?
+        var precisionModeV2: Bool?
+        var preferDualTagForFinalExport: Bool?
+        var showDistanceGuide: Bool?
+        var staticPoseStabilityMode: Bool?
+        var arkitAssistedCaptureEnabled: Bool?
+        var cameraZoomFactor: Double?
+        var manualFocusEnabled: Bool?
+        var manualLensPosition: Double?
+        var lockFocusAndExposureForScan: Bool?
+        var autoFocusOnDetectedAruco: Bool?
+        var lockAfterArucoFocus: Bool?
+        var minimumAllowedSharpness: Double?
+        var minimumPreferredSharpness: Double?
+        var lensPositionChangeThreshold: Double?
+        var focusSettleTimeSeconds: Double?
     }
 }

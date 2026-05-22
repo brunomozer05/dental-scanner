@@ -62,4 +62,20 @@ struct ARKitFrameQuality: Equatable {
         isEnabled: true,
         isAvailable: true
     )
+
+    static let avFoundationConflict = ARKitFrameQuality(
+        timestamp: nil,
+        trackingStateText: "ARKit Assist desligado para evitar conflito com camera",
+        isTrackingReliable: true,
+        hasCameraTransform: false,
+        hasIntrinsics: false,
+        cameraMotionSinceLastFrame: nil,
+        intrinsicsChanged: false,
+        lightEstimateText: nil,
+        stabilityScore: 1.0,
+        rotationStabilityScore: 1.0,
+        isRecent: false,
+        isEnabled: false,
+        isAvailable: false
+    )
 }

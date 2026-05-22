@@ -82,6 +82,26 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Ultimo export poses", value: snapshot.export.lastSTLExportPoseCount)
                     }
 
+                    debugSection(title: "Export gate") {
+                        debugRow(title: "Scan confidence", value: snapshot.exportGate.scanConfidence)
+                        debugRow(title: "Markers exportaveis", value: snapshot.exportGate.markerCountSummary)
+                        debugRow(title: "Expected markers", value: snapshot.exportGate.expectedMarkerCount)
+                        debugRow(title: "Missing markers", value: snapshot.exportGate.missingMarkerIds)
+                        debugRow(title: "Invalid markers", value: snapshot.exportGate.invalidMarkerIds)
+                        debugRow(title: "Ultimo bloqueio", value: snapshot.exportGate.lastBlockedReason)
+
+                        if snapshot.markerExportGateRows.isEmpty {
+                            debugRow(title: "Markers", value: "Sem validacao ainda")
+                        } else {
+                            ForEach(snapshot.markerExportGateRows) { marker in
+                                debugRow(
+                                    title: "M\(marker.markerId)",
+                                    value: "\(marker.status) | \(marker.reason)"
+                                )
+                            }
+                        }
+                    }
+
                     debugSection(title: "Readiness") {
                         debugRow(title: "coverageReady", value: snapshot.readiness.coverageReady)
                         debugRow(title: "goodFramesReady", value: snapshot.readiness.goodFramesReady)
@@ -194,6 +214,7 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Auto focus ArUco", value: snapshot.configuration.autoFocusOnDetectedAruco)
                         debugRow(title: "Lock apos ArUco", value: snapshot.configuration.lockAfterArucoFocus)
                         debugRow(title: "ARKit Assist", value: snapshot.configuration.arkitAssistedCaptureEnabled)
+                        debugRow(title: "Static stability", value: snapshot.configuration.staticPoseStabilityMode)
                         debugRow(title: "Frames min", value: snapshot.configuration.minimumGoodFrames)
                         debugRow(title: "Frames alvo", value: snapshot.configuration.targetValidFrames)
                         debugRow(title: "Cobertura angular", value: snapshot.configuration.requiredAngularCoverage)
@@ -201,6 +222,10 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Cobertura dual", value: snapshot.configuration.minimumDualAngularCoverage)
                         debugRow(title: "Precision v2", value: snapshot.configuration.precisionModeV2)
                         debugRow(title: "Dual export", value: snapshot.configuration.preferDualTagForFinalExport)
+                        debugRow(title: "Sharpness min", value: snapshot.configuration.minimumAllowedSharpness)
+                        debugRow(title: "Sharpness pref", value: snapshot.configuration.minimumPreferredSharpness)
+                        debugRow(title: "Lens delta foco", value: snapshot.configuration.lensPositionChangeThreshold)
+                        debugRow(title: "Focus settle", value: snapshot.configuration.focusSettleTimeSeconds)
                     }
 
                     debugSection(title: "Config scan") {
