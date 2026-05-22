@@ -137,8 +137,12 @@ final class ScannerViewModel: ObservableObject {
     private enum ScanConfiguration {
         static let readiness = ScanReadinessConfiguration.default
         static let expectedDualArucoPhysicalMarkerCount: Int = 4
-        static let minimumFinalObservationsForExport: Int = 8
-        static let minimumFinalQualityScoreForExport: Double = 0.20
+        static let minimumSingleArucoFinalObservationsForExport: Int = 8
+        static let minimumDualArucoFinalObservationsForExport: Int = 4
+        static let severeMinimumFinalQualityScoreForExport: Double = 0.10
+        static let warningMinimumFinalQualityScoreForExport: Double = 0.20
+        static let severeReprojectionErrorMultiplierForExport: Double = 3.0
+        static let severeNormalStdMultiplierForExport: Double = 3.0
         static let completedCoverageThreshold: Double = 0.995
         static let defaultTargetValidFrameCount: Int = readiness.targetGoodFrames
         static let minimumGoodFrameCountRange: ClosedRange<Int> = 30...180
@@ -332,6 +336,7 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private struct ExportGateValidation {
+        let markerProfile: MarkerProfile
         let expectedMarkerIds: [Int]
         let exportablePoses: [PoseResult]
         let markerValidations: [ExportableMarkerValidation]
@@ -502,6 +507,7 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var hasSTLExportFile: Bool = false
     @Published private(set) var hasSTLExportURL: Bool = false
     @Published private(set) var currentExportableTagPoseCount: Int = 0
+    @Published private(set) var exportGateMarkerProfile: MarkerProfile = MarkerConfiguration.defaultProfile
     @Published private(set) var exportGateExpectedMarkerCount: Int = 0
     @Published private(set) var exportGateExportableMarkerCount: Int = 0
     @Published private(set) var exportGateMissingMarkerIds: [Int] = []
@@ -1867,6 +1873,7 @@ final class ScannerViewModel: ObservableObject {
         scanMotionPenalizedFrameCount = 0
         scanMotionDiscardedObservationCount = 0
         scanARKitPenalizedFrameCount = 0
+        exportGateMarkerProfile = markerProfile
         exportGateExpectedMarkerCount = 0
         exportGateExportableMarkerCount = 0
         exportGateMissingMarkerIds = []
@@ -5435,6 +5442,7 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private func publishExportGateDiagnostics(_ exportGate: ExportGateValidation) {
+        exportGateMarkerProfile = exportGate.markerProfile
         currentExportableTagPoseCount = exportGate.exportablePoses.count
         exportGateExpectedMarkerCount = exportGate.expectedMarkerIds.count
         exportGateExportableMarkerCount = exportGate.exportablePoses.count
@@ -5792,7 +5800,8 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private func validateExportGate(for candidatePoses: [PoseResult]) -> ExportGateValidation {
-        let expectedMarkerIds = expectedExportMarkerIds(for: markerProfile)
+        let currentMarkerProfile = markerProfile
+        let expectedMarkerIds = expectedExportMarkerIds(for: currentMarkerProfile)
         let posesByMarkerId = Dictionary(
             uniqueKeysWithValues: candidatePoses.map { ($0.markerId, $0) }
         )
@@ -5819,6 +5828,7 @@ final class ScannerViewModel: ObservableObject {
         )
 
         return ExportGateValidation(
+            markerProfile: currentMarkerProfile,
             expectedMarkerIds: expectedMarkerIds,
             exportablePoses: exportablePoses,
             markerValidations: markerValidations,
@@ -5864,42 +5874,28 @@ final class ScannerViewModel: ObservableObject {
             )
         }
 
-        let dualTagFrameCount = scanDualTagFrameCountsByMarkerId[markerId] ?? 0
-        let topFallbackFrameCount = scanTopFallbackFrameCountsByMarkerId[markerId] ?? 0
-        let bottomFallbackFrameCount = scanBottomFallbackFrameCountsByMarkerId[markerId] ?? 0
-        let dualAngularCoveragePercent = dualAngularCoveragePercent(forPhysicalMarkerId: markerId)
-        let finalConfidence = finalRefinementConfidence(
-            finalDiagnostics: diagnostics,
-            dualTagFrameCount: dualTagFrameCount,
-            dualAngularCoveragePercent: dualAngularCoveragePercent
-        )
-
-        if isFallbackDominantForExport(
-            dualTagFrameCount: dualTagFrameCount,
-            topFallbackFrameCount: topFallbackFrameCount,
-            bottomFallbackFrameCount: bottomFallbackFrameCount
-        ) {
-            return ExportableMarkerValidation(
+        switch markerProfile {
+        case .singleArucoV1:
+            return validateSingleArucoV1Export(
                 markerId: markerId,
-                isExportable: false,
-                reason: "fallback dominante"
+                pose: pose,
+                diagnostics: diagnostics
+            )
+        case .dualArucoV2:
+            return validateDualArucoV2Export(
+                markerId: markerId,
+                pose: pose,
+                diagnostics: diagnostics
             )
         }
+    }
 
-        if finalConfidence == .low {
-            let reason = finalRefinementConfidenceReason(
-                finalDiagnostics: diagnostics,
-                dualTagFrameCount: dualTagFrameCount,
-                dualAngularCoveragePercent: dualAngularCoveragePercent
-            ) ?? "baixa confianca"
-            return ExportableMarkerValidation(
-                markerId: markerId,
-                isExportable: false,
-                reason: reason == "sem observacoes finais" ? "baixa confianca" : reason
-            )
-        }
-
-        if diagnostics.selectedObservationCount < ScanConfiguration.minimumFinalObservationsForExport {
+    private func validateSingleArucoV1Export(
+        markerId: Int,
+        pose: PoseResult,
+        diagnostics: FinalPoseObservationSelectionDiagnostics
+    ) -> ExportableMarkerValidation {
+        if diagnostics.selectedObservationCount < ScanConfiguration.minimumSingleArucoFinalObservationsForExport {
             return ExportableMarkerValidation(
                 markerId: markerId,
                 isExportable: false,
@@ -5909,7 +5905,7 @@ final class ScannerViewModel: ObservableObject {
 
         if let qualityScore = diagnostics.finalAverageQualityScore,
            qualityScore.isFinite,
-           qualityScore < ScanConfiguration.minimumFinalQualityScoreForExport {
+           qualityScore < ScanConfiguration.severeMinimumFinalQualityScoreForExport {
             return ExportableMarkerValidation(
                 markerId: markerId,
                 isExportable: false,
@@ -5927,31 +5923,144 @@ final class ScannerViewModel: ObservableObject {
             )
         }
 
-        if let normalStdDegrees = diagnostics.finalNormalStdDevDegrees,
-           normalStdDegrees.isFinite,
-           normalStdDegrees > scanMaximumFinalNormalOutlierDegrees {
-            return ExportableMarkerValidation(
-                markerId: markerId,
-                isExportable: false,
-                reason: "normal instavel"
-            )
+        var warnings: [String] = []
+        if diagnostics.finalConfidence == .low {
+            warnings.append("baixa confianca")
         }
 
-        if markerProfile == .dualArucoV2,
-           scanMinimumDualTagFrameCount > 0,
-           dualTagFrameCount < scanMinimumDualTagFrameCount {
-            return ExportableMarkerValidation(
-                markerId: markerId,
-                isExportable: false,
-                reason: "dual frames insuficientes"
-            )
+        if let qualityScore = diagnostics.finalAverageQualityScore,
+           qualityScore.isFinite,
+           qualityScore < ScanConfiguration.warningMinimumFinalQualityScoreForExport {
+            warnings.append("quality score moderado")
         }
 
         return ExportableMarkerValidation(
             markerId: markerId,
             isExportable: true,
-            reason: nil
+            reason: exportWarningReason(warnings)
         )
+    }
+
+    private func validateDualArucoV2Export(
+        markerId: Int,
+        pose: PoseResult,
+        diagnostics: FinalPoseObservationSelectionDiagnostics
+    ) -> ExportableMarkerValidation {
+        let dualTagFrameCount = scanDualTagFrameCountsByMarkerId[markerId] ?? 0
+        let topFallbackFrameCount = scanTopFallbackFrameCountsByMarkerId[markerId] ?? 0
+        let bottomFallbackFrameCount = scanBottomFallbackFrameCountsByMarkerId[markerId] ?? 0
+        let dualAngularCoveragePercent = dualAngularCoveragePercent(forPhysicalMarkerId: markerId)
+        let finalConfidence = finalRefinementConfidence(
+            finalDiagnostics: diagnostics,
+            dualTagFrameCount: dualTagFrameCount,
+            dualAngularCoveragePercent: dualAngularCoveragePercent
+        )
+
+        if diagnostics.selectedObservationCount <= 0 {
+            return ExportableMarkerValidation(
+                markerId: markerId,
+                isExportable: false,
+                reason: "sem observacoes finais"
+            )
+        }
+
+        if let qualityScore = diagnostics.finalAverageQualityScore,
+           qualityScore.isFinite,
+           qualityScore < ScanConfiguration.severeMinimumFinalQualityScoreForExport {
+            return ExportableMarkerValidation(
+                markerId: markerId,
+                isExportable: false,
+                reason: "quality score baixo"
+            )
+        }
+
+        let reprojectionError = diagnostics.finalAverageReprojectionError ?? pose.reprojectionError
+        let severeReprojectionError = scanReadinessConfiguration.maximumAverageReprojectionError *
+            ScanConfiguration.severeReprojectionErrorMultiplierForExport
+        if reprojectionError.isFinite,
+           reprojectionError > severeReprojectionError {
+            return ExportableMarkerValidation(
+                markerId: markerId,
+                isExportable: false,
+                reason: "reprojection muito alto"
+            )
+        }
+
+        let severeNormalStdDegrees = scanMaximumFinalNormalOutlierDegrees *
+            ScanConfiguration.severeNormalStdMultiplierForExport
+        if let normalStdDegrees = diagnostics.finalNormalStdDevDegrees,
+           normalStdDegrees.isFinite,
+           normalStdDegrees > severeNormalStdDegrees {
+            return ExportableMarkerValidation(
+                markerId: markerId,
+                isExportable: false,
+                reason: "normal muito instavel"
+            )
+        }
+
+        var warnings: [String] = []
+        if finalConfidence == .low {
+            let reason = finalRefinementConfidenceReason(
+                finalDiagnostics: diagnostics,
+                dualTagFrameCount: dualTagFrameCount,
+                dualAngularCoveragePercent: dualAngularCoveragePercent
+            ) ?? "baixa confianca"
+            warnings.append(reason == "sem observacoes finais" ? "baixa confianca" : reason)
+        }
+
+        if isFallbackDominantForExport(
+            dualTagFrameCount: dualTagFrameCount,
+            topFallbackFrameCount: topFallbackFrameCount,
+            bottomFallbackFrameCount: bottomFallbackFrameCount
+        ) {
+            warnings.append("fallback dominante")
+        }
+
+        if scanMinimumDualTagFrameCount > 0,
+           dualTagFrameCount < scanMinimumDualTagFrameCount {
+            warnings.append("dual frames baixos")
+        }
+
+        if scanRequiredDualAngularCoveragePercent > 0,
+           dualAngularCoveragePercent < scanRequiredDualAngularCoveragePercent {
+            warnings.append("cobertura dual baixa")
+        }
+
+        if diagnostics.selectedObservationCount < ScanConfiguration.minimumDualArucoFinalObservationsForExport {
+            warnings.append("poucas observacoes finais")
+        }
+
+        if let qualityScore = diagnostics.finalAverageQualityScore,
+           qualityScore.isFinite,
+           qualityScore < ScanConfiguration.warningMinimumFinalQualityScoreForExport {
+            warnings.append("quality score moderado")
+        }
+
+        if reprojectionError.isFinite,
+           reprojectionError > scanReadinessConfiguration.maximumAverageReprojectionError {
+            warnings.append("reprojection moderado")
+        }
+
+        if let normalStdDegrees = diagnostics.finalNormalStdDevDegrees,
+           normalStdDegrees.isFinite,
+           normalStdDegrees > scanMaximumFinalNormalOutlierDegrees {
+            warnings.append("normal moderada")
+        }
+
+        return ExportableMarkerValidation(
+            markerId: markerId,
+            isExportable: true,
+            reason: exportWarningReason(warnings)
+        )
+    }
+
+    private func exportWarningReason(_ warnings: [String]) -> String? {
+        let uniqueWarnings = Array(Set(warnings)).sorted()
+        guard !uniqueWarnings.isEmpty else {
+            return nil
+        }
+
+        return "warning: \(uniqueWarnings.joined(separator: ", "))"
     }
 
     private func expectedExportMarkerIds(for markerProfile: MarkerProfile) -> [Int] {
@@ -5971,26 +6080,20 @@ final class ScannerViewModel: ObservableObject {
         missingMarkerIds: [Int],
         exportableCount: Int
     ) -> String? {
-        if scanFinalConfidenceSummary == FinalPoseMarkerConfidence.low.rawValue {
-            return "Export bloqueado: confianca do scan baixa"
-        }
-
-        if let lowConfidenceMarker = markerValidations.first(where: {
-            !$0.isExportable && (($0.reason ?? "").contains("confianca") || ($0.reason ?? "").contains("dual"))
-        }) {
-            return "Export bloqueado: M\(lowConfidenceMarker.markerId) com baixa confianca"
-        }
-
         if let defaultPoseMarker = markerValidations.first(where: { $0.reason == "pose default" }) {
             return "Export bloqueado: M\(defaultPoseMarker.markerId) com pose default"
         }
 
-        if let fallbackMarker = markerValidations.first(where: { $0.reason == "fallback dominante" }) {
-            return "Export bloqueado: M\(fallbackMarker.markerId) dominado por fallback"
-        }
-
         guard !expectedMarkerIds.isEmpty else {
-            return markerValidations.contains(where: \.isExportable) ? nil : "Export bloqueado: sem poses exportaveis"
+            if markerValidations.contains(where: \.isExportable) {
+                return nil
+            }
+
+            if let invalidMarker = markerValidations.first(where: { !$0.isExportable }) {
+                return "Export bloqueado: M\(invalidMarker.markerId) invalido: \(invalidMarker.reason ?? "desconhecido")"
+            }
+
+            return "Export bloqueado: sem poses exportaveis"
         }
 
         if exportableCount != expectedMarkerIds.count {
@@ -6397,11 +6500,13 @@ final class ScannerViewModel: ObservableObject {
             missingMarkerIds: exportGateMissingMarkerIds.isEmpty ? nil : exportGateMissingMarkerIds,
             invalidMarkerIds: exportGateInvalidMarkerIds.isEmpty ? nil : exportGateInvalidMarkerIds,
             exportBlockedReason: exportGateBlockedReason,
+            exportGateProfile: exportGateMarkerProfile.rawValue,
             markerExportValidations: exportGateMarkerValidations
                 .sorted { $0.markerId < $1.markerId }
                 .map {
                     ScanTechnicalReport.MarkerExportValidation(
                         markerId: $0.markerId,
+                        exportGateProfile: exportGateMarkerProfile.rawValue,
                         isExportable: $0.isExportable,
                         reason: $0.reason
                     )

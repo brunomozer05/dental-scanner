@@ -13,6 +13,7 @@ struct ScanTechnicalReport: Codable {
     var missingMarkerIds: [Int]?
     var invalidMarkerIds: [Int]?
     var exportBlockedReason: String?
+    var exportGateProfile: String?
     var markerExportValidations: [MarkerExportValidation]?
     var scanConfiguration: ScanConfiguration?
 
@@ -56,6 +57,7 @@ struct ScanTechnicalReport: Codable {
 
     struct MarkerExportValidation: Codable {
         var markerId: Int
+        var exportGateProfile: String?
         var isExportable: Bool
         var reason: String?
     }

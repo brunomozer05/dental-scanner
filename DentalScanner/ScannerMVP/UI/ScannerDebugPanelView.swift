@@ -83,6 +83,7 @@ struct ScannerDebugPanelView: View {
                     }
 
                     debugSection(title: "Export gate") {
+                        debugRow(title: "Perfil gate", value: snapshot.exportGate.profile)
                         debugRow(title: "Scan confidence", value: snapshot.exportGate.scanConfidence)
                         debugRow(title: "Markers exportaveis", value: snapshot.exportGate.markerCountSummary)
                         debugRow(title: "Expected markers", value: snapshot.exportGate.expectedMarkerCount)

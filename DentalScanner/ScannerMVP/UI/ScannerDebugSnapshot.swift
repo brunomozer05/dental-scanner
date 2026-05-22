@@ -152,6 +152,7 @@ struct ScannerDebugSnapshot: Equatable {
     }
 
     struct ExportGateSection: Equatable {
+        let profile: String
         let scanConfidence: String
         let expectedMarkerCount: String
         let exportableMarkerCount: String
@@ -296,6 +297,7 @@ extension ScannerViewModel {
                 penalizedByARKit: "\(scanFinalPenalizedByARKitCount)"
             ),
             exportGate: ScannerDebugSnapshot.ExportGateSection(
+                profile: exportGateMarkerProfile.debugTitle,
                 scanConfidence: debugString(scanFinalConfidenceSummary),
                 expectedMarkerCount: exportGateExpectedMarkerCount > 0
                     ? "\(exportGateExpectedMarkerCount)"
