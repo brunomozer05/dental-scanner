@@ -70,6 +70,51 @@ enum FocusRecoveryState: String, Equatable {
     }
 }
 
+enum GuidedStaticCaptureStage: Int, CaseIterable {
+    case frontal = 0
+    case esquerda = 1
+    case direita = 2
+    case superior = 3
+
+    var displayName: String {
+        switch self {
+        case .frontal:
+            return "frontal"
+        case .esquerda:
+            return "esquerda"
+        case .direita:
+            return "direita"
+        case .superior:
+            return "superior"
+        }
+    }
+}
+
+struct GuidedStaticStageSnapshot: Equatable, Identifiable {
+    let stageIndex: Int
+    let stageName: String
+    var framesAccepted: Int
+    var framesRejectedByFocus: Int
+    var framesRejectedByMotion: Int
+    var framesRejectedByNormal: Int
+    var framesRejectedByReprojection: Int
+    var markersSeen: [Int]
+    var markersAccepted: [Int]
+    var normalStdDegreesMean: Double?
+    var isCompleted: Bool
+
+    var id: Int {
+        stageIndex
+    }
+}
+
+private enum GuidedStaticRejectionReason {
+    case focus
+    case motion
+    case normal
+    case reprojection
+}
+
 final class ScannerViewModel: ObservableObject {
     private enum OverlayStabilization {
         static let timeout: Double = 0.35
@@ -121,6 +166,19 @@ final class ScannerViewModel: ObservableObject {
         static let minimumArucoFocusTargetConfidence: Double = 0.35
         static let minimumSecondsBetweenArucoFocusRequests: Double = 2.0
         static let arucoFocusRecoveryDelaySeconds: Double = 0.75
+    }
+
+    private enum GuidedStaticCaptureConfiguration {
+        static let requiredStagesRange: ClosedRange<Int> = 3...4
+        static let framesPerStageRange: ClosedRange<Int> = 10...60
+        static let framesPerStageStep: Int = 5
+        static let defaultRequiredStages: Int = 3
+        static let defaultFramesPerStage: Int = 30
+        static let defaultMinStableTimeSeconds: Double = 0.5
+        static let defaultMaxNormalStdDegreesPerStage: Double = 5.0
+        static let requireAllMarkersPerStageDefault = false
+        static let minimumMotionStabilityScore: Double = 0.80
+        static let hardRejectImageEdgeMargin: Double = 0.06
     }
 
     private struct MarkerImagePositionDiagnostics {
@@ -569,6 +627,28 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var centerFocusRecoveryCount: Int = 0
     @Published private(set) var distanceGuideStateTitle: String = "Sem marker confiavel"
     @Published private(set) var lastDistanceGuideDistanceMm: Double?
+    @Published private(set) var guidedStaticCaptureEnabled: Bool = false
+    @Published private(set) var guidedStaticRequiredStages: Int =
+        GuidedStaticCaptureConfiguration.defaultRequiredStages
+    @Published private(set) var guidedStaticFramesPerStage: Int =
+        GuidedStaticCaptureConfiguration.defaultFramesPerStage
+    @Published private(set) var guidedStaticMinStableTimeSeconds: Double =
+        GuidedStaticCaptureConfiguration.defaultMinStableTimeSeconds
+    @Published private(set) var guidedStaticMaxNormalStdDegreesPerStage: Double =
+        GuidedStaticCaptureConfiguration.defaultMaxNormalStdDegreesPerStage
+    @Published private(set) var guidedStaticRequireAllMarkersPerStage: Bool =
+        GuidedStaticCaptureConfiguration.requireAllMarkersPerStageDefault
+    @Published private(set) var guidedStaticCurrentStageIndex: Int = 0
+    @Published private(set) var guidedStaticStageState: String = "desligado"
+    @Published private(set) var guidedStaticStageSnapshots: [GuidedStaticStageSnapshot] =
+        ScannerViewModel.makeInitialGuidedStaticStageSnapshots(
+            requiredStages: GuidedStaticCaptureConfiguration.defaultRequiredStages
+        )
+    @Published private(set) var guidedStaticCompletedStageCount: Int = 0
+    @Published private(set) var guidedStaticFramesRejectedByFocus: Int = 0
+    @Published private(set) var guidedStaticFramesRejectedByMotion: Int = 0
+    @Published private(set) var guidedStaticFramesRejectedByNormal: Int = 0
+    @Published private(set) var guidedStaticFramesRejectedByReprojection: Int = 0
     @Published private(set) var staticPoseStabilityMode: Bool = false
     @Published private(set) var staticPoseStabilityWindowSeconds: Double =
         StaticPoseStabilityConfiguration.windowSeconds
@@ -660,6 +740,8 @@ final class ScannerViewModel: ObservableObject {
     private var scanCameraDiagnosticsBaseline: CameraDiagnosticsBaseline?
     private var arucoFocusSettleUntilTimestamp: Double?
     private var didCountCurrentArucoLoss = false
+    private var guidedStaticAcceptedObservationsByStage: [Int: [FinalPoseObservation]] = [:]
+    private var guidedStaticStageStableStartTimestamp: Double?
     private var lastExportDiagnosticsUpdateTimestamp: Double?
     private var lastFinalObservationDiagnosticsUpdateTimestamp: Double?
     private var lastStaticPoseDiagnosticsUpdateTimestamp: Double?
@@ -785,6 +867,18 @@ final class ScannerViewModel: ObservableObject {
 
     var arucoFocusCooldownSeconds: Double {
         CameraDiagnosticsConfiguration.minimumSecondsBetweenArucoFocusRequests
+    }
+
+    var guidedStaticRequiredStagesRange: ClosedRange<Int> {
+        GuidedStaticCaptureConfiguration.requiredStagesRange
+    }
+
+    var guidedStaticFramesPerStageRange: ClosedRange<Int> {
+        GuidedStaticCaptureConfiguration.framesPerStageRange
+    }
+
+    var guidedStaticFramesPerStageStep: Int {
+        GuidedStaticCaptureConfiguration.framesPerStageStep
     }
 
     var scanTargetGoodFrameCount: Int {
@@ -1216,6 +1310,43 @@ final class ScannerViewModel: ObservableObject {
     @MainActor
     func setLockAfterArucoFocus(_ isEnabled: Bool) {
         lockAfterArucoFocus = isEnabled
+    }
+
+    @MainActor
+    func setGuidedStaticCaptureEnabled(_ isEnabled: Bool) {
+        guard guidedStaticCaptureEnabled != isEnabled else {
+            return
+        }
+
+        guidedStaticCaptureEnabled = isEnabled
+        resetGuidedStaticCaptureState()
+        resetScanSession()
+    }
+
+    @MainActor
+    func setGuidedStaticRequiredStages(_ value: Int) {
+        let clampedValue = min(
+            max(value, GuidedStaticCaptureConfiguration.requiredStagesRange.lowerBound),
+            GuidedStaticCaptureConfiguration.requiredStagesRange.upperBound
+        )
+        guard guidedStaticRequiredStages != clampedValue else {
+            return
+        }
+
+        guidedStaticRequiredStages = clampedValue
+        resetGuidedStaticCaptureState()
+        resetScanSession()
+    }
+
+    @MainActor
+    func setGuidedStaticFramesPerStage(_ value: Int) {
+        let clampedValue = min(
+            max(value, GuidedStaticCaptureConfiguration.framesPerStageRange.lowerBound),
+            GuidedStaticCaptureConfiguration.framesPerStageRange.upperBound
+        )
+        guidedStaticFramesPerStage = clampedValue
+        resetGuidedStaticCaptureState()
+        resetScanSession()
     }
 
     @MainActor
@@ -1928,6 +2059,7 @@ final class ScannerViewModel: ObservableObject {
                     finalPoseObservations: frameFinalPoseObservations,
                     dualTagRejectionReasons: poseMetrics.dualTagRejectionReasons,
                     cameraQuality: frame.cameraQuality,
+                    motionQuality: motionQuality,
                     arKitQuality: arKitQuality,
                     hasIntrinsics: frame.metadata.intrinsicMatrix != nil,
                     timestamp: metrics.lastFrameTimestamp,
@@ -1935,6 +2067,49 @@ final class ScannerViewModel: ObservableObject {
                 )
             }
         }
+    }
+
+    private static func makeInitialGuidedStaticStageSnapshots(
+        requiredStages: Int
+    ) -> [GuidedStaticStageSnapshot] {
+        let safeStageCount = min(
+            max(requiredStages, GuidedStaticCaptureConfiguration.requiredStagesRange.lowerBound),
+            GuidedStaticCaptureConfiguration.requiredStagesRange.upperBound
+        )
+
+        return GuidedStaticCaptureStage.allCases
+            .prefix(safeStageCount)
+            .map {
+                GuidedStaticStageSnapshot(
+                    stageIndex: $0.rawValue,
+                    stageName: $0.displayName,
+                    framesAccepted: 0,
+                    framesRejectedByFocus: 0,
+                    framesRejectedByMotion: 0,
+                    framesRejectedByNormal: 0,
+                    framesRejectedByReprojection: 0,
+                    markersSeen: [],
+                    markersAccepted: [],
+                    normalStdDegreesMean: nil,
+                    isCompleted: false
+                )
+            }
+    }
+
+    @MainActor
+    private func resetGuidedStaticCaptureState() {
+        guidedStaticCurrentStageIndex = 0
+        guidedStaticCompletedStageCount = 0
+        guidedStaticStageStableStartTimestamp = nil
+        guidedStaticAcceptedObservationsByStage = [:]
+        guidedStaticFramesRejectedByFocus = 0
+        guidedStaticFramesRejectedByMotion = 0
+        guidedStaticFramesRejectedByNormal = 0
+        guidedStaticFramesRejectedByReprojection = 0
+        guidedStaticStageState = guidedStaticCaptureEnabled ? "aguardando foco" : "desligado"
+        guidedStaticStageSnapshots = Self.makeInitialGuidedStaticStageSnapshots(
+            requiredStages: guidedStaticRequiredStages
+        )
     }
 
     @MainActor
@@ -2075,6 +2250,7 @@ final class ScannerViewModel: ObservableObject {
         scanReadinessStableStartTimestamp = nil
         scanCurrentFrameIsGood = false
         scanCurrentFrameReadinessBlocker = nil
+        resetGuidedStaticCaptureState()
         resetPrecisionValidationHistory()
         finalPoseObservations = []
         finalObservationDiagnosticsByMarkerId = [:]
@@ -2107,6 +2283,7 @@ final class ScannerViewModel: ObservableObject {
         finalPoseObservations: [FinalPoseObservation],
         dualTagRejectionReasons: [Int: String],
         cameraQuality: CameraFrameQuality,
+        motionQuality: MotionFrameQuality,
         arKitQuality: ARKitFrameQuality,
         hasIntrinsics: Bool,
         timestamp: Double,
@@ -2128,6 +2305,10 @@ final class ScannerViewModel: ObservableObject {
             cameraQuality,
             hasIntrinsics: hasIntrinsics
         ) {
+            if guidedStaticCaptureEnabled {
+                recordGuidedStaticRejectedFrame(reason: .focus)
+                guidedStaticStageState = "aguardando foco"
+            }
             rebuildScanTagCoverages()
             scanCurrentFrameIsGood = false
             scanCurrentFrameReadinessBlocker = cameraBlocker
@@ -2153,6 +2334,10 @@ final class ScannerViewModel: ObservableObject {
         guard !goodPoseResults.isEmpty,
               let goodFrameReprojectionError = averageReprojectionError(in: goodPoseResults)
         else {
+            if guidedStaticCaptureEnabled {
+                recordGuidedStaticRejectedFrame(reason: .reprojection)
+                guidedStaticStageState = "aguardando marker"
+            }
             rebuildScanTagCoverages()
             scanCurrentFrameIsGood = false
             scanCurrentFrameReadinessBlocker = scanReadinessBlockerMessage(
@@ -2175,13 +2360,33 @@ final class ScannerViewModel: ObservableObject {
         let goodFinalPoseObservations = finalPoseObservations.filter {
             goodMarkerIds.contains($0.markerId)
         }
-        if goodFinalPoseObservations.contains(where: {
+        let acceptedFinalPoseObservations: [FinalPoseObservation]
+        if guidedStaticCaptureEnabled {
+            guard let guidedAcceptance = recordGuidedStaticFrameIfAccepted(
+                goodPoseResults: goodPoseResults,
+                finalPoseObservations: goodFinalPoseObservations,
+                cameraQuality: cameraQuality,
+                motionQuality: motionQuality,
+                frameReprojectionError: goodFrameReprojectionError,
+                timestamp: timestamp
+            ) else {
+                updateScanProgressAndState(
+                    timestamp: timestamp
+                )
+                return
+            }
+            acceptedFinalPoseObservations = guidedAcceptance
+        } else {
+            acceptedFinalPoseObservations = goodFinalPoseObservations
+        }
+
+        if acceptedFinalPoseObservations.contains(where: {
             ($0.motionQuality?.stabilityScore ?? 1.0) < 0.999
         }) {
             scanMotionPenalizedFrameCount += 1
         }
         scanValidFrameCount += 1
-        self.finalPoseObservations.append(contentsOf: goodFinalPoseObservations)
+        self.finalPoseObservations.append(contentsOf: acceptedFinalPoseObservations)
         trimFinalPoseObservationBuffer()
         recordDualArucoV2RejectionReasons(dualTagRejectionReasons)
         updateFinalObservationDiagnosticsIfNeeded(timestamp: timestamp)
@@ -2190,7 +2395,7 @@ final class ScannerViewModel: ObservableObject {
 
         recordAngularCoverage(from: goodPoseResults)
         recordDualArucoV2PoseSourceFrames(from: goodPoseResults)
-        recordDualArucoV2ImageEdgeFrames(from: goodFinalPoseObservations)
+        recordDualArucoV2ImageEdgeFrames(from: acceptedFinalPoseObservations)
 
         let goodConsolidatedPoseResults = consolidatedPoseResults.filter {
             goodMarkerIds.contains($0.markerId)
@@ -2222,6 +2427,262 @@ final class ScannerViewModel: ObservableObject {
         }
 
         return quality.scanRejectionReason
+    }
+
+    @MainActor
+    private func recordGuidedStaticFrameIfAccepted(
+        goodPoseResults: [PoseResult],
+        finalPoseObservations: [FinalPoseObservation],
+        cameraQuality: CameraFrameQuality,
+        motionQuality: MotionFrameQuality,
+        frameReprojectionError: Double,
+        timestamp: Double
+    ) -> [FinalPoseObservation]? {
+        guard guidedStaticCaptureEnabled else {
+            return finalPoseObservations
+        }
+
+        guard let stageSnapshot = currentGuidedStaticStageSnapshot else {
+            guidedStaticStageState = "concluida"
+            return nil
+        }
+
+        let stageIndex = stageSnapshot.stageIndex
+        recordGuidedStaticMarkersSeen(
+            markerIds: goodPoseResults.map(\.markerId),
+            stageIndex: stageIndex
+        )
+
+        guard !finalPoseObservations.isEmpty else {
+            recordGuidedStaticRejectedFrame(reason: .reprojection)
+            guidedStaticStageState = "aguardando marker"
+            return nil
+        }
+
+        if guidedStaticRequireAllMarkersPerStage {
+            let expectedMarkerIds = expectedExportMarkerIds(for: markerProfile)
+            let seenMarkerIds = Set(goodPoseResults.map(\.markerId))
+            guard expectedMarkerIds.allSatisfy({ seenMarkerIds.contains($0) }) else {
+                recordGuidedStaticRejectedFrame(reason: .reprojection)
+                guidedStaticStageState = "aguardando markers"
+                return nil
+            }
+        }
+
+        if !cameraQuality.isFocusStable || !cameraQuality.isSharpnessAcceptable {
+            recordGuidedStaticRejectedFrame(reason: .focus)
+            guidedStaticStageState = "aguardando foco"
+            guidedStaticStageStableStartTimestamp = nil
+            return nil
+        }
+
+        if motionQuality.isRecent,
+           (!motionQuality.isStable ||
+            motionQuality.stabilityScore < GuidedStaticCaptureConfiguration.minimumMotionStabilityScore) {
+            recordGuidedStaticRejectedFrame(reason: .motion)
+            guidedStaticStageState = "aguardando estabilidade"
+            guidedStaticStageStableStartTimestamp = nil
+            return nil
+        }
+
+        guard frameReprojectionError.isFinite,
+              frameReprojectionError <= scanReadinessConfiguration.maximumAverageReprojectionError
+        else {
+            recordGuidedStaticRejectedFrame(reason: .reprojection)
+            guidedStaticStageState = "reprojection alto"
+            return nil
+        }
+
+        if finalPoseObservations.contains(where: isGuidedStaticObservationTooCloseToEdge) {
+            recordGuidedStaticRejectedFrame(reason: .reprojection)
+            guidedStaticStageState = "marker na borda"
+            return nil
+        }
+
+        if let stableStartTimestamp = guidedStaticStageStableStartTimestamp {
+            let stableDuration = timestamp - stableStartTimestamp
+            guard stableDuration.isFinite,
+                  stableDuration >= guidedStaticMinStableTimeSeconds
+            else {
+                recordGuidedStaticRejectedFrame(reason: .motion)
+                guidedStaticStageState = "aguardando estabilidade"
+                return nil
+            }
+        } else {
+            guidedStaticStageStableStartTimestamp = timestamp
+            guidedStaticStageState = "aguardando estabilidade"
+            return nil
+        }
+
+        let existingStageObservations = guidedStaticAcceptedObservationsByStage[stageIndex] ?? []
+        let candidateObservations = existingStageObservations + finalPoseObservations
+        let normalStdDegreesMean = guidedStaticNormalStdDegreesMean(in: candidateObservations)
+        if stageSnapshot.framesAccepted >= 3,
+           let normalStdDegreesMean,
+           normalStdDegreesMean > guidedStaticMaxNormalStdDegreesPerStage {
+            recordGuidedStaticRejectedFrame(reason: .normal)
+            guidedStaticStageState = "normal instavel"
+            return nil
+        }
+
+        guidedStaticAcceptedObservationsByStage[stageIndex] = candidateObservations
+        updateGuidedStaticStage(stageIndex: stageIndex) { stage in
+            stage.framesAccepted += 1
+            stage.markersAccepted = Self.sortedUnique(stage.markersAccepted + finalPoseObservations.map(\.markerId))
+            stage.normalStdDegreesMean = normalStdDegreesMean
+            if stage.framesAccepted >= guidedStaticFramesPerStage {
+                stage.isCompleted = true
+            }
+        }
+        guidedStaticCompletedStageCount = guidedStaticStageSnapshots.filter(\.isCompleted).count
+
+        if guidedStaticStageSnapshots.first(where: { $0.stageIndex == stageIndex })?.isCompleted == true {
+            guidedStaticCurrentStageIndex = min(stageIndex + 1, guidedStaticRequiredStages)
+            guidedStaticStageStableStartTimestamp = nil
+            guidedStaticStageState = guidedStaticCompletedStageCount >= guidedStaticRequiredStages
+                ? "concluida"
+                : "aguardando foco"
+        } else {
+            guidedStaticStageState = "coletando"
+        }
+
+        return finalPoseObservations
+    }
+
+    @MainActor
+    private func recordGuidedStaticRejectedFrame(reason: GuidedStaticRejectionReason) {
+        switch reason {
+        case .focus:
+            guidedStaticFramesRejectedByFocus += 1
+        case .motion:
+            guidedStaticFramesRejectedByMotion += 1
+        case .normal:
+            guidedStaticFramesRejectedByNormal += 1
+        case .reprojection:
+            guidedStaticFramesRejectedByReprojection += 1
+        }
+
+        guard let stageIndex = currentGuidedStaticStageSnapshot?.stageIndex else {
+            return
+        }
+
+        updateGuidedStaticStage(stageIndex: stageIndex) { stage in
+            switch reason {
+            case .focus:
+                stage.framesRejectedByFocus += 1
+            case .motion:
+                stage.framesRejectedByMotion += 1
+            case .normal:
+                stage.framesRejectedByNormal += 1
+            case .reprojection:
+                stage.framesRejectedByReprojection += 1
+            }
+        }
+    }
+
+    @MainActor
+    private func recordGuidedStaticMarkersSeen(markerIds: [Int], stageIndex: Int) {
+        updateGuidedStaticStage(stageIndex: stageIndex) { stage in
+            stage.markersSeen = Self.sortedUnique(stage.markersSeen + markerIds)
+        }
+    }
+
+    @MainActor
+    private func updateGuidedStaticStage(
+        stageIndex: Int,
+        mutate: (inout GuidedStaticStageSnapshot) -> Void
+    ) {
+        guard let index = guidedStaticStageSnapshots.firstIndex(where: { $0.stageIndex == stageIndex }) else {
+            return
+        }
+
+        var stage = guidedStaticStageSnapshots[index]
+        mutate(&stage)
+        stage.markersSeen = Self.sortedUnique(stage.markersSeen)
+        stage.markersAccepted = Self.sortedUnique(stage.markersAccepted)
+        guidedStaticStageSnapshots[index] = stage
+    }
+
+    private var currentGuidedStaticStageSnapshot: GuidedStaticStageSnapshot? {
+        guidedStaticStageSnapshots.first {
+            $0.stageIndex == guidedStaticCurrentStageIndex && !$0.isCompleted
+        }
+    }
+
+    private static func sortedUnique(_ values: [Int]) -> [Int] {
+        Array(Set(values)).sorted()
+    }
+
+    private func isGuidedStaticObservationTooCloseToEdge(_ observation: FinalPoseObservation) -> Bool {
+        guard let center = normalizedImageCenter(for: observation) else {
+            return false
+        }
+
+        let margin = Double(
+            min(center.x, 1.0 - center.x, center.y, 1.0 - center.y)
+        )
+        return margin.isFinite &&
+            margin < GuidedStaticCaptureConfiguration.hardRejectImageEdgeMargin
+    }
+
+    private func normalizedImageCenter(for observation: FinalPoseObservation) -> CGPoint? {
+        guard observation.frameSizePixels.width > 0,
+              observation.frameSizePixels.height > 0,
+              !observation.imagePoints.isEmpty
+        else {
+            return nil
+        }
+
+        let sum = observation.imagePoints.reduce(CGPoint.zero) { partialResult, point in
+            CGPoint(
+                x: partialResult.x + point.x,
+                y: partialResult.y + point.y
+            )
+        }
+        let count = CGFloat(observation.imagePoints.count)
+        let center = CGPoint(x: sum.x / count, y: sum.y / count)
+        let normalized = CGPoint(
+            x: center.x / observation.frameSizePixels.width,
+            y: center.y / observation.frameSizePixels.height
+        )
+        guard normalized.x.isFinite,
+              normalized.y.isFinite
+        else {
+            return nil
+        }
+
+        return normalized
+    }
+
+    private func guidedStaticNormalStdDegreesMean(in observations: [FinalPoseObservation]) -> Double? {
+        let observationsByMarkerId = Dictionary(grouping: observations, by: \.markerId)
+        let markerStdValues = observationsByMarkerId.values.compactMap {
+            normalStdDegrees(in: $0)
+        }
+
+        guard !markerStdValues.isEmpty else {
+            return nil
+        }
+
+        return markerStdValues.reduce(0.0, +) / Double(markerStdValues.count)
+    }
+
+    private func normalStdDegrees(in observations: [FinalPoseObservation]) -> Double? {
+        let normals = observations.compactMap {
+            markerNormal(for: $0.rotationMatrix)
+        }
+        guard normals.count >= 2,
+              let averageNormal = averageNormal(normals)
+        else {
+            return nil
+        }
+
+        let squaredAngles = normals.map {
+            pow(normalAngularDistanceDegrees($0, averageNormal), 2.0)
+        }
+        let variance = squaredAngles.reduce(0.0, +) / Double(squaredAngles.count)
+        let std = sqrt(max(variance, 0.0))
+        return std.isFinite ? std : nil
     }
 
     @MainActor
@@ -2892,6 +3353,19 @@ final class ScannerViewModel: ObservableObject {
             return
         }
 
+        if guidedStaticCaptureEnabled && !evaluation.hasGuidedStaticStagesReady {
+            let nextScanState: ScanState = scanValidFrameCount >= minimumStabilizingFrameCount
+                ? .stabilizing
+                : .scanning
+            setScanState(nextScanState)
+            scanProgress = min(guidedStaticOverallProgress() * 100.0, 99)
+            scanReadinessMessage = guidedStaticReadinessMessage()
+            scanQualityStatus = scanReadinessMessage
+            scanReadinessBlockerSummary = "Bloqueio principal: captura guiada"
+            updateExportDiagnosticsIfNeeded(timestamp: timestamp)
+            return
+        }
+
         if isReady {
             setScanState(.ready)
             scanProgress = 100
@@ -2969,6 +3443,42 @@ final class ScannerViewModel: ObservableObject {
         max(3, scanTargetValidFrameCount / 2)
     }
 
+    private func guidedStaticOverallProgress() -> Double {
+        guard guidedStaticCaptureEnabled,
+              guidedStaticRequiredStages > 0,
+              guidedStaticFramesPerStage > 0
+        else {
+            return 0
+        }
+
+        let acceptedFrameCount = guidedStaticStageSnapshots
+            .prefix(guidedStaticRequiredStages)
+            .map(\.framesAccepted)
+            .reduce(0, +)
+        let targetFrameCount = guidedStaticRequiredStages * guidedStaticFramesPerStage
+        guard targetFrameCount > 0 else {
+            return 0
+        }
+
+        return min(max(Double(acceptedFrameCount) / Double(targetFrameCount), 0.0), 1.0)
+    }
+
+    private func guidedStaticReadinessMessage() -> String {
+        guard guidedStaticCaptureEnabled else {
+            return "Captura livre"
+        }
+
+        if guidedStaticCompletedStageCount >= guidedStaticRequiredStages {
+            return "Captura guiada concluida"
+        }
+
+        guard let stage = currentGuidedStaticStageSnapshot else {
+            return "Captura guiada concluida"
+        }
+
+        return "Etapa \(stage.stageName): \(guidedStaticStageState) \(stage.framesAccepted)/\(guidedStaticFramesPerStage)"
+    }
+
     private var hasCompleteTagCoverage: Bool {
         !activeTagCoverages.isEmpty &&
             activeTagCoverages.allSatisfy {
@@ -3044,6 +3554,8 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private func scanReadinessEvaluation() -> ScanReadinessEvaluation {
+        let hasGuidedStaticStagesReady = !guidedStaticCaptureEnabled ||
+            guidedStaticCompletedStageCount >= guidedStaticRequiredStages
         let hasTags = !observedTagCoverages.isEmpty
         let hasEnoughGoodFrames = scanValidFrameCount >= scanMinimumGoodFrameCount
         let hasPerTagGoodFrames = hasTags && activeTagCoverages.allSatisfy {
@@ -3059,9 +3571,11 @@ final class ScannerViewModel: ObservableObject {
         let hasExportableTagPoses = cachedExportGateIsPassing
         let hasMinimumDualTagFrames = hasMinimumDualTagFramesPerMarker()
         let hasMinimumDualAngularCoverage = hasMinimumDualAngularCoveragePerMarker()
+        let hasCurrentGoodFrame = scanCurrentFrameIsGood ||
+            (guidedStaticCaptureEnabled && hasGuidedStaticStagesReady)
 
         return ScanReadinessEvaluation(
-            hasCurrentGoodFrame: scanCurrentFrameIsGood,
+            hasCurrentGoodFrame: hasCurrentGoodFrame,
             hasTags: hasTags,
             hasCompleteTagCoverage: hasCompleteTagCoverage,
             hasEnoughGoodFrames: hasEnoughGoodFrames,
@@ -3072,7 +3586,8 @@ final class ScannerViewModel: ObservableObject {
             hasAcceptableReprojectionError: hasAcceptableReprojectionError,
             hasStablePosition: hasStablePosition,
             hasStableRotation: hasStableRotation,
-            hasExportableTagPoses: hasExportableTagPoses
+            hasExportableTagPoses: hasExportableTagPoses,
+            hasGuidedStaticStagesReady: hasGuidedStaticStagesReady
         )
     }
 
@@ -3137,6 +3652,10 @@ final class ScannerViewModel: ObservableObject {
 
         if !evaluation.hasEnoughGoodFrames || !evaluation.hasPerTagGoodFrames {
             return "Colete mais frames bons"
+        }
+
+        if !evaluation.hasGuidedStaticStagesReady {
+            return guidedStaticReadinessMessage()
         }
 
         if !evaluation.hasAcceptableReprojectionError {
@@ -3214,6 +3733,10 @@ final class ScannerViewModel: ObservableObject {
 
         if !evaluation.hasEnoughGoodFrames || !evaluation.hasPerTagGoodFrames {
             return "Bloqueio principal: frames bons"
+        }
+
+        if !evaluation.hasGuidedStaticStagesReady {
+            return "Bloqueio principal: captura guiada"
         }
 
         if !evaluation.hasAcceptableReprojectionError {
@@ -7258,7 +7781,27 @@ final class ScannerViewModel: ObservableObject {
             centerFocusRecoveryCount: centerFocusRecoveryCount,
             distanceGuideState: distanceGuideStateTitle,
             lastDistanceMm: finiteReportDouble(lastDistanceGuideDistanceMm ?? poseDistanceMm),
-            tagAreaPixelsMean: finiteReportDouble(averageTagAreaPixelsForReport())
+            tagAreaPixelsMean: finiteReportDouble(averageTagAreaPixelsForReport()),
+            guidedStaticCaptureEnabled: guidedStaticCaptureEnabled,
+            guidedStaticStages: guidedStaticCaptureEnabled
+                ? guidedStaticStageSnapshots.map(technicalReportGuidedStaticStage)
+                : nil
+        )
+    }
+
+    private func technicalReportGuidedStaticStage(
+        _ stage: GuidedStaticStageSnapshot
+    ) -> ScanTechnicalReport.GuidedStaticStage {
+        ScanTechnicalReport.GuidedStaticStage(
+            stageName: stage.stageName,
+            framesAccepted: stage.framesAccepted,
+            framesRejectedByFocus: stage.framesRejectedByFocus,
+            framesRejectedByMotion: stage.framesRejectedByMotion,
+            framesRejectedByNormal: stage.framesRejectedByNormal,
+            framesRejectedByReprojection: stage.framesRejectedByReprojection,
+            markersSeen: stage.markersSeen.isEmpty ? nil : stage.markersSeen,
+            markersAccepted: stage.markersAccepted.isEmpty ? nil : stage.markersAccepted,
+            normalStdDegreesMean: finiteReportDouble(stage.normalStdDegreesMean)
         )
     }
 
@@ -7285,6 +7828,14 @@ final class ScannerViewModel: ObservableObject {
             lockFocusAndExposureForScan: lockFocusAndExposureForScan,
             autoFocusOnDetectedAruco: autoFocusOnDetectedAruco,
             lockAfterArucoFocus: lockAfterArucoFocus,
+            guidedStaticCaptureEnabled: guidedStaticCaptureEnabled,
+            guidedStaticRequiredStages: guidedStaticRequiredStages,
+            guidedStaticFramesPerStage: guidedStaticFramesPerStage,
+            guidedStaticMinStableTimeSeconds: finiteReportDouble(guidedStaticMinStableTimeSeconds),
+            guidedStaticMaxNormalStdDegreesPerStage: finiteReportDouble(
+                guidedStaticMaxNormalStdDegreesPerStage
+            ),
+            guidedStaticRequireAllMarkersPerStage: guidedStaticRequireAllMarkersPerStage,
             minimumAllowedSharpness: finiteReportDouble(minimumAllowedSharpness),
             minimumPreferredSharpness: finiteReportDouble(minimumPreferredSharpness),
             lensPositionChangeThreshold: finiteReportDouble(cameraLensPositionChangeThreshold),
@@ -7472,6 +8023,7 @@ final class ScannerViewModel: ObservableObject {
         let hasStablePosition: Bool
         let hasStableRotation: Bool
         let hasExportableTagPoses: Bool
+        let hasGuidedStaticStagesReady: Bool
 
         var isReadyCandidate: Bool {
             hasCurrentGoodFrame &&
@@ -7485,7 +8037,8 @@ final class ScannerViewModel: ObservableObject {
                 hasAcceptableReprojectionError &&
                 hasStablePosition &&
                 hasStableRotation &&
-                hasExportableTagPoses
+                hasExportableTagPoses &&
+                hasGuidedStaticStagesReady
         }
     }
 

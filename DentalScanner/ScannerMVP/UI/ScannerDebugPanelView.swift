@@ -23,6 +23,9 @@ struct ScannerDebugPanelView: View {
     let cameraZoomFactorStep: Double
     let manualLensPositionRange: ClosedRange<Double>
     let manualLensPositionStep: Double
+    let guidedStaticRequiredStagesRange: ClosedRange<Int>
+    let guidedStaticFramesPerStageRange: ClosedRange<Int>
+    let guidedStaticFramesPerStageStep: Int
     @Binding var markerProfile: MarkerProfile
     @Binding var requiredCoveragePercent: Double
     @Binding var minimumGoodFrames: Int
@@ -40,6 +43,9 @@ struct ScannerDebugPanelView: View {
     @Binding var autoFocusOnDetectedAruco: Bool
     @Binding var lockAfterArucoFocus: Bool
     @Binding var arkitAssistedCaptureEnabled: Bool
+    @Binding var guidedStaticCaptureEnabled: Bool
+    @Binding var guidedStaticRequiredStages: Int
+    @Binding var guidedStaticFramesPerStage: Int
     @Binding var lensPositionChangeThreshold: Double
     @Binding var focusSettleTimeSeconds: Double
     @Binding var minimumAllowedSharpness: Double
@@ -116,6 +122,36 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "currentFrameGood", value: snapshot.readiness.currentFrameGood)
                         debugRow(title: "dualTagReady", value: snapshot.readiness.dualTagReady)
                         debugRow(title: "dualAngularReady", value: snapshot.readiness.dualAngularReady)
+                    }
+
+                    debugSection(title: "Guided Static Capture") {
+                        debugRow(title: "Ligado", value: snapshot.guidedStatic.enabled)
+                        debugRow(title: "Etapa atual", value: snapshot.guidedStatic.currentStage)
+                        debugRow(title: "Progresso etapa", value: snapshot.guidedStatic.stageProgress)
+                        debugRow(title: "Estado etapa", value: snapshot.guidedStatic.stageState)
+                        debugRow(title: "Etapas concluidas", value: snapshot.guidedStatic.completedStages)
+                        debugRow(title: "Etapas exigidas", value: snapshot.guidedStatic.requiredStages)
+                        debugRow(title: "Frames por etapa", value: snapshot.guidedStatic.framesPerStage)
+                        debugRow(title: "Tempo estavel min", value: snapshot.guidedStatic.minStableTime)
+                        debugRow(title: "Normal std max", value: snapshot.guidedStatic.maxNormalStdDegrees)
+                        debugRow(title: "Exigir todos markers", value: snapshot.guidedStatic.requireAllMarkersPerStage)
+                        debugRow(title: "Rejeitados foco", value: snapshot.guidedStatic.framesRejectedByFocus)
+                        debugRow(title: "Rejeitados motion", value: snapshot.guidedStatic.framesRejectedByMotion)
+                        debugRow(title: "Rejeitados normal", value: snapshot.guidedStatic.framesRejectedByNormal)
+                        debugRow(title: "Rejeitados reproj", value: snapshot.guidedStatic.framesRejectedByReprojection)
+                        debugRow(title: "Markers vistos etapa", value: snapshot.guidedStatic.markersSeenThisStage)
+                        debugRow(title: "Markers aceitos etapa", value: snapshot.guidedStatic.markersAcceptedThisStage)
+
+                        if snapshot.guidedStaticStageRows.isEmpty {
+                            debugRow(title: "Etapas", value: "Sem etapas")
+                        } else {
+                            ForEach(snapshot.guidedStaticStageRows) { stage in
+                                debugRow(
+                                    title: stage.stageName,
+                                    value: "\(stage.status) | aceitos \(stage.framesAccepted) | foco \(stage.framesRejectedByFocus), motion \(stage.framesRejectedByMotion), normal \(stage.framesRejectedByNormal), reproj \(stage.framesRejectedByReprojection) | markers \(stage.markersAccepted) | normal \(stage.normalStdDegreesMean)"
+                                )
+                            }
+                        }
                     }
 
                     debugSection(title: "Performance") {
@@ -241,6 +277,9 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Auto focus ArUco", value: snapshot.configuration.autoFocusOnDetectedAruco)
                         debugRow(title: "Lock apos ArUco", value: snapshot.configuration.lockAfterArucoFocus)
                         debugRow(title: "ARKit Assist", value: snapshot.configuration.arkitAssistedCaptureEnabled)
+                        debugRow(title: "Guided Static", value: snapshot.guidedStatic.enabled)
+                        debugRow(title: "Guided etapas", value: snapshot.guidedStatic.requiredStages)
+                        debugRow(title: "Guided frames/etapa", value: snapshot.guidedStatic.framesPerStage)
                         debugRow(title: "Static stability", value: snapshot.configuration.staticPoseStabilityMode)
                         debugRow(title: "Frames min", value: snapshot.configuration.minimumGoodFrames)
                         debugRow(title: "Frames alvo", value: snapshot.configuration.targetValidFrames)
@@ -270,6 +309,7 @@ struct ScannerDebugPanelView: View {
                         Toggle("Auto focus no ArUco", isOn: $autoFocusOnDetectedAruco)
                         Toggle("Travar apos foco ArUco", isOn: $lockAfterArucoFocus)
                         Toggle("ARKit Assist experimental", isOn: $arkitAssistedCaptureEnabled)
+                        Toggle("Guided Static Capture", isOn: $guidedStaticCaptureEnabled)
 
                         HStack(spacing: 8) {
                             Button("Lock camera now", action: onLockCameraNow)
@@ -340,6 +380,20 @@ struct ScannerDebugPanelView: View {
                             step: sharpnessThresholdStep,
                             decimals: 0,
                             suffix: ""
+                        )
+
+                        debugIntStepper(
+                            title: "Etapas guiadas",
+                            value: $guidedStaticRequiredStages,
+                            range: guidedStaticRequiredStagesRange,
+                            step: 1
+                        )
+
+                        debugIntStepper(
+                            title: "Frames por etapa guiada",
+                            value: $guidedStaticFramesPerStage,
+                            range: guidedStaticFramesPerStageRange,
+                            step: guidedStaticFramesPerStageStep
                         )
 
                         debugIntStepper(

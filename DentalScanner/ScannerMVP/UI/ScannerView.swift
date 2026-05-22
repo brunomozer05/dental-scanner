@@ -119,6 +119,9 @@ struct ScannerView: View {
                             cameraZoomFactorStep: viewModel.cameraZoomFactorStep,
                             manualLensPositionRange: viewModel.manualLensPositionRange,
                             manualLensPositionStep: viewModel.manualLensPositionStep,
+                            guidedStaticRequiredStagesRange: viewModel.guidedStaticRequiredStagesRange,
+                            guidedStaticFramesPerStageRange: viewModel.guidedStaticFramesPerStageRange,
+                            guidedStaticFramesPerStageStep: viewModel.guidedStaticFramesPerStageStep,
                             markerProfile: markerProfileBinding,
                             requiredCoveragePercent: scanRequiredCoverageBinding,
                             minimumGoodFrames: scanMinimumGoodFrameBinding,
@@ -136,6 +139,9 @@ struct ScannerView: View {
                             autoFocusOnDetectedAruco: autoFocusOnDetectedArucoBinding,
                             lockAfterArucoFocus: lockAfterArucoFocusBinding,
                             arkitAssistedCaptureEnabled: arkitAssistedCaptureEnabledBinding,
+                            guidedStaticCaptureEnabled: guidedStaticCaptureEnabledBinding,
+                            guidedStaticRequiredStages: guidedStaticRequiredStagesBinding,
+                            guidedStaticFramesPerStage: guidedStaticFramesPerStageBinding,
                             lensPositionChangeThreshold: cameraLensPositionChangeThresholdBinding,
                             focusSettleTimeSeconds: cameraFocusSettleTimeBinding,
                             minimumAllowedSharpness: minimumAllowedSharpnessBinding,
@@ -553,6 +559,27 @@ struct ScannerView: View {
         Binding(
             get: { viewModel.arkitAssistedCaptureEnabled },
             set: { viewModel.setARKitAssistedCaptureEnabled($0) }
+        )
+    }
+
+    private var guidedStaticCaptureEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.guidedStaticCaptureEnabled },
+            set: { viewModel.setGuidedStaticCaptureEnabled($0) }
+        )
+    }
+
+    private var guidedStaticRequiredStagesBinding: Binding<Int> {
+        Binding(
+            get: { viewModel.guidedStaticRequiredStages },
+            set: { viewModel.setGuidedStaticRequiredStages($0) }
+        )
+    }
+
+    private var guidedStaticFramesPerStageBinding: Binding<Int> {
+        Binding(
+            get: { viewModel.guidedStaticFramesPerStage },
+            set: { viewModel.setGuidedStaticFramesPerStage($0) }
         )
     }
 

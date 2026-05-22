@@ -188,6 +188,43 @@ struct ScannerDebugSnapshot: Equatable {
         let diagnosticsUpdateHz: String
     }
 
+    struct GuidedStaticSection: Equatable {
+        let enabled: String
+        let currentStage: String
+        let stageProgress: String
+        let stageState: String
+        let completedStages: String
+        let requiredStages: String
+        let framesPerStage: String
+        let minStableTime: String
+        let maxNormalStdDegrees: String
+        let requireAllMarkersPerStage: String
+        let framesRejectedByFocus: String
+        let framesRejectedByMotion: String
+        let framesRejectedByNormal: String
+        let framesRejectedByReprojection: String
+        let markersSeenThisStage: String
+        let markersAcceptedThisStage: String
+    }
+
+    struct GuidedStaticStageRow: Equatable, Identifiable {
+        let stageIndex: Int
+        let stageName: String
+        let status: String
+        let framesAccepted: String
+        let framesRejectedByFocus: String
+        let framesRejectedByMotion: String
+        let framesRejectedByNormal: String
+        let framesRejectedByReprojection: String
+        let markersSeen: String
+        let markersAccepted: String
+        let normalStdDegreesMean: String
+
+        var id: Int {
+            stageIndex
+        }
+    }
+
     struct MarkerExportGateRow: Equatable, Identifiable {
         let markerId: Int
         let status: String
@@ -224,9 +261,11 @@ struct ScannerDebugSnapshot: Equatable {
     let exportQuality: ExportQualitySection
     let exportGate: ExportGateSection
     let performance: PerformanceSection
+    let guidedStatic: GuidedStaticSection
     let isDualArucoV2: Bool
     let markerV2Rows: [MarkerV2Row]
     let markerExportGateRows: [MarkerExportGateRow]
+    let guidedStaticStageRows: [GuidedStaticStageRow]
 }
 
 extension ScannerViewModel {
@@ -371,6 +410,23 @@ extension ScannerViewModel {
                 lastFrameProcessingTimeMs: Self.debugMilliseconds(scanLastFrameProcessingTimeMs),
                 diagnosticsUpdateHz: Self.debugNumber(diagnosticsUpdateHz, decimals: 1)
             ),
+            guidedStatic: Self.debugGuidedStaticSection(
+                enabled: guidedStaticCaptureEnabled,
+                currentStage: guidedStaticStageSnapshots.first {
+                    $0.stageIndex == guidedStaticCurrentStageIndex && !$0.isCompleted
+                },
+                stageState: guidedStaticStageState,
+                completedStageCount: guidedStaticCompletedStageCount,
+                requiredStageCount: guidedStaticRequiredStages,
+                framesPerStage: guidedStaticFramesPerStage,
+                minStableTimeSeconds: guidedStaticMinStableTimeSeconds,
+                maxNormalStdDegrees: guidedStaticMaxNormalStdDegreesPerStage,
+                requireAllMarkersPerStage: guidedStaticRequireAllMarkersPerStage,
+                framesRejectedByFocus: guidedStaticFramesRejectedByFocus,
+                framesRejectedByMotion: guidedStaticFramesRejectedByMotion,
+                framesRejectedByNormal: guidedStaticFramesRejectedByNormal,
+                framesRejectedByReprojection: guidedStaticFramesRejectedByReprojection
+            ),
             isDualArucoV2: markerProfile == .dualArucoV2,
             markerV2Rows: markerProfile == .dualArucoV2
                 ? dualMarkerDebugStates
@@ -379,7 +435,80 @@ extension ScannerViewModel {
                 : [],
             markerExportGateRows: exportGateMarkerValidations
                 .sorted { $0.markerId < $1.markerId }
-                .map(Self.debugMarkerExportGateRow)
+                .map(Self.debugMarkerExportGateRow),
+            guidedStaticStageRows: guidedStaticStageSnapshots
+                .sorted { $0.stageIndex < $1.stageIndex }
+                .map(Self.debugGuidedStaticStageRow)
+        )
+    }
+
+    private static func debugGuidedStaticSection(
+        enabled: Bool,
+        currentStage: GuidedStaticStageSnapshot?,
+        stageState: String,
+        completedStageCount: Int,
+        requiredStageCount: Int,
+        framesPerStage: Int,
+        minStableTimeSeconds: Double,
+        maxNormalStdDegrees: Double,
+        requireAllMarkersPerStage: Bool,
+        framesRejectedByFocus: Int,
+        framesRejectedByMotion: Int,
+        framesRejectedByNormal: Int,
+        framesRejectedByReprojection: Int
+    ) -> ScannerDebugSnapshot.GuidedStaticSection {
+        let stageProgress: String
+        let currentStageName: String
+        let markersSeen: String
+        let markersAccepted: String
+
+        if let currentStage {
+            currentStageName = currentStage.stageName
+            stageProgress = "\(currentStage.framesAccepted)/\(framesPerStage)"
+            markersSeen = debugIntList(currentStage.markersSeen)
+            markersAccepted = debugIntList(currentStage.markersAccepted)
+        } else {
+            currentStageName = enabled ? "concluida" : ScannerDebugSnapshot.missingValue
+            stageProgress = enabled ? "\(completedStageCount)/\(requiredStageCount) etapas" : ScannerDebugSnapshot.missingValue
+            markersSeen = ScannerDebugSnapshot.missingValue
+            markersAccepted = ScannerDebugSnapshot.missingValue
+        }
+
+        return ScannerDebugSnapshot.GuidedStaticSection(
+            enabled: enabled ? "Sim" : "Nao",
+            currentStage: currentStageName,
+            stageProgress: stageProgress,
+            stageState: debugText(stageState),
+            completedStages: "\(completedStageCount)/\(requiredStageCount)",
+            requiredStages: "\(requiredStageCount)",
+            framesPerStage: "\(framesPerStage)",
+            minStableTime: debugSeconds(minStableTimeSeconds),
+            maxNormalStdDegrees: debugDegrees(maxNormalStdDegrees),
+            requireAllMarkersPerStage: requireAllMarkersPerStage ? "Sim" : "Nao",
+            framesRejectedByFocus: "\(framesRejectedByFocus)",
+            framesRejectedByMotion: "\(framesRejectedByMotion)",
+            framesRejectedByNormal: "\(framesRejectedByNormal)",
+            framesRejectedByReprojection: "\(framesRejectedByReprojection)",
+            markersSeenThisStage: markersSeen,
+            markersAcceptedThisStage: markersAccepted
+        )
+    }
+
+    private static func debugGuidedStaticStageRow(
+        _ stage: GuidedStaticStageSnapshot
+    ) -> ScannerDebugSnapshot.GuidedStaticStageRow {
+        ScannerDebugSnapshot.GuidedStaticStageRow(
+            stageIndex: stage.stageIndex,
+            stageName: stage.stageName,
+            status: stage.isCompleted ? "concluida" : "pendente",
+            framesAccepted: "\(stage.framesAccepted)",
+            framesRejectedByFocus: "\(stage.framesRejectedByFocus)",
+            framesRejectedByMotion: "\(stage.framesRejectedByMotion)",
+            framesRejectedByNormal: "\(stage.framesRejectedByNormal)",
+            framesRejectedByReprojection: "\(stage.framesRejectedByReprojection)",
+            markersSeen: debugIntList(stage.markersSeen),
+            markersAccepted: debugIntList(stage.markersAccepted),
+            normalStdDegreesMean: debugDegrees(stage.normalStdDegreesMean)
         )
     }
 
@@ -641,6 +770,14 @@ extension ScannerViewModel {
         }
 
         return "\(String(format: "%.1f", value)) mm"
+    }
+
+    private static func debugDegrees(_ value: Double?) -> String {
+        guard let value, value.isFinite else {
+            return ScannerDebugSnapshot.missingValue
+        }
+
+        return "\(String(format: "%.1f", value)) deg"
     }
 
     private static func debugMeters(_ value: Double?) -> String {

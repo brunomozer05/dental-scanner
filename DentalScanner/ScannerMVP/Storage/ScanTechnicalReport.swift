@@ -23,6 +23,8 @@ struct ScanTechnicalReport: Codable {
     var distanceGuideState: String?
     var lastDistanceMm: Double?
     var tagAreaPixelsMean: Double?
+    var guidedStaticCaptureEnabled: Bool?
+    var guidedStaticStages: [GuidedStaticStage]?
 
     struct Device: Codable {
         var model: String?
@@ -91,9 +93,27 @@ struct ScanTechnicalReport: Codable {
         var lockFocusAndExposureForScan: Bool?
         var autoFocusOnDetectedAruco: Bool?
         var lockAfterArucoFocus: Bool?
+        var guidedStaticCaptureEnabled: Bool?
+        var guidedStaticRequiredStages: Int?
+        var guidedStaticFramesPerStage: Int?
+        var guidedStaticMinStableTimeSeconds: Double?
+        var guidedStaticMaxNormalStdDegreesPerStage: Double?
+        var guidedStaticRequireAllMarkersPerStage: Bool?
         var minimumAllowedSharpness: Double?
         var minimumPreferredSharpness: Double?
         var lensPositionChangeThreshold: Double?
         var focusSettleTimeSeconds: Double?
+    }
+
+    struct GuidedStaticStage: Codable {
+        var stageName: String
+        var framesAccepted: Int
+        var framesRejectedByFocus: Int
+        var framesRejectedByMotion: Int
+        var framesRejectedByNormal: Int
+        var framesRejectedByReprojection: Int
+        var markersSeen: [Int]?
+        var markersAccepted: [Int]?
+        var normalStdDegreesMean: Double?
     }
 }
