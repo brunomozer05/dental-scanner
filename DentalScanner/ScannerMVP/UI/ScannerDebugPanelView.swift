@@ -115,6 +115,19 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "dualAngularReady", value: snapshot.readiness.dualAngularReady)
                     }
 
+                    debugSection(title: "Performance") {
+                        debugRow(title: "FPS estimado", value: snapshot.performance.estimatedFPS)
+                        debugRow(title: "Frames processados", value: snapshot.performance.processedFrames)
+                        debugRow(title: "Obs finais", value: snapshot.performance.finalObservationBuffer)
+                        debugRow(title: "Obs por marker", value: snapshot.performance.finalObservationsByMarker)
+                        debugRow(title: "Limite obs", value: snapshot.performance.finalObservationLimitPerMarker)
+                        debugRow(title: "Static samples", value: snapshot.performance.staticPoseSamples)
+                        debugRow(title: "Static pares", value: snapshot.performance.staticPosePairSamples)
+                        debugRow(title: "Static planos", value: snapshot.performance.staticPosePlaneSamples)
+                        debugRow(title: "Frame proc", value: snapshot.performance.lastFrameProcessingTimeMs)
+                        debugRow(title: "Diag Hz", value: snapshot.performance.diagnosticsUpdateHz)
+                    }
+
                     debugSection(title: "Camera / Focus") {
                         debugRow(title: "Device", value: snapshot.camera.deviceName)
                         debugRow(title: "Type", value: snapshot.camera.deviceType)

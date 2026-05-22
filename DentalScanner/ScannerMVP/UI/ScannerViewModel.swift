@@ -173,6 +173,13 @@ final class ScannerViewModel: ObservableObject {
         static let defaultMaximumFinalNormalOutlierDegrees: Double = 3.0
         static let maximumFinalNormalOutlierDegreesRange: ClosedRange<Double> = 1.0...10.0
         static let maximumFinalNormalOutlierDegreesStep: Double = 0.5
+        static let maximumFinalPoseObservationsPerMarker: Int = 200
+        static let diagnosticsUpdateIntervalSeconds: Double = 0.25
+        static let finalObservationDiagnosticsUpdateIntervalSeconds: Double = 0.25
+        static let staticPoseDiagnosticsUpdateIntervalSeconds: Double = 0.25
+        static let maximumStaticPoseSamplesPerMarker: Int = 180
+        static let maximumStaticPosePairSamplesPerPair: Int = 180
+        static let maximumStaticPosePlaneSamples: Int = 180
     }
 
     enum CameraState: Equatable {
@@ -514,6 +521,14 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var exportGateInvalidMarkerIds: [Int] = []
     @Published private(set) var exportGateBlockedReason: String?
     @Published private(set) var exportGateMarkerValidations: [ExportableMarkerValidation] = []
+    @Published private(set) var scanFinalPoseObservationCount: Int = 0
+    @Published private(set) var scanFinalPoseObservationCountsByMarkerId: [Int: Int] = [:]
+    @Published private(set) var scanFinalPoseObservationLimitPerMarker: Int =
+        ScanConfiguration.maximumFinalPoseObservationsPerMarker
+    @Published private(set) var scanStaticPoseSampleCount: Int = 0
+    @Published private(set) var scanStaticPosePairSampleCount: Int = 0
+    @Published private(set) var scanStaticPosePlaneSampleCount: Int = 0
+    @Published private(set) var scanLastFrameProcessingTimeMs: Double?
     @Published private(set) var readyTransitionCount: Int = 0
     @Published private(set) var didCallHandleScanBecameReady: Bool = false
     @Published private(set) var didCallSaveCurrentScanIfNeeded: Bool = false
@@ -573,6 +588,9 @@ final class ScannerViewModel: ObservableObject {
     private var finalObservationDiagnosticsByMarkerId: [Int: FinalPoseObservationSelectionDiagnostics] = [:]
     private var scanCameraDiagnosticsBaseline: CameraDiagnosticsBaseline?
     private var arucoFocusSettleUntilTimestamp: Double?
+    private var lastExportDiagnosticsUpdateTimestamp: Double?
+    private var lastFinalObservationDiagnosticsUpdateTimestamp: Double?
+    private var lastStaticPoseDiagnosticsUpdateTimestamp: Double?
     private var staticPoseSamples: [StaticPoseSample] = []
     private var staticPosePairDistanceSamples: [StaticPosePairDistanceSample] = []
     private var staticPosePlaneSamples: [StaticPosePlaneSample] = []
@@ -603,6 +621,10 @@ final class ScannerViewModel: ObservableObject {
 
     var markerProfiles: [MarkerProfile] {
         MarkerProfile.allCases
+    }
+
+    var diagnosticsUpdateHz: Double {
+        1.0 / ScanConfiguration.diagnosticsUpdateIntervalSeconds
     }
 
     var scanTargetValidFrameRange: ClosedRange<Int> {
@@ -1366,11 +1388,7 @@ final class ScannerViewModel: ObservableObject {
         stlExportURL = nil
         stlExportedImplantCount = 0
         stlExportErrorMessage = nil
-        finalObservationDiagnosticsByMarkerId = finalPoseRefiner.selectionDiagnostics(
-            observations: finalPoseObservations,
-            preferDualTagForFinalExport: preferDualTagForFinalExport,
-            maximumFinalNormalOutlierDegrees: scanMaximumFinalNormalOutlierDegrees
-        )
+        updateFinalObservationDiagnosticsIfNeeded(force: true)
         updateExportDiagnostics()
     }
 
@@ -1385,11 +1403,7 @@ final class ScannerViewModel: ObservableObject {
         stlExportURL = nil
         stlExportedImplantCount = 0
         stlExportErrorMessage = nil
-        finalObservationDiagnosticsByMarkerId = finalPoseRefiner.selectionDiagnostics(
-            observations: finalPoseObservations,
-            preferDualTagForFinalExport: preferDualTagForFinalExport,
-            maximumFinalNormalOutlierDegrees: scanMaximumFinalNormalOutlierDegrees
-        )
+        updateFinalObservationDiagnosticsIfNeeded(force: true)
         updateExportDiagnostics()
     }
 
@@ -1427,7 +1441,7 @@ final class ScannerViewModel: ObservableObject {
 
         staticPoseReferencesByMarkerId = references
         staticPoseReferenceCaptured = !references.isEmpty
-        rebuildStaticPoseStabilityDiagnostics()
+        rebuildStaticPoseStabilityDiagnosticsIfNeeded(force: true)
     }
 
     @MainActor
@@ -1442,11 +1456,7 @@ final class ScannerViewModel: ObservableObject {
         stlExportURL = nil
         stlExportedImplantCount = 0
         stlExportErrorMessage = nil
-        finalObservationDiagnosticsByMarkerId = finalPoseRefiner.selectionDiagnostics(
-            observations: finalPoseObservations,
-            preferDualTagForFinalExport: precisionModeV2,
-            maximumFinalNormalOutlierDegrees: scanMaximumFinalNormalOutlierDegrees
-        )
+        updateFinalObservationDiagnosticsIfNeeded(force: true)
         updateExportDiagnostics()
     }
 
@@ -1625,6 +1635,7 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private func handleFrame(_ frame: CameraFrame) {
+        let frameProcessingStartTimestamp = Date().timeIntervalSinceReferenceDate
         let metrics = buildFrameMetrics(from: frame)
         let motionQuality = motionFrameQualityService.quality(near: metrics.lastFrameTimestamp)
         let arKitQuality = arkitAssistedCaptureEnabled
@@ -1717,8 +1728,11 @@ final class ScannerViewModel: ObservableObject {
                 arKitQuality: arKitQuality
             )
             : []
-        let staticPoseObservations = shouldCollectStaticPoseFrame
-            ? makeFinalPoseObservations(
+        let staticPoseObservations: [FinalPoseObservation]
+        if shouldCollectStaticPoseFrame && shouldCollectScanFrame {
+            staticPoseObservations = frameFinalPoseObservations
+        } else if shouldCollectStaticPoseFrame {
+            staticPoseObservations = makeFinalPoseObservations(
                 from: arucoMetrics.detections,
                 poseResults: poseMetrics.rawPoseResults,
                 in: frame,
@@ -1728,7 +1742,13 @@ final class ScannerViewModel: ObservableObject {
                 motionQuality: motionQuality,
                 arKitQuality: arKitQuality
             )
-            : []
+        } else {
+            staticPoseObservations = []
+        }
+        let frameProcessingTimeMs = max(
+            0,
+            (Date().timeIntervalSinceReferenceDate - frameProcessingStartTimestamp) * 1000.0
+        )
 
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -1739,6 +1759,9 @@ final class ScannerViewModel: ObservableObject {
             self.currentARKitFrameQuality = arKitQuality
             self.currentCameraFrameQuality = frame.cameraQuality
             self.currentCameraDebugSnapshot = frame.cameraDebugSnapshot
+            self.scanLastFrameProcessingTimeMs = frameProcessingTimeMs.isFinite
+                ? frameProcessingTimeMs
+                : nil
             self.cameraLockErrorMessage = frame.cameraDebugSnapshot.lockError
             self.frameResolution = metrics.frameResolution
             self.isIntrinsicMatrixAvailable = metrics.isIntrinsicMatrixAvailable
@@ -1880,6 +1903,15 @@ final class ScannerViewModel: ObservableObject {
         exportGateInvalidMarkerIds = []
         exportGateBlockedReason = nil
         exportGateMarkerValidations = []
+        scanFinalPoseObservationCount = 0
+        scanFinalPoseObservationCountsByMarkerId = [:]
+        scanStaticPoseSampleCount = 0
+        scanStaticPosePairSampleCount = 0
+        scanStaticPosePlaneSampleCount = 0
+        scanLastFrameProcessingTimeMs = nil
+        lastExportDiagnosticsUpdateTimestamp = nil
+        lastFinalObservationDiagnosticsUpdateTimestamp = nil
+        lastStaticPoseDiagnosticsUpdateTimestamp = nil
         cameraFocusAdjustingFrameCount = 0
         cameraExposureAdjustingFrameCount = 0
         cameraWhiteBalanceAdjustingFrameCount = 0
@@ -2018,12 +2050,9 @@ final class ScannerViewModel: ObservableObject {
         }
         scanValidFrameCount += 1
         self.finalPoseObservations.append(contentsOf: goodFinalPoseObservations)
+        trimFinalPoseObservationBuffer()
         recordDualArucoV2RejectionReasons(dualTagRejectionReasons)
-        finalObservationDiagnosticsByMarkerId = finalPoseRefiner.selectionDiagnostics(
-            observations: self.finalPoseObservations,
-            preferDualTagForFinalExport: preferDualTagForFinalExport,
-            maximumFinalNormalOutlierDegrees: scanMaximumFinalNormalOutlierDegrees
-        )
+        updateFinalObservationDiagnosticsIfNeeded(timestamp: timestamp)
         scanReprojectionErrors.append(goodFrameReprojectionError)
         trimRecentValues(&scanReprojectionErrors, to: scanTargetValidFrameCount)
 
@@ -2046,7 +2075,6 @@ final class ScannerViewModel: ObservableObject {
         updateScanProgressAndState(
             timestamp: timestamp
         )
-        updateExportDiagnostics()
     }
 
     private func cameraFrameQualityBlocker(
@@ -2422,7 +2450,7 @@ final class ScannerViewModel: ObservableObject {
             positionStabilityScore * 0.15 +
             rotationStabilityScore * 0.10 +
             distanceScore * 0.05
-        updateExportDiagnostics()
+        updateExportDiagnosticsIfNeeded(timestamp: timestamp)
         let evaluation = scanReadinessEvaluation()
         let currentTimestamp = timestamp.isFinite ? timestamp : Date().timeIntervalSinceReferenceDate
 
@@ -2454,7 +2482,7 @@ final class ScannerViewModel: ObservableObject {
             scanReadinessMessage = "Teste estatico coletando"
             scanQualityStatus = scanReadinessMessage
             scanReadinessBlockerSummary = "Teste estatico: export desativado"
-            updateExportDiagnostics()
+            updateExportDiagnosticsIfNeeded(timestamp: timestamp)
             return
         }
 
@@ -2475,7 +2503,7 @@ final class ScannerViewModel: ObservableObject {
             hasStableDuration: hasStableDuration
         )
         scanQualityStatus = scanReadinessMessage
-        updateExportDiagnostics()
+        updateExportDiagnosticsIfNeeded(timestamp: timestamp)
     }
 
     private func publishReadinessDiagnostics(
@@ -2503,11 +2531,7 @@ final class ScannerViewModel: ObservableObject {
 
         didApplyFinalPoseRefinement = true
 
-        finalObservationDiagnosticsByMarkerId = finalPoseRefiner.selectionDiagnostics(
-            observations: finalPoseObservations,
-            preferDualTagForFinalExport: preferDualTagForFinalExport,
-            maximumFinalNormalOutlierDegrees: scanMaximumFinalNormalOutlierDegrees
-        )
+        updateFinalObservationDiagnosticsIfNeeded(force: true)
         let currentPoseResults = consolidatedPoseResults()
         let refinedPoseResults = finalPoseRefiner.refine(
             observations: finalPoseObservations,
@@ -2626,8 +2650,7 @@ final class ScannerViewModel: ObservableObject {
             scanReadinessConfiguration.maximumPositionJitterMm
         let hasStableRotation = (scanRotationJitterDegrees ?? .infinity) <=
             scanReadinessConfiguration.maximumRotationJitterDegrees
-        let exportGate = currentExportGateValidation()
-        let hasExportableTagPoses = exportGate.isPassing
+        let hasExportableTagPoses = cachedExportGateIsPassing
         let hasMinimumDualTagFrames = hasMinimumDualTagFramesPerMarker()
         let hasMinimumDualAngularCoverage = hasMinimumDualAngularCoveragePerMarker()
 
@@ -2645,6 +2668,18 @@ final class ScannerViewModel: ObservableObject {
             hasStableRotation: hasStableRotation,
             hasExportableTagPoses: hasExportableTagPoses
         )
+    }
+
+    private var cachedExportGateIsPassing: Bool {
+        guard exportGateBlockedReason == nil else {
+            return false
+        }
+
+        if exportGateExpectedMarkerCount > 0 {
+            return exportGateExportableMarkerCount == exportGateExpectedMarkerCount
+        }
+
+        return currentExportableTagPoseCount > 0
     }
 
     private func hasMinimumDualTagFramesPerMarker() -> Bool {
@@ -3098,7 +3133,8 @@ final class ScannerViewModel: ObservableObject {
             timestamp: timestamp
         )
         trimStaticPoseStabilitySamples(currentTimestamp: timestamp)
-        rebuildStaticPoseStabilityDiagnostics()
+        updateStaticPoseSampleCounts()
+        rebuildStaticPoseStabilityDiagnosticsIfNeeded(timestamp: timestamp)
     }
 
     private func staticPoseBottomSmall(
@@ -3172,6 +3208,9 @@ final class ScannerViewModel: ObservableObject {
         staticPoseSamples.removeAll { $0.timestamp < earliestTimestamp }
         staticPosePairDistanceSamples.removeAll { $0.timestamp < earliestTimestamp }
         staticPosePlaneSamples.removeAll { $0.timestamp < earliestTimestamp }
+        trimStaticPoseSamplesByMarker(limit: ScanConfiguration.maximumStaticPoseSamplesPerMarker)
+        trimStaticPosePairSamplesByPair(limit: ScanConfiguration.maximumStaticPosePairSamplesPerPair)
+        trimRecentValues(&staticPosePlaneSamples, to: ScanConfiguration.maximumStaticPosePlaneSamples)
     }
 
     private func resetStaticPoseStabilityDiagnostics(clearReference: Bool) {
@@ -3189,9 +3228,75 @@ final class ScannerViewModel: ObservableObject {
             staticPoseReferencesByMarkerId = [:]
             staticPoseReferenceCaptured = false
         }
+
+        lastStaticPoseDiagnosticsUpdateTimestamp = nil
+        updateStaticPoseSampleCounts()
+    }
+
+    private func trimStaticPoseSamplesByMarker(limit: Int) {
+        guard limit > 0 else {
+            staticPoseSamples.removeAll()
+            return
+        }
+
+        var countsByMarkerId: [Int: Int] = [:]
+        let trimmedReversed = staticPoseSamples.reversed().filter { sample in
+            let currentCount = countsByMarkerId[sample.markerId, default: 0]
+            guard currentCount < limit else {
+                return false
+            }
+
+            countsByMarkerId[sample.markerId] = currentCount + 1
+            return true
+        }
+        staticPoseSamples = Array(trimmedReversed.reversed())
+    }
+
+    private func trimStaticPosePairSamplesByPair(limit: Int) {
+        guard limit > 0 else {
+            staticPosePairDistanceSamples.removeAll()
+            return
+        }
+
+        var countsByPairId: [String: Int] = [:]
+        let trimmedReversed = staticPosePairDistanceSamples.reversed().filter { sample in
+            let pairId = "\(sample.firstMarkerId)-\(sample.secondMarkerId)"
+            let currentCount = countsByPairId[pairId, default: 0]
+            guard currentCount < limit else {
+                return false
+            }
+
+            countsByPairId[pairId] = currentCount + 1
+            return true
+        }
+        staticPosePairDistanceSamples = Array(trimmedReversed.reversed())
+    }
+
+    private func updateStaticPoseSampleCounts() {
+        scanStaticPoseSampleCount = staticPoseSamples.count
+        scanStaticPosePairSampleCount = staticPosePairDistanceSamples.count
+        scanStaticPosePlaneSampleCount = staticPosePlaneSamples.count
+    }
+
+    private func rebuildStaticPoseStabilityDiagnosticsIfNeeded(
+        timestamp: Double? = nil,
+        force: Bool = false
+    ) {
+        let currentTimestamp = sanitizedDiagnosticsTimestamp(timestamp)
+        guard force ||
+            lastStaticPoseDiagnosticsUpdateTimestamp == nil ||
+            currentTimestamp - (lastStaticPoseDiagnosticsUpdateTimestamp ?? 0) >=
+                ScanConfiguration.staticPoseDiagnosticsUpdateIntervalSeconds
+        else {
+            return
+        }
+
+        rebuildStaticPoseStabilityDiagnostics()
+        lastStaticPoseDiagnosticsUpdateTimestamp = currentTimestamp
     }
 
     private func rebuildStaticPoseStabilityDiagnostics() {
+        updateStaticPoseSampleCounts()
         let markerDiagnostics = makeStaticPoseMarkerDiagnostics(from: staticPoseSamples)
         let pairDiagnostics = makeStaticPosePairDiagnostics(from: staticPosePairDistanceSamples)
 
@@ -5418,8 +5523,85 @@ final class ScannerViewModel: ObservableObject {
         precisionValidationSampleCount = 0
     }
 
+    private func updateFinalObservationDiagnosticsIfNeeded(
+        timestamp: Double? = nil,
+        force: Bool = false
+    ) {
+        let currentTimestamp = sanitizedDiagnosticsTimestamp(timestamp)
+        guard force ||
+            lastFinalObservationDiagnosticsUpdateTimestamp == nil ||
+            currentTimestamp - (lastFinalObservationDiagnosticsUpdateTimestamp ?? 0) >=
+                ScanConfiguration.finalObservationDiagnosticsUpdateIntervalSeconds
+        else {
+            return
+        }
+
+        updateFinalObservationDiagnostics()
+        lastFinalObservationDiagnosticsUpdateTimestamp = currentTimestamp
+    }
+
+    private func updateFinalObservationDiagnostics() {
+        finalObservationDiagnosticsByMarkerId = finalPoseRefiner.selectionDiagnostics(
+            observations: finalPoseObservations,
+            preferDualTagForFinalExport: preferDualTagForFinalExport,
+            maximumFinalNormalOutlierDegrees: scanMaximumFinalNormalOutlierDegrees
+        )
+    }
+
+    private func trimFinalPoseObservationBuffer() {
+        scanFinalPoseObservationLimitPerMarker = ScanConfiguration.maximumFinalPoseObservationsPerMarker
+        let limit = ScanConfiguration.maximumFinalPoseObservationsPerMarker
+        guard limit > 0 else {
+            finalPoseObservations.removeAll()
+            scanFinalPoseObservationCount = 0
+            scanFinalPoseObservationCountsByMarkerId = [:]
+            return
+        }
+
+        var countsByMarkerId: [Int: Int] = [:]
+        let trimmedReversed = finalPoseObservations.reversed().filter { observation in
+            let currentCount = countsByMarkerId[observation.markerId, default: 0]
+            guard currentCount < limit else {
+                return false
+            }
+
+            countsByMarkerId[observation.markerId] = currentCount + 1
+            return true
+        }
+        finalPoseObservations = Array(trimmedReversed.reversed())
+        scanFinalPoseObservationCount = finalPoseObservations.count
+        scanFinalPoseObservationCountsByMarkerId = countsByMarkerId
+    }
+
     private func consolidatedPoseResults() -> [PoseResult] {
         fusedPoseResults.isEmpty ? rawPoseResults : fusedPoseResults
+    }
+
+    private func updateExportDiagnosticsIfNeeded(
+        timestamp: Double? = nil,
+        force: Bool = false
+    ) {
+        let currentTimestamp = sanitizedDiagnosticsTimestamp(timestamp)
+        guard force ||
+            lastExportDiagnosticsUpdateTimestamp == nil ||
+            currentTimestamp - (lastExportDiagnosticsUpdateTimestamp ?? 0) >=
+                ScanConfiguration.diagnosticsUpdateIntervalSeconds
+        else {
+            return
+        }
+
+        updateExportDiagnostics()
+        lastExportDiagnosticsUpdateTimestamp = currentTimestamp
+    }
+
+    private func sanitizedDiagnosticsTimestamp(_ timestamp: Double?) -> Double {
+        guard let timestamp,
+              timestamp.isFinite
+        else {
+            return Date().timeIntervalSinceReferenceDate
+        }
+
+        return timestamp
     }
 
     private func updateExportDiagnostics() {
@@ -6298,6 +6480,7 @@ final class ScannerViewModel: ObservableObject {
     private func saveCurrentScanIfNeeded() -> URL? {
         didCallSaveCurrentScanIfNeeded = true
         lastSTLExportEventMessage = "saveCurrentScanIfNeeded called"
+        updateFinalObservationDiagnosticsIfNeeded(force: true)
 
         if let stlExportURL,
            FileManager.default.fileExists(atPath: stlExportURL.path) {

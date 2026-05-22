@@ -162,6 +162,19 @@ struct ScannerDebugSnapshot: Equatable {
         let lastBlockedReason: String
     }
 
+    struct PerformanceSection: Equatable {
+        let estimatedFPS: String
+        let processedFrames: String
+        let finalObservationBuffer: String
+        let finalObservationsByMarker: String
+        let finalObservationLimitPerMarker: String
+        let staticPoseSamples: String
+        let staticPosePairSamples: String
+        let staticPosePlaneSamples: String
+        let lastFrameProcessingTimeMs: String
+        let diagnosticsUpdateHz: String
+    }
+
     struct MarkerExportGateRow: Equatable, Identifiable {
         let markerId: Int
         let status: String
@@ -193,6 +206,7 @@ struct ScannerDebugSnapshot: Equatable {
     let arkit: ARKitSection
     let exportQuality: ExportQualitySection
     let exportGate: ExportGateSection
+    let performance: PerformanceSection
     let isDualArucoV2: Bool
     let markerV2Rows: [MarkerV2Row]
     let markerExportGateRows: [MarkerExportGateRow]
@@ -309,6 +323,23 @@ extension ScannerViewModel {
                 missingMarkerIds: Self.debugIntList(exportGateMissingMarkerIds),
                 invalidMarkerIds: Self.debugIntList(exportGateInvalidMarkerIds),
                 lastBlockedReason: debugString(exportGateBlockedReason ?? "Nenhum")
+            ),
+            performance: ScannerDebugSnapshot.PerformanceSection(
+                estimatedFPS: Self.debugNumber(estimatedFPS, decimals: 1),
+                processedFrames: "\(totalFramesReceived)",
+                finalObservationBuffer:
+                    "\(scanFinalPoseObservationCount) obs",
+                finalObservationsByMarker: Self.debugIntDictionary(
+                    scanFinalPoseObservationCountsByMarkerId,
+                    valuePrefix: "M"
+                ),
+                finalObservationLimitPerMarker:
+                    "\(scanFinalPoseObservationLimitPerMarker)/marker",
+                staticPoseSamples: "\(scanStaticPoseSampleCount)",
+                staticPosePairSamples: "\(scanStaticPosePairSampleCount)",
+                staticPosePlaneSamples: "\(scanStaticPosePlaneSampleCount)",
+                lastFrameProcessingTimeMs: Self.debugMilliseconds(scanLastFrameProcessingTimeMs),
+                diagnosticsUpdateHz: Self.debugNumber(diagnosticsUpdateHz, decimals: 1)
             ),
             isDualArucoV2: markerProfile == .dualArucoV2,
             markerV2Rows: markerProfile == .dualArucoV2
@@ -541,6 +572,14 @@ extension ScannerViewModel {
         return "\(String(format: "%.2f", seconds)) s"
     }
 
+    private static func debugMilliseconds(_ milliseconds: Double?) -> String {
+        guard let milliseconds, milliseconds.isFinite else {
+            return ScannerDebugSnapshot.missingValue
+        }
+
+        return "\(String(format: "%.1f", milliseconds)) ms"
+    }
+
     private static func debugMillimeters(_ value: Double?) -> String {
         guard let value, value.isFinite else {
             return ScannerDebugSnapshot.missingValue
@@ -602,5 +641,20 @@ extension ScannerViewModel {
         }
 
         return values.sorted().map(String.init).joined(separator: ", ")
+    }
+
+    private static func debugIntDictionary(
+        _ values: [Int: Int],
+        valuePrefix: String = ""
+    ) -> String {
+        guard !values.isEmpty else {
+            return ScannerDebugSnapshot.missingValue
+        }
+
+        return values
+            .keys
+            .sorted()
+            .map { key in "\(valuePrefix)\(key): \(values[key] ?? 0)" }
+            .joined(separator: ", ")
     }
 }
