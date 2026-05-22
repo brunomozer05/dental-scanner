@@ -154,6 +154,9 @@ struct ScannerDebugSnapshot: Equatable {
     struct ExportGateSection: Equatable {
         let profile: String
         let scanConfidence: String
+        let visualMarkerCount: String
+        let currentPoseMarkerCount: String
+        let observedMarkerCount: String
         let expectedMarkerCount: String
         let exportableMarkerCount: String
         let markerCountSummary: String
@@ -179,6 +182,10 @@ struct ScannerDebugSnapshot: Equatable {
         let markerId: Int
         let status: String
         let reason: String
+        let visuallyRecent: String
+        let hasCurrentPose: String
+        let accumulatedObservations: String
+        let finalObservationsUsed: String
 
         var id: Int {
             markerId
@@ -313,6 +320,9 @@ extension ScannerViewModel {
             exportGate: ScannerDebugSnapshot.ExportGateSection(
                 profile: exportGateMarkerProfile.debugTitle,
                 scanConfidence: debugString(scanFinalConfidenceSummary),
+                visualMarkerCount: "\(exportGateMarkerValidations.filter(\.isVisuallyRecent).count)",
+                currentPoseMarkerCount: "\(exportGateMarkerValidations.filter(\.hasCurrentPose).count)",
+                observedMarkerCount: "\(exportGateMarkerValidations.filter { $0.accumulatedObservationCount > 0 }.count)",
                 expectedMarkerCount: exportGateExpectedMarkerCount > 0
                     ? "\(exportGateExpectedMarkerCount)"
                     : ScannerDebugSnapshot.missingValue,
@@ -460,7 +470,12 @@ extension ScannerViewModel {
         ScannerDebugSnapshot.MarkerExportGateRow(
             markerId: validation.markerId,
             status: validation.isExportable ? "exportavel" : "nao exportavel",
-            reason: debugText(validation.reason ?? "ok")
+            reason: debugText(validation.reason ?? "ok"),
+            visuallyRecent: validation.isVisuallyRecent ? "Sim" : "Nao",
+            hasCurrentPose: validation.hasCurrentPose ? "Sim" : "Nao",
+            accumulatedObservations: "\(validation.accumulatedObservationCount)",
+            finalObservationsUsed: validation.finalObservationsUsed.map(String.init) ??
+                ScannerDebugSnapshot.missingValue
         )
     }
 

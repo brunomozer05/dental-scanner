@@ -181,7 +181,7 @@ struct DualArucoMarkerDefinition: Equatable, Identifiable {
 }
 
 enum MarkerConfiguration {
-    static let defaultProfile: MarkerProfile = .dualArucoV2
+    static let defaultProfile: MarkerProfile = .singleArucoV1
 
     static let dualMarkers: [DualArucoMarkerDefinition] = [
         DualArucoMarkerDefinition(

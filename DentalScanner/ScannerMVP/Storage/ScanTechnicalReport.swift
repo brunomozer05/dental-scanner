@@ -60,6 +60,10 @@ struct ScanTechnicalReport: Codable {
         var exportGateProfile: String?
         var isExportable: Bool
         var reason: String?
+        var isVisuallyRecent: Bool?
+        var hasCurrentPose: Bool?
+        var accumulatedObservationCount: Int?
+        var finalObservationsUsed: Int?
     }
 
     struct ScanConfiguration: Codable {

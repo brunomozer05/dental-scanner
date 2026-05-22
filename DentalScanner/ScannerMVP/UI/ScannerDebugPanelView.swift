@@ -85,6 +85,9 @@ struct ScannerDebugPanelView: View {
                     debugSection(title: "Export gate") {
                         debugRow(title: "Perfil gate", value: snapshot.exportGate.profile)
                         debugRow(title: "Scan confidence", value: snapshot.exportGate.scanConfidence)
+                        debugRow(title: "Markers visuais", value: snapshot.exportGate.visualMarkerCount)
+                        debugRow(title: "Markers com pose", value: snapshot.exportGate.currentPoseMarkerCount)
+                        debugRow(title: "Markers com obs", value: snapshot.exportGate.observedMarkerCount)
                         debugRow(title: "Markers exportaveis", value: snapshot.exportGate.markerCountSummary)
                         debugRow(title: "Expected markers", value: snapshot.exportGate.expectedMarkerCount)
                         debugRow(title: "Missing markers", value: snapshot.exportGate.missingMarkerIds)
@@ -97,7 +100,7 @@ struct ScannerDebugPanelView: View {
                             ForEach(snapshot.markerExportGateRows) { marker in
                                 debugRow(
                                     title: "M\(marker.markerId)",
-                                    value: "\(marker.status) | \(marker.reason)"
+                                    value: "\(marker.status) | \(marker.reason) | visual \(marker.visuallyRecent), pose \(marker.hasCurrentPose), obs \(marker.accumulatedObservations), usadas \(marker.finalObservationsUsed)"
                                 )
                             }
                         }
