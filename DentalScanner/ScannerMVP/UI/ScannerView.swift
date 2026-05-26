@@ -182,11 +182,11 @@ struct ScannerView: View {
             updateLandscapePreviewOrientation()
         }
         .onChange(of: scenePhase) { _, newScenePhase in
-            guard newScenePhase == .active else {
-                return
+            if newScenePhase == .active {
+                viewModel.handleAppBecameActive()
+            } else {
+                viewModel.handleAppBecameInactive()
             }
-
-            viewModel.handleAppBecameActive()
         }
         .onDisappear {
             viewModel.stopCamera()

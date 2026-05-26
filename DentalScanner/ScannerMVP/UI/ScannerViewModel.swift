@@ -627,6 +627,8 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var centerFocusRecoveryCount: Int = 0
     @Published private(set) var distanceGuideStateTitle: String = "Sem marker confiavel"
     @Published private(set) var lastDistanceGuideDistanceMm: Double?
+    @Published private(set) var screenAwakeEnabled: Bool = false
+    @Published private(set) var idleTimerDisabled: Bool = false
     @Published private(set) var guidedStaticCaptureEnabled: Bool = false
     @Published private(set) var guidedStaticRequiredStages: Int =
         GuidedStaticCaptureConfiguration.defaultRequiredStages
@@ -956,6 +958,9 @@ final class ScannerViewModel: ObservableObject {
     deinit {
         motionFrameQualityService.stop()
         arKitCaptureAssistService.stop()
+        Task { @MainActor in
+            UIApplication.shared.isIdleTimerDisabled = false
+        }
     }
 
     func prepareCamera() async {
@@ -1021,6 +1026,7 @@ final class ScannerViewModel: ObservableObject {
         arKitCaptureAssistService.stop()
         await MainActor.run {
             cameraState = .running
+            updateScreenAwakeState()
         }
     }
 
@@ -1034,8 +1040,12 @@ final class ScannerViewModel: ObservableObject {
         currentARKitFrameQuality = arkitAssistedCaptureEnabled ? .waitingForData : .disabled
         currentCameraFrameQuality = .neutral
         turnOffTorchForInactiveCamera()
-        guard cameraState != .failed else { return }
+        guard cameraState != .failed else {
+            updateScreenAwakeState()
+            return
+        }
         cameraState = .ready
+        updateScreenAwakeState()
     }
 
     @MainActor
@@ -1411,6 +1421,7 @@ final class ScannerViewModel: ObservableObject {
     @MainActor
     func handleAppBecameActive() {
         guard shouldRunCamera else {
+            updateScreenAwakeState()
             return
         }
 
@@ -1419,6 +1430,11 @@ final class ScannerViewModel: ObservableObject {
             await self.startCamera()
             await self.reapplyDesiredTorchIfNeeded()
         }
+    }
+
+    @MainActor
+    func handleAppBecameInactive() {
+        setScreenAwake(false)
     }
 
     @MainActor
@@ -1498,6 +1514,19 @@ final class ScannerViewModel: ObservableObject {
         setScanState(.scanning)
         scanQualityStatus = "Capturando"
         scanReadinessMessage = "Capturando"
+    }
+
+    @MainActor
+    private func setScreenAwake(_ isEnabled: Bool) {
+        UIApplication.shared.isIdleTimerDisabled = isEnabled
+        screenAwakeEnabled = isEnabled
+        idleTimerDisabled = UIApplication.shared.isIdleTimerDisabled
+    }
+
+    @MainActor
+    private func updateScreenAwakeState() {
+        let shouldKeepAwake = shouldRunCamera && cameraState == .running
+        setScreenAwake(shouldKeepAwake)
     }
 
     @MainActor
@@ -7549,6 +7578,8 @@ final class ScannerViewModel: ObservableObject {
 
     private func handleCameraError(_ error: Error) {
         cameraState = .failed
+        shouldRunCamera = false
+        updateScreenAwakeState()
         errorMessage = makeErrorMessage(from: error)
     }
 

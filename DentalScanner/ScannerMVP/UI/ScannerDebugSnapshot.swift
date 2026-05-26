@@ -125,6 +125,8 @@ struct ScannerDebugSnapshot: Equatable {
         let distanceGuideSourceReliable: String
         let distanceMm: String
         let distanceReady: String
+        let screenAwake: String
+        let idleTimerDisabled: String
     }
 
     struct ARKitSection: Equatable {
@@ -353,7 +355,9 @@ extension ScannerViewModel {
                 arucoLostCount: arucoLostCount,
                 centerFocusRecoveryCount: centerFocusRecoveryCount,
                 distanceGuideState: distanceGuideStateTitle,
-                lastArucoFocusError: lastArucoFocusErrorMessage
+                lastArucoFocusError: lastArucoFocusErrorMessage,
+                screenAwake: screenAwakeEnabled,
+                idleTimerDisabled: idleTimerDisabled
             ),
             arkit: Self.debugARKitSection(
                 currentARKitFrameQuality,
@@ -544,7 +548,9 @@ extension ScannerViewModel {
         arucoLostCount: Int,
         centerFocusRecoveryCount: Int,
         distanceGuideState: String,
-        lastArucoFocusError: String?
+        lastArucoFocusError: String?,
+        screenAwake: Bool,
+        idleTimerDisabled: Bool
     ) -> ScannerDebugSnapshot.CameraSection {
         ScannerDebugSnapshot.CameraSection(
             deviceName: debugText(snapshot.deviceName),
@@ -618,7 +624,9 @@ extension ScannerViewModel {
             lastBadFrameReason: debugText(lastBadFrameReason),
             distanceGuideSourceReliable: distanceGuideSourceReliable ? "Sim" : "Nao",
             distanceMm: debugMillimeters(distanceMm),
-            distanceReady: distanceReady ? "Sim" : "Nao"
+            distanceReady: distanceReady ? "Sim" : "Nao",
+            screenAwake: screenAwake ? "on" : "off",
+            idleTimerDisabled: idleTimerDisabled ? "true" : "false"
         )
     }
 

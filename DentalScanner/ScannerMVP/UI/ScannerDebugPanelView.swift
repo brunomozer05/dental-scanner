@@ -231,6 +231,8 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Distancia confiavel", value: snapshot.camera.distanceGuideSourceReliable)
                         debugRow(title: "Distancia", value: snapshot.camera.distanceMm)
                         debugRow(title: "distanceReady", value: snapshot.camera.distanceReady)
+                        debugRow(title: "Screen awake", value: snapshot.camera.screenAwake)
+                        debugRow(title: "Idle timer disabled", value: snapshot.camera.idleTimerDisabled)
                     }
 
                     debugSection(title: "ARKit Assist") {
