@@ -167,6 +167,22 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Diag Hz", value: snapshot.performance.diagnosticsUpdateHz)
                     }
 
+                    debugSection(title: "Diagnostics") {
+                        debugRow(title: "Diagnostics enabled", value: snapshot.diagnostics.enabled)
+                        debugRow(title: "Events count", value: snapshot.diagnostics.eventsCount)
+                        debugRow(title: "Last event", value: snapshot.diagnostics.lastEvent)
+                        debugRow(title: "Diagnostics file", value: snapshot.diagnostics.fileAvailable)
+                        debugRow(title: "FPS mean", value: snapshot.diagnostics.fpsMean)
+                        debugRow(title: "FPS min", value: snapshot.diagnostics.fpsMin)
+                        debugRow(title: "Scan duration", value: snapshot.diagnostics.scanDuration)
+                        debugRow(title: "Current block", value: snapshot.diagnostics.currentBlockingReason)
+                        debugRow(title: "Last export block", value: snapshot.diagnostics.lastExportBlockReason)
+                        debugRow(title: "Slowest marker", value: snapshot.diagnostics.slowestMarker)
+                        debugRow(title: "All markers seen", value: snapshot.diagnostics.timeToAllMarkersSeen)
+                        debugRow(title: "All markers exportable", value: snapshot.diagnostics.timeToAllMarkersExportable)
+                        debugRow(title: "Extra after 100%", value: snapshot.diagnostics.extraTimeAfter100Percent)
+                    }
+
                     debugSection(title: "Camera / Focus") {
                         debugRow(title: "Device", value: snapshot.camera.deviceName)
                         debugRow(title: "Type", value: snapshot.camera.deviceType)

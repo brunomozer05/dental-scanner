@@ -4,6 +4,7 @@ struct ScanTechnicalReport: Codable {
     var createdAt: String
     var markerProfile: String
     var stlFileName: String?
+    var diagnosticsFileName: String?
     var device: Device
     var cameraQuality: CameraQuality
     var markers: [Marker]

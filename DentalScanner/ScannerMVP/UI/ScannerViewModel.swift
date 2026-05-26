@@ -629,6 +629,10 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var lastDistanceGuideDistanceMm: Double?
     @Published private(set) var screenAwakeEnabled: Bool = false
     @Published private(set) var idleTimerDisabled: Bool = false
+    @Published private(set) var diagnosticsEnabled: Bool = true
+    @Published private(set) var currentScanDiagnosticsSnapshot: ScanDiagnosticsSnapshot = .empty
+    @Published private(set) var diagnosticsFileAvailable: Bool = false
+    @Published private(set) var lastDiagnosticsFileURL: URL?
     @Published private(set) var guidedStaticCaptureEnabled: Bool = false
     @Published private(set) var guidedStaticRequiredStages: Int =
         GuidedStaticCaptureConfiguration.defaultRequiredStages
@@ -709,6 +713,8 @@ final class ScannerViewModel: ObservableObject {
     private let scanReadinessConfiguration = ScanReadinessConfiguration.default
     private let stlExporter: STLExporter
     private let scanStorageManager: ScanStorageManager
+    private let diagnosticsRecorder: ScanDiagnosticsRecorder
+    private let crashReportingService: CrashReportingService
     private var shouldRunCamera = false
     private var totalFramesCounter: Int = 0
     private var recentFrameTimestamps: [Double] = []
@@ -747,6 +753,7 @@ final class ScannerViewModel: ObservableObject {
     private var lastExportDiagnosticsUpdateTimestamp: Double?
     private var lastFinalObservationDiagnosticsUpdateTimestamp: Double?
     private var lastStaticPoseDiagnosticsUpdateTimestamp: Double?
+    private var lastDiagnosticsSnapshotPublishTimestamp: Double?
     private var staticPoseSamples: [StaticPoseSample] = []
     private var staticPosePairDistanceSamples: [StaticPosePairDistanceSample] = []
     private var staticPosePlaneSamples: [StaticPosePlaneSample] = []
@@ -939,7 +946,9 @@ final class ScannerViewModel: ObservableObject {
         motionFrameQualityService: MotionFrameQualityService = MotionFrameQualityService(),
         arKitCaptureAssistService: ARKitCaptureAssistService = ARKitCaptureAssistService(),
         stlExporter: STLExporter = STLExporter(),
-        scanStorageManager: ScanStorageManager = ScanStorageManager()
+        scanStorageManager: ScanStorageManager = ScanStorageManager(),
+        diagnosticsRecorder: ScanDiagnosticsRecorder = ScanDiagnosticsRecorder(),
+        crashReportingService: CrashReportingService = NoopCrashReportingService()
     ) {
         self.cameraService = cameraService
         self.arUcoDetector = arUcoDetector
@@ -951,6 +960,8 @@ final class ScannerViewModel: ObservableObject {
         self.arKitCaptureAssistService = arKitCaptureAssistService
         self.stlExporter = stlExporter
         self.scanStorageManager = scanStorageManager
+        self.diagnosticsRecorder = diagnosticsRecorder
+        self.crashReportingService = crashReportingService
         self.isOpenCVAvailable = arUcoDetector.isOpenCVAvailable
         bindCameraCallbacks()
     }
@@ -1027,11 +1038,15 @@ final class ScannerViewModel: ObservableObject {
         await MainActor.run {
             cameraState = .running
             updateScreenAwakeState()
+            recordDiagnosticEvent(name: "camera_started")
         }
     }
 
     @MainActor
     func stopCamera() {
+        if scanState == .scanning || scanState == .stabilizing {
+            recordDiagnosticEvent(name: "scan_aborted", message: scanReadinessBlockerSummary)
+        }
         shouldRunCamera = false
         cameraService.stopRunning()
         motionFrameQualityService.stop()
@@ -1042,10 +1057,12 @@ final class ScannerViewModel: ObservableObject {
         turnOffTorchForInactiveCamera()
         guard cameraState != .failed else {
             updateScreenAwakeState()
+            recordDiagnosticEvent(name: "camera_stopped")
             return
         }
         cameraState = .ready
         updateScreenAwakeState()
+        recordDiagnosticEvent(name: "camera_stopped")
     }
 
     @MainActor
@@ -1511,9 +1528,66 @@ final class ScannerViewModel: ObservableObject {
     @MainActor
     func startScan() {
         resetScanSession()
+        resetScanDiagnostics()
         setScanState(.scanning)
         scanQualityStatus = "Capturando"
         scanReadinessMessage = "Capturando"
+    }
+
+    @MainActor
+    private func resetScanDiagnostics() {
+        let timestamp = lastFrameTimestamp ?? Date().timeIntervalSinceReferenceDate
+        diagnosticsFileAvailable = false
+        lastDiagnosticsFileURL = nil
+        diagnosticsRecorder.startScan(
+            markerProfile: markerProfile.rawValue,
+            expectedMarkerIds: expectedExportMarkerIds(for: markerProfile),
+            timestamp: timestamp,
+            createdAt: Self.reportDateFormatter.string(from: Date())
+        )
+        lastDiagnosticsSnapshotPublishTimestamp = nil
+        currentScanDiagnosticsSnapshot = makeCurrentDiagnosticsSnapshot(timestamp: timestamp)
+    }
+
+    @MainActor
+    private func recordDiagnosticEvent(
+        name: String,
+        markerId: Int? = nil,
+        message: String? = nil,
+        metadata: [String: String]? = nil,
+        timestamp: Double? = nil
+    ) {
+        guard diagnosticsEnabled else {
+            return
+        }
+
+        diagnosticsRecorder.record(
+            name: name,
+            timestamp: timestamp ?? lastFrameTimestamp ?? Date().timeIntervalSinceReferenceDate,
+            markerId: markerId,
+            message: message,
+            metadata: metadata
+        )
+        publishDiagnosticsSnapshotIfNeeded(
+            timestamp: timestamp ?? lastFrameTimestamp ?? Date().timeIntervalSinceReferenceDate,
+            force: true
+        )
+    }
+
+    @MainActor
+    private func publishDiagnosticsSnapshotIfNeeded(
+        timestamp: Double,
+        force: Bool = false
+    ) {
+        let safeTimestamp = sanitizedDiagnosticsTimestamp(timestamp)
+        if !force,
+           let lastDiagnosticsSnapshotPublishTimestamp,
+           safeTimestamp - lastDiagnosticsSnapshotPublishTimestamp < 0.5 {
+            return
+        }
+
+        currentScanDiagnosticsSnapshot = makeCurrentDiagnosticsSnapshot(timestamp: safeTimestamp)
+        lastDiagnosticsSnapshotPublishTimestamp = safeTimestamp
     }
 
     @MainActor
@@ -2012,6 +2086,15 @@ final class ScannerViewModel: ObservableObject {
             self.currentARKitFrameQuality = arKitQuality
             self.currentCameraFrameQuality = frame.cameraQuality
             self.currentCameraDebugSnapshot = frame.cameraDebugSnapshot
+            self.diagnosticsRecorder.recordFocusState(
+                isStable: frame.cameraQuality.isFocusStable,
+                timestamp: metrics.lastFrameTimestamp
+            )
+            self.diagnosticsRecorder.recordMarkersSeen(
+                markerIds: poseMetrics.rawPoseResults.map(\.markerId),
+                timestamp: metrics.lastFrameTimestamp,
+                expectedMarkerIds: self.expectedExportMarkerIds(for: activeMarkerProfile)
+            )
             self.scanLastFrameProcessingTimeMs = frameProcessingTimeMs.isFinite
                 ? frameProcessingTimeMs
                 : nil
@@ -2349,6 +2432,12 @@ final class ScannerViewModel: ObservableObject {
                 cameraFocusRejectedFrameCount += 1
             }
 
+            recordDiagnosticFrame(
+                accepted: false,
+                rejectedByFocus: cameraBlocker.contains("foco"),
+                rejectedByBlur: cameraBlocker.contains("fora de foco"),
+                timestamp: timestamp
+            )
             updateScanProgressAndState(
                 timestamp: timestamp
             )
@@ -2375,6 +2464,11 @@ final class ScannerViewModel: ObservableObject {
                 averageReprojectionError: frameReprojectionError
             )
             scanLastBadFrameReason = scanCurrentFrameReadinessBlocker
+            recordDiagnosticFrame(
+                accepted: false,
+                rejectedByReprojection: true,
+                timestamp: timestamp
+            )
             updateScanProgressAndState(
                 timestamp: timestamp
             )
@@ -2399,6 +2493,19 @@ final class ScannerViewModel: ObservableObject {
                 frameReprojectionError: goodFrameReprojectionError,
                 timestamp: timestamp
             ) else {
+                let rejectedByFocus = guidedStaticStageState.contains("foco")
+                let rejectedByMotion = guidedStaticStageState.contains("estabilidade")
+                let rejectedByNormal = guidedStaticStageState.contains("normal")
+                let rejectedByReprojection = guidedStaticStageState.contains("reprojection") ||
+                    guidedStaticStageState.contains("marker")
+                recordDiagnosticFrame(
+                    accepted: false,
+                    rejectedByFocus: rejectedByFocus,
+                    rejectedByMotion: rejectedByMotion,
+                    rejectedByNormal: rejectedByNormal,
+                    rejectedByReprojection: rejectedByReprojection,
+                    timestamp: timestamp
+                )
                 updateScanProgressAndState(
                     timestamp: timestamp
                 )
@@ -2414,6 +2521,10 @@ final class ScannerViewModel: ObservableObject {
         }) {
             scanMotionPenalizedFrameCount += 1
         }
+        recordDiagnosticFrame(
+            accepted: true,
+            timestamp: timestamp
+        )
         scanValidFrameCount += 1
         self.finalPoseObservations.append(contentsOf: acceptedFinalPoseObservations)
         trimFinalPoseObservationBuffer()
@@ -2769,6 +2880,19 @@ final class ScannerViewModel: ObservableObject {
     ) {
         let distanceMm = pose?.distanceMm
         lastDistanceGuideDistanceMm = distanceMm?.isFinite == true ? distanceMm : nil
+        defer {
+            guard diagnosticsEnabled else {
+                return
+            }
+            let timestamp = lastFrameTimestamp ?? Date().timeIntervalSinceReferenceDate
+            diagnosticsRecorder.recordDistanceState(
+                state: distanceGuideStateTitle,
+                distanceMm: lastDistanceGuideDistanceMm,
+                isReliable: distanceGuideSourceReliable,
+                timestamp: timestamp
+            )
+            publishDiagnosticsSnapshotIfNeeded(timestamp: timestamp)
+        }
 
         if cameraQuality.isAdjustingFocus ||
             cameraQuality.isFocusSettling ||
@@ -2845,6 +2969,7 @@ final class ScannerViewModel: ObservableObject {
         if !didCountCurrentArucoLoss {
             arucoLostCount += 1
             didCountCurrentArucoLoss = true
+            recordDiagnosticEvent(name: "marker_lost", message: "ArUco focus target lost", timestamp: timestamp)
         }
 
         requestCenterFocusRecoveryIfNeeded(
@@ -2894,6 +3019,13 @@ final class ScannerViewModel: ObservableObject {
         arucoFocusSettleUntilTimestamp = timestamp + cameraFocusSettleTimeSeconds
         focusRecoveryState = .focusingOnAruco
         scanLastBadFrameReason = "Focando na tag..."
+        recordDiagnosticEvent(
+            name: "focus_recovery_started",
+            markerId: target.markerId,
+            message: "focusing_on_aruco",
+            metadata: ["tagId": "\(target.tagId)"],
+            timestamp: timestamp
+        )
 
         let focusPoint = target.centerNormalized
         let lockAfterFocus = lockAfterArucoFocus
@@ -2919,6 +3051,11 @@ final class ScannerViewModel: ObservableObject {
                 } else {
                     self.focusRecoveryState = .waitingForAruco
                 }
+                self.recordDiagnosticEvent(
+                    name: "focus_recovery_finished",
+                    markerId: target.markerId,
+                    message: self.focusRecoveryState.rawValue
+                )
             }
         }
     }
@@ -2965,6 +3102,11 @@ final class ScannerViewModel: ObservableObject {
         arucoFocusSettleUntilTimestamp = timestamp + cameraFocusSettleTimeSeconds
         focusRecoveryState = .recoveringFocus
         scanLastBadFrameReason = "Recuperando foco no centro..."
+        recordDiagnosticEvent(
+            name: "focus_recovery_started",
+            message: "center_recovery",
+            timestamp: timestamp
+        )
 
         let settleTimeSeconds = cameraFocusSettleTimeSeconds
         Task { [weak self] in
@@ -2986,6 +3128,10 @@ final class ScannerViewModel: ObservableObject {
                 } else {
                     self.focusRecoveryState = .waitingForAruco
                 }
+                self.recordDiagnosticEvent(
+                    name: "focus_recovery_finished",
+                    message: self.focusRecoveryState.rawValue
+                )
             }
         }
     }
@@ -3836,6 +3982,33 @@ final class ScannerViewModel: ObservableObject {
         }
 
         return "Capturando"
+    }
+
+    @MainActor
+    private func recordDiagnosticFrame(
+        accepted: Bool,
+        rejectedByFocus: Bool = false,
+        rejectedByBlur: Bool = false,
+        rejectedByMotion: Bool = false,
+        rejectedByNormal: Bool = false,
+        rejectedByReprojection: Bool = false,
+        timestamp: Double
+    ) {
+        guard diagnosticsEnabled else {
+            return
+        }
+
+        diagnosticsRecorder.recordFrame(
+            timestamp: timestamp,
+            fps: estimatedFPS,
+            accepted: accepted,
+            rejectedByFocus: rejectedByFocus,
+            rejectedByBlur: rejectedByBlur,
+            rejectedByMotion: rejectedByMotion,
+            rejectedByNormal: rejectedByNormal,
+            rejectedByReprojection: rejectedByReprojection
+        )
+        publishDiagnosticsSnapshotIfNeeded(timestamp: timestamp)
     }
 
     func cameraReadinessWarning() -> String? {
@@ -6575,6 +6748,43 @@ final class ScannerViewModel: ObservableObject {
         return timestamp
     }
 
+    private func makeCurrentDiagnosticsSnapshot(timestamp: Double? = nil) -> ScanDiagnosticsSnapshot {
+        diagnosticsRecorder.makeSnapshot(
+            timestamp: sanitizedDiagnosticsTimestamp(timestamp ?? lastFrameTimestamp),
+            markerProfile: markerProfile.rawValue,
+            exportGateReason: exportGateBlockedReason,
+            scanConfidence: scanFinalConfidenceSummary == "-" ? nil : scanFinalConfidenceSummary,
+            mainIssue: scanFinalMainIssueSummary == "-" ? nil : scanFinalMainIssueSummary,
+            focusRecoveryState: focusRecoveryState.rawValue,
+            focusRecoveryCount: arucoLostCount + centerFocusRecoveryCount,
+            arucoLostCount: arucoLostCount,
+            centerFocusRecoveryCount: centerFocusRecoveryCount,
+            distanceGuideState: distanceGuideStateTitle,
+            lastDistanceMm: lastDistanceGuideDistanceMm ?? poseDistanceMm,
+            currentBlockingReason: scanReadinessBlockerSummary,
+            guidedStaticCaptureEnabled: guidedStaticCaptureEnabled,
+            guidedStages: guidedStaticCaptureEnabled
+                ? guidedStaticStageSnapshots.map(diagnosticsGuidedStageSummary)
+                : nil
+        )
+    }
+
+    private func diagnosticsGuidedStageSummary(
+        _ stage: GuidedStaticStageSnapshot
+    ) -> ScanDiagnosticsSnapshot.GuidedStageSummary {
+        ScanDiagnosticsSnapshot.GuidedStageSummary(
+            stageName: stage.stageName,
+            framesAccepted: stage.framesAccepted,
+            framesRejectedByFocus: stage.framesRejectedByFocus,
+            framesRejectedByMotion: stage.framesRejectedByMotion,
+            framesRejectedByNormal: stage.framesRejectedByNormal,
+            framesRejectedByReprojection: stage.framesRejectedByReprojection,
+            markersSeen: stage.markersSeen.isEmpty ? nil : stage.markersSeen,
+            markersAccepted: stage.markersAccepted.isEmpty ? nil : stage.markersAccepted,
+            normalStdDegreesMean: finiteReportDouble(stage.normalStdDegreesMean)
+        )
+    }
+
     private func updateExportDiagnostics() {
         updateFinalConfidenceSummary()
         let exportGate = currentExportGateValidation()
@@ -6603,6 +6813,13 @@ final class ScannerViewModel: ObservableObject {
         exportGateInvalidMarkerIds = exportGate.invalidMarkerIds
         exportGateBlockedReason = exportGate.blockedReason
         exportGateMarkerValidations = exportGate.markerValidations
+        diagnosticsRecorder.updateMarkerSummaries(
+            validations: exportGate.markerValidations,
+            diagnosticsByMarkerId: finalObservationDiagnosticsByMarkerId,
+            timestamp: sanitizedDiagnosticsTimestamp(lastFrameTimestamp),
+            expectedMarkerIds: expectedExportMarkerIds(for: exportGate.markerProfile)
+        )
+        currentScanDiagnosticsSnapshot = makeCurrentDiagnosticsSnapshot()
     }
 
     private func updateFinalConfidenceSummary() {
@@ -7620,6 +7837,7 @@ final class ScannerViewModel: ObservableObject {
         lastSTLExportBottomCenterYMillimeters = exportSTLExporter.bottomTagCenterYMillimeters
 
         if let blockedReason = exportGate.blockedReason {
+            recordDiagnosticEvent(name: "export_blocked", message: blockedReason)
             stlExportURL = nil
             stlExportedImplantCount = 0
             stlExportErrorMessage = blockedReason
@@ -7632,6 +7850,7 @@ final class ScannerViewModel: ObservableObject {
         }
 
         guard !currentTagPoses.isEmpty else {
+            recordDiagnosticEvent(name: "export_blocked", message: "empty_tag_pose_list")
             stlExportURL = nil
             stlExportedImplantCount = 0
             stlExportErrorMessage = STLExporter.ExportError.emptyTagPoseList.localizedDescription
@@ -7652,6 +7871,11 @@ final class ScannerViewModel: ObservableObject {
             createdAt: scanDate,
             markerProfile: currentMarkerProfile,
             tagPoses: currentTagPoses
+        )
+        recordDiagnosticEvent(name: "export_success")
+        recordDiagnosticEvent(name: "scan_finished")
+        let diagnosticsSnapshot = makeCurrentDiagnosticsSnapshot(
+            timestamp: lastFrameTimestamp ?? Date().timeIntervalSinceReferenceDate
         )
         let exportedTagCount = currentTagPoses.count
         let exportGenerationID = UUID()
@@ -7683,7 +7907,8 @@ final class ScannerViewModel: ObservableObject {
                 let scan = try scanStorageManager.saveScan(
                     stlData: stlData,
                     name: scanName,
-                    technicalReport: technicalReport
+                    technicalReport: technicalReport,
+                    diagnostics: diagnosticsSnapshot
                 )
                 result = .success(scan)
             } catch {
@@ -7705,6 +7930,10 @@ final class ScannerViewModel: ObservableObject {
                 switch result {
                 case .success(let scan):
                     self.stlExportURL = scan.fileURL
+                    self.lastDiagnosticsFileURL = scan.diagnosticsURL
+                    self.diagnosticsFileAvailable = scan.diagnosticsURL.map {
+                        FileManager.default.fileExists(atPath: $0.path)
+                    } ?? false
                     self.stlExportedImplantCount = exportedTagCount
                     self.stlExportErrorMessage = nil
                     self.lastSTLExportEventMessage = self.makeSTLExportEventMessage(
@@ -7719,6 +7948,7 @@ final class ScannerViewModel: ObservableObject {
                         self.scanReadinessBlockerSummary = "Pronto: STL gerado"
                     }
                 case .failure(let error):
+                    self.recordDiagnosticEvent(name: "export_blocked", message: error.localizedDescription)
                     self.stlExportURL = nil
                     self.stlExportedImplantCount = 0
                     self.stlExportErrorMessage = error.localizedDescription
@@ -7762,6 +7992,7 @@ final class ScannerViewModel: ObservableObject {
             createdAt: Self.reportDateFormatter.string(from: createdAt),
             markerProfile: markerProfile.rawValue,
             stlFileName: nil,
+            diagnosticsFileName: nil,
             device: ScanTechnicalReport.Device(
                 model: UIDevice.current.model,
                 iosVersion: UIDevice.current.systemVersion,

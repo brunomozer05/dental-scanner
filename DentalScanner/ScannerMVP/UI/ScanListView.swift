@@ -27,6 +27,7 @@ struct ScanListView: View {
                             ScanRowView(
                                 scan: scan,
                                 hasReport: reportURLIfAvailable(for: scan) != nil,
+                                hasDiagnostics: diagnosticsURLIfAvailable(for: scan) != nil,
                                 isSelectionModeActive: isSelectionModeActive,
                                 isSelected: selectedScanIDs.contains(scan.id)
                             )
@@ -149,7 +150,7 @@ struct ScanListView: View {
                 Button {
                     shareAllScans()
                 } label: {
-                    Label("Compartilhar todos STL + Reports", systemImage: "square.and.arrow.up")
+                    Label("Compartilhar todos STL + Reports + Diagnostics", systemImage: "square.and.arrow.up")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -168,6 +169,13 @@ struct ScanListView: View {
                         Label("Compartilhar todos Reports JSON", systemImage: "doc.text")
                     }
                     .disabled(allReportURLs.isEmpty)
+
+                    Button {
+                        shareAllDiagnostics()
+                    } label: {
+                        Label("Compartilhar todos Diagnostics JSON", systemImage: "waveform.path.ecg")
+                    }
+                    .disabled(allDiagnosticsURLs.isEmpty)
                 } label: {
                     Label("Mais opcoes de lote", systemImage: "ellipsis.circle")
                         .frame(maxWidth: .infinity)
@@ -238,6 +246,10 @@ struct ScanListView: View {
 
     private var allReportURLs: [URL] {
         reportURLs(for: scans)
+    }
+
+    private var allDiagnosticsURLs: [URL] {
+        diagnosticsURLs(for: scans)
     }
 
     private func reloadScans() {
@@ -313,12 +325,33 @@ struct ScanListView: View {
         return inferredReportURL
     }
 
+    private func diagnosticsURLIfAvailable(for scan: ScanItem) -> URL? {
+        if let diagnosticsURL = scan.diagnosticsURL,
+           fileManager.fileExists(atPath: diagnosticsURL.path) {
+            return diagnosticsURL
+        }
+
+        let inferredDiagnosticsURL = scan.fileURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("\(scan.fileURL.deletingPathExtension().lastPathComponent)_diagnostics.json")
+
+        guard fileManager.fileExists(atPath: inferredDiagnosticsURL.path) else {
+            return nil
+        }
+
+        return inferredDiagnosticsURL
+    }
+
     private func shareURLs(for scans: [ScanItem]) -> [URL] {
         let urls = scans.flatMap { scan -> [URL] in
             var scanURLs = [scan.fileURL]
 
             if let reportURL = reportURLIfAvailable(for: scan) {
                 scanURLs.append(reportURL)
+            }
+
+            if let diagnosticsURL = diagnosticsURLIfAvailable(for: scan) {
+                scanURLs.append(diagnosticsURL)
             }
 
             return scanURLs
@@ -329,6 +362,10 @@ struct ScanListView: View {
 
     private func reportURLs(for scans: [ScanItem]) -> [URL] {
         uniqueURLs(scans.compactMap { reportURLIfAvailable(for: $0) })
+    }
+
+    private func diagnosticsURLs(for scans: [ScanItem]) -> [URL] {
+        uniqueURLs(scans.compactMap { diagnosticsURLIfAvailable(for: $0) })
     }
 
     private func uniqueURLs(_ urls: [URL]) -> [URL] {
@@ -380,6 +417,14 @@ struct ScanListView: View {
         )
     }
 
+    private func shareAllDiagnostics() {
+        shareScanFiles(
+            urls: allDiagnosticsURLs,
+            emptyMessage: "Nenhum diagnostics para compartilhar",
+            statusPrefix: "Compartilhando diagnostics"
+        )
+    }
+
     private func shareScanFiles(
         urls: [URL],
         emptyMessage: String,
@@ -405,16 +450,28 @@ struct ScanListView: View {
         }
 
         if let reportURL = reportURLIfAvailable(for: scan) {
+            let packageURLs = uniqueURLs(
+                [scan.fileURL, reportURL] + [diagnosticsURLIfAvailable(for: scan)].compactMap { $0 }
+            )
+
             Button {
-                shareFiles(urls: [scan.fileURL, reportURL])
+                shareFiles(urls: packageURLs)
             } label: {
-                Label("Compartilhar STL + Report", systemImage: "doc.on.doc")
+                Label("Compartilhar pacote diagnostico", systemImage: "doc.on.doc")
             }
 
             Button {
                 shareFile(url: reportURL)
             } label: {
                 Label("Compartilhar Report JSON", systemImage: "doc.text")
+            }
+
+            if let diagnosticsURL = diagnosticsURLIfAvailable(for: scan) {
+                Button {
+                    shareFile(url: diagnosticsURL)
+                } label: {
+                    Label("Compartilhar Diagnostics JSON", systemImage: "waveform.path.ecg")
+                }
             }
         } else {
             Button {} label: {
@@ -445,10 +502,14 @@ struct ScanListView: View {
         }
 
         if let reportURL = reportURLIfAvailable(for: scan) {
+            let packageURLs = uniqueURLs(
+                [scan.fileURL, reportURL] + [diagnosticsURLIfAvailable(for: scan)].compactMap { $0 }
+            )
+
             Button {
-                shareFiles(urls: [scan.fileURL, reportURL])
+                shareFiles(urls: packageURLs)
             } label: {
-                Label("STL + Report", systemImage: "doc.on.doc")
+                Label("Pacote", systemImage: "doc.on.doc")
             }
             .tint(Color(red: 0.23, green: 0.51, blue: 0.96))
 
@@ -458,6 +519,15 @@ struct ScanListView: View {
                 Label("Report", systemImage: "doc.text")
             }
             .tint(Color(red: 0.19, green: 0.66, blue: 0.44))
+
+            if let diagnosticsURL = diagnosticsURLIfAvailable(for: scan) {
+                Button {
+                    shareFile(url: diagnosticsURL)
+                } label: {
+                    Label("Diag", systemImage: "waveform.path.ecg")
+                }
+                .tint(Color(red: 0.62, green: 0.46, blue: 0.95))
+            }
         } else {
             Button {
                 shareFile(url: scan.fileURL)
@@ -472,6 +542,7 @@ struct ScanListView: View {
 private struct ScanRowView: View {
     let scan: ScanItem
     let hasReport: Bool
+    let hasDiagnostics: Bool
     let isSelectionModeActive: Bool
     let isSelected: Bool
 
@@ -501,9 +572,9 @@ private struct ScanRowView: View {
                     .font(.caption)
                     .foregroundStyle(Color.white.opacity(0.62))
 
-                Text(hasReport ? "Report JSON disponivel" : "Report indisponivel")
+                Text(statusText)
                     .font(.caption2)
-                    .foregroundStyle(hasReport ? Color.green.opacity(0.82) : Color.white.opacity(0.38))
+                    .foregroundStyle(hasReport || hasDiagnostics ? Color.green.opacity(0.82) : Color.white.opacity(0.38))
             }
 
             Spacer()
@@ -515,6 +586,19 @@ private struct ScanRowView: View {
             }
         }
         .padding(.vertical, 8)
+    }
+
+    private var statusText: String {
+        switch (hasReport, hasDiagnostics) {
+        case (true, true):
+            return "Report + diagnostics disponiveis"
+        case (true, false):
+            return "Report JSON disponivel"
+        case (false, true):
+            return "Diagnostics JSON disponivel"
+        case (false, false):
+            return "Report indisponivel"
+        }
     }
 
     private static let dateFormatter: DateFormatter = {

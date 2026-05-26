@@ -190,6 +190,22 @@ struct ScannerDebugSnapshot: Equatable {
         let diagnosticsUpdateHz: String
     }
 
+    struct DiagnosticsSection: Equatable {
+        let enabled: String
+        let eventsCount: String
+        let lastEvent: String
+        let fileAvailable: String
+        let fpsMean: String
+        let fpsMin: String
+        let scanDuration: String
+        let currentBlockingReason: String
+        let lastExportBlockReason: String
+        let slowestMarker: String
+        let timeToAllMarkersSeen: String
+        let timeToAllMarkersExportable: String
+        let extraTimeAfter100Percent: String
+    }
+
     struct GuidedStaticSection: Equatable {
         let enabled: String
         let currentStage: String
@@ -263,6 +279,7 @@ struct ScannerDebugSnapshot: Equatable {
     let exportQuality: ExportQualitySection
     let exportGate: ExportGateSection
     let performance: PerformanceSection
+    let diagnostics: DiagnosticsSection
     let guidedStatic: GuidedStaticSection
     let isDualArucoV2: Bool
     let markerV2Rows: [MarkerV2Row]
@@ -414,6 +431,12 @@ extension ScannerViewModel {
                 lastFrameProcessingTimeMs: Self.debugMilliseconds(scanLastFrameProcessingTimeMs),
                 diagnosticsUpdateHz: Self.debugNumber(diagnosticsUpdateHz, decimals: 1)
             ),
+            diagnostics: Self.debugDiagnosticsSection(
+                currentScanDiagnosticsSnapshot,
+                enabled: diagnosticsEnabled,
+                fileAvailable: diagnosticsFileAvailable,
+                lastExportBlockReason: exportGateBlockedReason
+            ),
             guidedStatic: Self.debugGuidedStaticSection(
                 enabled: guidedStaticCaptureEnabled,
                 currentStage: guidedStaticStageSnapshots.first {
@@ -495,6 +518,29 @@ extension ScannerViewModel {
             framesRejectedByReprojection: "\(framesRejectedByReprojection)",
             markersSeenThisStage: markersSeen,
             markersAcceptedThisStage: markersAccepted
+        )
+    }
+
+    private static func debugDiagnosticsSection(
+        _ snapshot: ScanDiagnosticsSnapshot,
+        enabled: Bool,
+        fileAvailable: Bool,
+        lastExportBlockReason: String?
+    ) -> ScannerDebugSnapshot.DiagnosticsSection {
+        ScannerDebugSnapshot.DiagnosticsSection(
+            enabled: enabled ? "Sim" : "Nao",
+            eventsCount: "\(snapshot.eventsCount)",
+            lastEvent: debugText(snapshot.lastEventName),
+            fileAvailable: fileAvailable ? "Sim" : "Nao",
+            fpsMean: debugNumber(snapshot.fpsMean, decimals: 1),
+            fpsMin: debugNumber(snapshot.fpsMin, decimals: 1),
+            scanDuration: debugSeconds(snapshot.scanDurationSeconds),
+            currentBlockingReason: debugText(snapshot.currentBlockingReason),
+            lastExportBlockReason: debugText(lastExportBlockReason),
+            slowestMarker: snapshot.slowestMarkerId.map { "M\($0)" } ?? ScannerDebugSnapshot.missingValue,
+            timeToAllMarkersSeen: debugSeconds(snapshot.timeToAllMarkersSeenSeconds),
+            timeToAllMarkersExportable: debugSeconds(snapshot.timeToAllMarkersExportableSeconds),
+            extraTimeAfter100Percent: debugSeconds(snapshot.extraTimeAfterAllMarkers100PercentSeconds)
         )
     }
 

@@ -6,19 +6,22 @@ struct ScanItem: Identifiable, Codable {
     let date: Date
     let fileURL: URL
     let reportURL: URL?
+    let diagnosticsURL: URL?
 
     init(
         id: UUID,
         name: String,
         date: Date,
         fileURL: URL,
-        reportURL: URL? = nil
+        reportURL: URL? = nil,
+        diagnosticsURL: URL? = nil
     ) {
         self.id = id
         self.name = name
         self.date = date
         self.fileURL = fileURL
         self.reportURL = reportURL
+        self.diagnosticsURL = diagnosticsURL
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -27,6 +30,7 @@ struct ScanItem: Identifiable, Codable {
         case date
         case fileURL
         case reportURL
+        case diagnosticsURL
     }
 
     init(from decoder: Decoder) throws {
@@ -36,6 +40,7 @@ struct ScanItem: Identifiable, Codable {
         date = try container.decode(Date.self, forKey: .date)
         fileURL = try container.decode(URL.self, forKey: .fileURL)
         reportURL = try container.decodeIfPresent(URL.self, forKey: .reportURL)
+        diagnosticsURL = try container.decodeIfPresent(URL.self, forKey: .diagnosticsURL)
     }
 }
 
@@ -70,7 +75,8 @@ final class ScanStorageManager {
     func saveScan(
         stlData: Data,
         name: String,
-        technicalReport: ScanTechnicalReport? = nil
+        technicalReport: ScanTechnicalReport? = nil,
+        diagnostics: ScanDiagnosticsSnapshot? = nil
     ) throws -> ScanItem {
         let documentsURL = try documentsDirectoryURL()
         let fileURL = uniqueFileURL(
@@ -79,9 +85,14 @@ final class ScanStorageManager {
         )
 
         try stlData.write(to: fileURL, options: .atomic)
+        let diagnosticsURL = try saveDiagnosticsIfNeeded(
+            diagnostics,
+            forSTLFileURL: fileURL
+        )
         let reportURL = try saveTechnicalReportIfNeeded(
             technicalReport,
-            forSTLFileURL: fileURL
+            forSTLFileURL: fileURL,
+            diagnosticsURL: diagnosticsURL
         )
 
         let scan = ScanItem(
@@ -89,7 +100,8 @@ final class ScanStorageManager {
             name: fileURL.lastPathComponent,
             date: Date(),
             fileURL: fileURL,
-            reportURL: reportURL
+            reportURL: reportURL,
+            diagnosticsURL: diagnosticsURL
         )
         var scans = loadScans()
         scans.insert(scan, at: 0)
@@ -118,6 +130,11 @@ final class ScanStorageManager {
         if let reportURL = scan.reportURL,
            fileManager.fileExists(atPath: reportURL.path) {
             try? fileManager.removeItem(at: reportURL)
+        }
+
+        if let diagnosticsURL = scan.diagnosticsURL,
+           fileManager.fileExists(atPath: diagnosticsURL.path) {
+            try? fileManager.removeItem(at: diagnosticsURL)
         }
 
         let scans = loadScans().filter { $0.id != scan.id }
@@ -168,13 +185,15 @@ final class ScanStorageManager {
 
     private func saveTechnicalReportIfNeeded(
         _ report: ScanTechnicalReport?,
-        forSTLFileURL stlFileURL: URL
+        forSTLFileURL stlFileURL: URL,
+        diagnosticsURL: URL?
     ) throws -> URL? {
         guard var report else {
             return nil
         }
 
         report.stlFileName = stlFileURL.lastPathComponent
+        report.diagnosticsFileName = diagnosticsURL?.lastPathComponent
         let reportFileName = "\(stlFileURL.deletingPathExtension().lastPathComponent)_report.json"
         let reportURL = stlFileURL
             .deletingLastPathComponent()
@@ -185,6 +204,26 @@ final class ScanStorageManager {
         try reportData.write(to: reportURL, options: .atomic)
 
         return reportURL
+    }
+
+    private func saveDiagnosticsIfNeeded(
+        _ diagnostics: ScanDiagnosticsSnapshot?,
+        forSTLFileURL stlFileURL: URL
+    ) throws -> URL? {
+        guard let diagnostics else {
+            return nil
+        }
+
+        let diagnosticsFileName = "\(stlFileURL.deletingPathExtension().lastPathComponent)_diagnostics.json"
+        let diagnosticsURL = stlFileURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(diagnosticsFileName)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let diagnosticsData = try encoder.encode(diagnostics)
+        try diagnosticsData.write(to: diagnosticsURL, options: .atomic)
+
+        return diagnosticsURL
     }
 
     private func uniqueFileURL(
