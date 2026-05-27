@@ -210,6 +210,16 @@ struct ScannerDebugSnapshot: Equatable {
         let extraTimeAfter100Percent: String
         let distanceSamples: String
         let distanceValidPercent: String
+        let normalFinalizationState: String
+        let normalFinalizationStartedAt: String
+        let normalFinalizationElapsed: String
+        let normalFinalizationStableSeconds: String
+        let normalFinalizationFramesAccepted: String
+        let normalFinalizationRejectedByFocus: String
+        let normalFinalizationRejectedByMotion: String
+        let normalFinalizationRejectedByReprojection: String
+        let normalFinalizationRejectedByNormal: String
+        let normalFinalizationWillAutoExport: String
     }
 
     struct GuidedStaticSection: Equatable {
@@ -441,7 +451,18 @@ extension ScannerViewModel {
                 currentScanDiagnosticsSnapshot,
                 enabled: diagnosticsEnabled,
                 fileAvailable: diagnosticsFileAvailable,
-                lastExportBlockReason: exportGateBlockedReason
+                lastExportBlockReason: exportGateBlockedReason,
+                normalFinalizationState: normalFinalizationState,
+                normalFinalizationStartedAtTimestamp: normalFinalizationStartedAtTimestamp,
+                normalFinalizationElapsedSeconds: normalFinalizationElapsedSeconds(),
+                normalFinalizationStableSecondsCollected: normalFinalizationStableSecondsCollected,
+                normalFinalizationFramesAccepted: normalFinalizationFramesAccepted,
+                normalFinalizationFramesRejectedByFocus: normalFinalizationFramesRejectedByFocus,
+                normalFinalizationFramesRejectedByMotion: normalFinalizationFramesRejectedByMotion,
+                normalFinalizationFramesRejectedByReprojection: normalFinalizationFramesRejectedByReprojection,
+                normalFinalizationFramesRejectedByNormal: normalFinalizationFramesRejectedByNormal,
+                normalFinalizationWillAutoExport: shouldUseNormalScanFinalization &&
+                    normalFinalizationState == .stabilizing
             ),
             guidedStatic: Self.debugGuidedStaticSection(
                 enabled: guidedStaticCaptureEnabled,
@@ -531,7 +552,17 @@ extension ScannerViewModel {
         _ snapshot: ScanDiagnosticsSnapshot,
         enabled: Bool,
         fileAvailable: Bool,
-        lastExportBlockReason: String?
+        lastExportBlockReason: String?,
+        normalFinalizationState: NormalScanFinalizationState,
+        normalFinalizationStartedAtTimestamp: Double?,
+        normalFinalizationElapsedSeconds: Double?,
+        normalFinalizationStableSecondsCollected: Double,
+        normalFinalizationFramesAccepted: Int,
+        normalFinalizationFramesRejectedByFocus: Int,
+        normalFinalizationFramesRejectedByMotion: Int,
+        normalFinalizationFramesRejectedByReprojection: Int,
+        normalFinalizationFramesRejectedByNormal: Int,
+        normalFinalizationWillAutoExport: Bool
     ) -> ScannerDebugSnapshot.DiagnosticsSection {
         ScannerDebugSnapshot.DiagnosticsSection(
             enabled: enabled ? "Sim" : "Nao",
@@ -553,7 +584,19 @@ extension ScannerViewModel {
             timeToAllMarkersExportable: debugSeconds(snapshot.timeToAllMarkersExportableSeconds),
             extraTimeAfter100Percent: debugSeconds(snapshot.extraTimeAfterAllMarkers100PercentSeconds),
             distanceSamples: "\(snapshot.distanceSamplesValid)/\(snapshot.distanceSamplesTotal)",
-            distanceValidPercent: debugPercent(snapshot.distanceValidPercent)
+            distanceValidPercent: debugPercent(snapshot.distanceValidPercent),
+            normalFinalizationState: normalFinalizationState.debugTitle,
+            normalFinalizationStartedAt: normalFinalizationStartedAtTimestamp == nil
+                ? ScannerDebugSnapshot.missingValue
+                : "Sim",
+            normalFinalizationElapsed: debugSeconds(normalFinalizationElapsedSeconds),
+            normalFinalizationStableSeconds: debugSeconds(normalFinalizationStableSecondsCollected),
+            normalFinalizationFramesAccepted: "\(normalFinalizationFramesAccepted)",
+            normalFinalizationRejectedByFocus: "\(normalFinalizationFramesRejectedByFocus)",
+            normalFinalizationRejectedByMotion: "\(normalFinalizationFramesRejectedByMotion)",
+            normalFinalizationRejectedByReprojection: "\(normalFinalizationFramesRejectedByReprojection)",
+            normalFinalizationRejectedByNormal: "\(normalFinalizationFramesRejectedByNormal)",
+            normalFinalizationWillAutoExport: normalFinalizationWillAutoExport ? "Sim" : "Nao"
         )
     }
 

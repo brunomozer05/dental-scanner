@@ -24,6 +24,15 @@ struct ScanTechnicalReport: Codable {
     var distanceGuideState: String?
     var lastDistanceMm: Double?
     var tagAreaPixelsMean: Double?
+    var normalFinalizationState: String?
+    var normalFinalizationStartedAtSeconds: Double?
+    var normalFinalizationDurationSeconds: Double?
+    var normalFinalizationFramesAccepted: Int?
+    var normalFinalizationFramesRejectedByFocus: Int?
+    var normalFinalizationFramesRejectedByMotion: Int?
+    var normalFinalizationFramesRejectedByReprojection: Int?
+    var normalFinalizationFramesRejectedByNormal: Int?
+    var autoExportTriggered: Bool?
     var guidedStaticCaptureEnabled: Bool?
     var guidedStaticStages: [GuidedStaticStage]?
 

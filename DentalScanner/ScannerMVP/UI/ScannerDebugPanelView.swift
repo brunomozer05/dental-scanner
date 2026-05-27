@@ -190,6 +190,19 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Extra after 100%", value: snapshot.diagnostics.extraTimeAfter100Percent)
                         debugRow(title: "Distance samples", value: snapshot.diagnostics.distanceSamples)
                         debugRow(title: "Distance valid", value: snapshot.diagnostics.distanceValidPercent)
+                        debugRow(title: "Normal final state", value: snapshot.diagnostics.normalFinalizationState)
+                        debugRow(title: "Finalization started", value: snapshot.diagnostics.normalFinalizationStartedAt)
+                        debugRow(title: "Finalization elapsed", value: snapshot.diagnostics.normalFinalizationElapsed)
+                        debugRow(title: "Stable collected", value: snapshot.diagnostics.normalFinalizationStableSeconds)
+                        debugRow(title: "Final frames OK", value: snapshot.diagnostics.normalFinalizationFramesAccepted)
+                        debugRow(title: "Final reject focus", value: snapshot.diagnostics.normalFinalizationRejectedByFocus)
+                        debugRow(title: "Final reject motion", value: snapshot.diagnostics.normalFinalizationRejectedByMotion)
+                        debugRow(
+                            title: "Final reject reproj",
+                            value: snapshot.diagnostics.normalFinalizationRejectedByReprojection
+                        )
+                        debugRow(title: "Final reject normal", value: snapshot.diagnostics.normalFinalizationRejectedByNormal)
+                        debugRow(title: "Auto export", value: snapshot.diagnostics.normalFinalizationWillAutoExport)
                     }
 
                     debugSection(title: "Camera / Focus") {

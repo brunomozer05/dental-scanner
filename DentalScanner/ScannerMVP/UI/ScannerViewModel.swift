@@ -90,6 +90,29 @@ enum GuidedStaticCaptureStage: Int, CaseIterable {
     }
 }
 
+enum NormalScanFinalizationState: String, Equatable {
+    case notReady
+    case allMarkersExportable
+    case stabilizing
+    case exporting
+    case completed
+
+    var debugTitle: String {
+        switch self {
+        case .notReady:
+            return "not ready"
+        case .allMarkersExportable:
+            return "all markers exportable"
+        case .stabilizing:
+            return "stabilizing"
+        case .exporting:
+            return "exporting"
+        case .completed:
+            return "completed"
+        }
+    }
+}
+
 struct GuidedStaticStageSnapshot: Equatable, Identifiable {
     let stageIndex: Int
     let stageName: String
@@ -293,6 +316,11 @@ final class ScannerViewModel: ObservableObject {
         static let diagnosticsUpdateIntervalSeconds: Double = 0.25
         static let finalObservationDiagnosticsUpdateIntervalSeconds: Double = 0.25
         static let staticPoseDiagnosticsUpdateIntervalSeconds: Double = 0.25
+        static let normalFinalizationStableSeconds: Double = 3.0
+        static let normalFinalizationMaxSeconds: Double = 6.0
+        static let normalFinalizationRequireCameraStable: Bool = true
+        static let normalFinalizationRequireDistanceValid: Bool = true
+        static let normalFinalizationRequireFocusStable: Bool = true
         static let maximumStaticPoseSamplesPerMarker: Int = 180
         static let maximumStaticPosePairSamplesPerPair: Int = 180
         static let maximumStaticPosePlaneSamples: Int = 180
@@ -633,6 +661,15 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var currentScanDiagnosticsSnapshot: ScanDiagnosticsSnapshot = .empty
     @Published private(set) var diagnosticsFileAvailable: Bool = false
     @Published private(set) var lastDiagnosticsFileURL: URL?
+    @Published private(set) var normalFinalizationState: NormalScanFinalizationState = .notReady
+    @Published private(set) var normalFinalizationStartedAtTimestamp: Double?
+    @Published private(set) var normalFinalizationStableSecondsCollected: Double = 0
+    @Published private(set) var normalFinalizationFramesAccepted: Int = 0
+    @Published private(set) var normalFinalizationFramesRejectedByFocus: Int = 0
+    @Published private(set) var normalFinalizationFramesRejectedByMotion: Int = 0
+    @Published private(set) var normalFinalizationFramesRejectedByReprojection: Int = 0
+    @Published private(set) var normalFinalizationFramesRejectedByNormal: Int = 0
+    @Published private(set) var normalFinalizationAutoExportTriggered: Bool = false
     @Published private(set) var guidedStaticCaptureEnabled: Bool = false
     @Published private(set) var guidedStaticRequiredStages: Int =
         GuidedStaticCaptureConfiguration.defaultRequiredStages
@@ -755,6 +792,7 @@ final class ScannerViewModel: ObservableObject {
     private var lastStaticPoseDiagnosticsUpdateTimestamp: Double?
     private var lastDiagnosticsSnapshotPublishTimestamp: Double?
     private var lastBlockingReasonBeforeExport: String?
+    private var normalFinalizationLastAcceptedFrameTimestamp: Double?
     private var staticPoseSamples: [StaticPoseSample] = []
     private var staticPosePairDistanceSamples: [StaticPosePairDistanceSample] = []
     private var staticPosePlaneSamples: [StaticPosePlaneSample] = []
@@ -2364,6 +2402,7 @@ final class ScannerViewModel: ObservableObject {
         scanReadinessStableStartTimestamp = nil
         scanCurrentFrameIsGood = false
         scanCurrentFrameReadinessBlocker = nil
+        resetNormalScanFinalization()
         resetGuidedStaticCaptureState()
         resetPrecisionValidationHistory()
         finalPoseObservations = []
@@ -2388,6 +2427,20 @@ final class ScannerViewModel: ObservableObject {
         lastSTLExportMarkerProfile = markerProfile
         lastSTLExportBottomTagSizeMillimeters = nil
         lastSTLExportBottomCenterYMillimeters = nil
+    }
+
+    @MainActor
+    private func resetNormalScanFinalization() {
+        normalFinalizationState = .notReady
+        normalFinalizationStartedAtTimestamp = nil
+        normalFinalizationStableSecondsCollected = 0
+        normalFinalizationFramesAccepted = 0
+        normalFinalizationFramesRejectedByFocus = 0
+        normalFinalizationFramesRejectedByMotion = 0
+        normalFinalizationFramesRejectedByReprojection = 0
+        normalFinalizationFramesRejectedByNormal = 0
+        normalFinalizationAutoExportTriggered = false
+        normalFinalizationLastAcceptedFrameTimestamp = nil
     }
 
     @MainActor
@@ -2518,11 +2571,31 @@ final class ScannerViewModel: ObservableObject {
             acceptedFinalPoseObservations = goodFinalPoseObservations
         }
 
+        if normalFinalizationState == .stabilizing,
+           let rejectionReason = normalFinalizationFrameRejectionReason(
+            evaluationReprojectionError: goodFrameReprojectionError,
+            cameraQuality: cameraQuality,
+            motionQuality: motionQuality
+           ) {
+            recordNormalFinalizationRejection(rejectionReason)
+            recordDiagnosticFrame(
+                accepted: false,
+                rejectedByFocus: rejectionReason == .focus,
+                rejectedByMotion: rejectionReason == .motion,
+                rejectedByNormal: rejectionReason == .normal,
+                rejectedByReprojection: rejectionReason == .reprojection,
+                timestamp: timestamp
+            )
+            updateScanProgressAndState(timestamp: timestamp)
+            return
+        }
+
         if acceptedFinalPoseObservations.contains(where: {
             ($0.motionQuality?.stabilityScore ?? 1.0) < 0.999
         }) {
             scanMotionPenalizedFrameCount += 1
         }
+        recordNormalFinalizationAcceptedFrameIfNeeded(timestamp: timestamp)
         recordDiagnosticFrame(
             accepted: true,
             timestamp: timestamp
@@ -2554,6 +2627,75 @@ final class ScannerViewModel: ObservableObject {
         updateScanProgressAndState(
             timestamp: timestamp
         )
+    }
+
+    @MainActor
+    private func recordNormalFinalizationAcceptedFrameIfNeeded(timestamp: Double) {
+        guard normalFinalizationState == .stabilizing else {
+            return
+        }
+
+        normalFinalizationFramesAccepted += 1
+        if let normalFinalizationLastAcceptedFrameTimestamp,
+           timestamp > normalFinalizationLastAcceptedFrameTimestamp {
+            normalFinalizationStableSecondsCollected += min(
+                timestamp - normalFinalizationLastAcceptedFrameTimestamp,
+                0.25
+            )
+        }
+        normalFinalizationLastAcceptedFrameTimestamp = timestamp
+    }
+
+    private func normalFinalizationFrameRejectionReason(
+        evaluationReprojectionError: Double,
+        cameraQuality: CameraFrameQuality,
+        motionQuality: MotionFrameQuality
+    ) -> GuidedStaticRejectionReason? {
+        if ScanConfiguration.normalFinalizationRequireFocusStable &&
+            (!cameraQuality.isFocusStable || !cameraQuality.isSharpnessAcceptable) {
+            return .focus
+        }
+
+        if ScanConfiguration.normalFinalizationRequireCameraStable &&
+            (cameraQuality.isUnstable || cameraQuality.cameraStabilityScore < 0.5) {
+            return .focus
+        }
+
+        if motionQuality.isRecent,
+           (!motionQuality.isStable || motionQuality.stabilityScore < 0.5) {
+            return .motion
+        }
+
+        if ScanConfiguration.normalFinalizationRequireDistanceValid &&
+            !distanceGuideSourceReliable {
+            return .reprojection
+        }
+
+        if evaluationReprojectionError >
+            scanReadinessConfiguration.maximumAverageReprojectionError {
+            return .reprojection
+        }
+
+        if let scanRotationJitterDegrees,
+           scanRotationJitterDegrees > scanReadinessConfiguration.maximumRotationJitterDegrees {
+            return .normal
+        }
+
+        return nil
+    }
+
+    @MainActor
+    private func recordNormalFinalizationRejection(_ reason: GuidedStaticRejectionReason) {
+        switch reason {
+        case .focus:
+            normalFinalizationFramesRejectedByFocus += 1
+        case .motion:
+            normalFinalizationFramesRejectedByMotion += 1
+        case .normal:
+            normalFinalizationFramesRejectedByNormal += 1
+        case .reprojection:
+            normalFinalizationFramesRejectedByReprojection += 1
+        }
     }
 
     private func cameraFrameQualityBlocker(
@@ -3542,6 +3684,13 @@ final class ScannerViewModel: ObservableObject {
             return
         }
 
+        if updateNormalScanFinalizationIfNeeded(
+            evaluation: evaluation,
+            timestamp: currentTimestamp
+        ) {
+            return
+        }
+
         if isReady {
             setScanState(.ready)
             scanProgress = 100
@@ -3560,6 +3709,94 @@ final class ScannerViewModel: ObservableObject {
         )
         scanQualityStatus = scanReadinessMessage
         updateExportDiagnosticsIfNeeded(timestamp: timestamp)
+    }
+
+    @MainActor
+    private func updateNormalScanFinalizationIfNeeded(
+        evaluation: ScanReadinessEvaluation,
+        timestamp: Double
+    ) -> Bool {
+        guard shouldUseNormalScanFinalization else {
+            return false
+        }
+
+        guard evaluation.hasExportableTagPoses else {
+            if normalFinalizationState != .notReady {
+                resetNormalScanFinalization()
+            }
+            return false
+        }
+
+        if normalFinalizationState == .notReady {
+            normalFinalizationState = .allMarkersExportable
+            normalFinalizationStartedAtTimestamp = timestamp
+            normalFinalizationStableSecondsCollected = 0
+            normalFinalizationLastAcceptedFrameTimestamp = nil
+            recordDiagnosticEvent(name: "normal_finalization_started", timestamp: timestamp)
+        }
+
+        if normalFinalizationState == .allMarkersExportable {
+            normalFinalizationState = .stabilizing
+        }
+
+        let elapsedSeconds = normalFinalizationElapsedSeconds(at: timestamp) ?? 0
+        let hasStableWindow = normalFinalizationStableSecondsCollected >=
+            ScanConfiguration.normalFinalizationStableSeconds
+        let hitMaxWindow = elapsedSeconds >= ScanConfiguration.normalFinalizationMaxSeconds
+
+        if hasStableWindow || hitMaxWindow {
+            normalFinalizationState = .exporting
+            normalFinalizationAutoExportTriggered = true
+            recordDiagnosticEvent(
+                name: "normal_finalization_export_triggered",
+                metadata: [
+                    "elapsedSeconds": String(format: "%.2f", elapsedSeconds),
+                    "stableSeconds": String(format: "%.2f", normalFinalizationStableSecondsCollected),
+                    "reason": hasStableWindow ? "stable_window" : "max_window"
+                ],
+                timestamp: timestamp
+            )
+            setScanState(.ready)
+            scanProgress = 100
+            scanReadinessMessage = "Finalizando STL..."
+            scanQualityStatus = "Finalizando STL..."
+            scanReadinessBlockerSummary = "Pronto: finalizacao normal"
+            handleScanBecameReady()
+            normalFinalizationState = .completed
+            return true
+        }
+
+        setScanState(.stabilizing)
+        scanProgress = 99
+        scanReadinessMessage = "Todos capturados - mantenha parado"
+        scanQualityStatus = "Finalizando STL..."
+        scanReadinessBlockerSummary = "Pronto: finalizando scan normal"
+        updateExportDiagnosticsIfNeeded(timestamp: timestamp)
+        return true
+    }
+
+    private var shouldUseNormalScanFinalization: Bool {
+        markerProfile == .singleArucoV1 &&
+            !guidedStaticCaptureEnabled &&
+            !staticPoseStabilityMode &&
+            !hasSTLExportURL &&
+            stlExportURL == nil &&
+            !isGeneratingSTL
+    }
+
+    private func normalFinalizationElapsedSeconds(at timestamp: Double? = nil) -> Double? {
+        guard let normalFinalizationStartedAtTimestamp else {
+            return nil
+        }
+
+        let currentTimestamp = timestamp ?? lastFrameTimestamp ?? Date().timeIntervalSinceReferenceDate
+        guard currentTimestamp.isFinite,
+              currentTimestamp >= normalFinalizationStartedAtTimestamp
+        else {
+            return nil
+        }
+
+        return currentTimestamp - normalFinalizationStartedAtTimestamp
     }
 
     private func publishReadinessDiagnostics(
@@ -6768,6 +7005,15 @@ final class ScannerViewModel: ObservableObject {
             lastDistanceMm: lastDistanceGuideDistanceMm ?? poseDistanceMm,
             currentBlockingReason: currentBlockingReasonOverride ?? diagnosticsCurrentBlockingReason(),
             lastBlockingReasonBeforeExport: lastBlockingReasonBeforeExportOverride ?? lastBlockingReasonBeforeExport,
+            normalFinalizationState: normalFinalizationState.rawValue,
+            normalFinalizationStartedAt: normalFinalizationStartedAtTimestamp,
+            normalFinalizationDurationSeconds: normalFinalizationElapsedSeconds(),
+            normalFinalizationFramesAccepted: normalFinalizationFramesAccepted,
+            normalFinalizationFramesRejectedByFocus: normalFinalizationFramesRejectedByFocus,
+            normalFinalizationFramesRejectedByMotion: normalFinalizationFramesRejectedByMotion,
+            normalFinalizationFramesRejectedByReprojection: normalFinalizationFramesRejectedByReprojection,
+            normalFinalizationFramesRejectedByNormal: normalFinalizationFramesRejectedByNormal,
+            autoExportTriggered: normalFinalizationAutoExportTriggered,
             guidedStaticCaptureEnabled: guidedStaticCaptureEnabled,
             guidedStages: guidedStaticCaptureEnabled
                 ? guidedStaticStageSnapshots.map(diagnosticsGuidedStageSummary)
@@ -8066,6 +8312,17 @@ final class ScannerViewModel: ObservableObject {
             distanceGuideState: distanceGuideStateTitle,
             lastDistanceMm: finiteReportDouble(lastDistanceGuideDistanceMm ?? poseDistanceMm),
             tagAreaPixelsMean: finiteReportDouble(averageTagAreaPixelsForReport()),
+            normalFinalizationState: normalFinalizationState.rawValue,
+            normalFinalizationStartedAtSeconds: finiteReportDouble(
+                currentScanDiagnosticsSnapshot.normalFinalizationStartedAtSeconds
+            ),
+            normalFinalizationDurationSeconds: finiteReportDouble(normalFinalizationElapsedSeconds()),
+            normalFinalizationFramesAccepted: normalFinalizationFramesAccepted,
+            normalFinalizationFramesRejectedByFocus: normalFinalizationFramesRejectedByFocus,
+            normalFinalizationFramesRejectedByMotion: normalFinalizationFramesRejectedByMotion,
+            normalFinalizationFramesRejectedByReprojection: normalFinalizationFramesRejectedByReprojection,
+            normalFinalizationFramesRejectedByNormal: normalFinalizationFramesRejectedByNormal,
+            autoExportTriggered: normalFinalizationAutoExportTriggered,
             guidedStaticCaptureEnabled: guidedStaticCaptureEnabled,
             guidedStaticStages: guidedStaticCaptureEnabled
                 ? guidedStaticStageSnapshots.map(technicalReportGuidedStaticStage)

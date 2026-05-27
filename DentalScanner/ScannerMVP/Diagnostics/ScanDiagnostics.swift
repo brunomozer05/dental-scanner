@@ -61,6 +61,15 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
     var slowestExpectedMarkerId: Int?
     var currentBlockingReason: String?
     var lastBlockingReasonBeforeExport: String?
+    var normalFinalizationState: String?
+    var normalFinalizationStartedAtSeconds: Double?
+    var normalFinalizationDurationSeconds: Double?
+    var normalFinalizationFramesAccepted: Int
+    var normalFinalizationFramesRejectedByFocus: Int
+    var normalFinalizationFramesRejectedByMotion: Int
+    var normalFinalizationFramesRejectedByReprojection: Int
+    var normalFinalizationFramesRejectedByNormal: Int
+    var autoExportTriggered: Bool
     var lastEventName: String?
     var eventsCount: Int
     var events: [ScanDiagnosticEvent]
@@ -103,6 +112,15 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
         slowestExpectedMarkerId: nil,
         currentBlockingReason: nil,
         lastBlockingReasonBeforeExport: nil,
+        normalFinalizationState: nil,
+        normalFinalizationStartedAtSeconds: nil,
+        normalFinalizationDurationSeconds: nil,
+        normalFinalizationFramesAccepted: 0,
+        normalFinalizationFramesRejectedByFocus: 0,
+        normalFinalizationFramesRejectedByMotion: 0,
+        normalFinalizationFramesRejectedByReprojection: 0,
+        normalFinalizationFramesRejectedByNormal: 0,
+        autoExportTriggered: false,
         lastEventName: nil,
         eventsCount: 0,
         events: [],
