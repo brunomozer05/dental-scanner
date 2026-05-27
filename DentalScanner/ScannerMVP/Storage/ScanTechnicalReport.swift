@@ -44,6 +44,8 @@ struct ScanTechnicalReport: Codable {
     var normalFinalizationAutoExportReason: String?
     var normalFinalizationBlockedReason: String?
     var normalFinalizationMinObservationsByMarker: [Int: Int]?
+    var allExpectedMarkersAt100Percent: Bool?
+    var expectedMarkerProgressById: [Int: Double]?
     var guidedStaticCaptureEnabled: Bool?
     var guidedStaticStages: [GuidedStaticStage]?
 

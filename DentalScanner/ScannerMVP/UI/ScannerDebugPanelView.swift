@@ -247,6 +247,22 @@ struct ScannerDebugPanelView: View {
                             title: "Final blocked reason",
                             value: snapshot.diagnostics.normalFinalizationBlockedReason
                         )
+                        debugRow(
+                            title: "All expected 100%",
+                            value: snapshot.diagnostics.allExpectedMarkersAt100Percent
+                        )
+                        debugRow(
+                            title: "Expected progress",
+                            value: snapshot.diagnostics.expectedMarkerProgressById
+                        )
+                        debugRow(
+                            title: "Can start finalization",
+                            value: snapshot.diagnostics.normalFinalizationCanStart
+                        )
+                        debugRow(
+                            title: "Can auto export",
+                            value: snapshot.diagnostics.normalFinalizationCanAutoExport
+                        )
                     }
 
                     debugSection(title: "Camera / Focus") {

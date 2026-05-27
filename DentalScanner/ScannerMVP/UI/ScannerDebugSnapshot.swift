@@ -231,6 +231,10 @@ struct ScannerDebugSnapshot: Equatable {
         let normalFinalizationMaturityGatePassed: String
         let normalFinalizationAutoExportReason: String
         let normalFinalizationBlockedReason: String
+        let allExpectedMarkersAt100Percent: String
+        let expectedMarkerProgressById: String
+        let normalFinalizationCanStart: String
+        let normalFinalizationCanAutoExport: String
     }
 
     struct GuidedStaticSection: Equatable {
@@ -495,7 +499,15 @@ extension ScannerViewModel {
                 normalFinalizationAutoExportReason:
                     normalFinalizationAutoExportReason,
                 normalFinalizationBlockedReason:
-                    normalFinalizationBlockedReason
+                    normalFinalizationBlockedReason,
+                allExpectedMarkersAt100Percent:
+                    normalFinalizationAllExpectedMarkersAt100Percent,
+                expectedMarkerProgressById:
+                    normalFinalizationExpectedMarkerProgressById,
+                normalFinalizationCanStart:
+                    normalFinalizationCanStart,
+                normalFinalizationCanAutoExport:
+                    normalFinalizationCanAutoExport
             ),
             guidedStatic: Self.debugGuidedStaticSection(
                 enabled: guidedStaticCaptureEnabled,
@@ -606,7 +618,11 @@ extension ScannerViewModel {
         normalFinalizationWorstNormalStdDegrees: Double?,
         normalFinalizationMaturityGatePassed: Bool,
         normalFinalizationAutoExportReason: String?,
-        normalFinalizationBlockedReason: String?
+        normalFinalizationBlockedReason: String?,
+        allExpectedMarkersAt100Percent: Bool,
+        expectedMarkerProgressById: [Int: Double],
+        normalFinalizationCanStart: Bool,
+        normalFinalizationCanAutoExport: Bool
     ) -> ScannerDebugSnapshot.DiagnosticsSection {
         ScannerDebugSnapshot.DiagnosticsSection(
             enabled: enabled ? "Sim" : "Nao",
@@ -664,7 +680,15 @@ extension ScannerViewModel {
             normalFinalizationAutoExportReason:
                 debugText(normalFinalizationAutoExportReason),
             normalFinalizationBlockedReason:
-                debugText(normalFinalizationBlockedReason)
+                debugText(normalFinalizationBlockedReason),
+            allExpectedMarkersAt100Percent:
+                allExpectedMarkersAt100Percent ? "Sim" : "Nao",
+            expectedMarkerProgressById:
+                debugProgressDictionary(expectedMarkerProgressById, valuePrefix: "M"),
+            normalFinalizationCanStart:
+                normalFinalizationCanStart ? "Sim" : "Nao",
+            normalFinalizationCanAutoExport:
+                normalFinalizationCanAutoExport ? "Sim" : "Nao"
         )
     }
 
@@ -1025,6 +1049,24 @@ extension ScannerViewModel {
             .keys
             .sorted()
             .map { key in "\(valuePrefix)\(key): \(values[key] ?? 0)" }
+            .joined(separator: ", ")
+    }
+
+    private static func debugProgressDictionary(
+        _ values: [Int: Double],
+        valuePrefix: String = ""
+    ) -> String {
+        guard !values.isEmpty else {
+            return ScannerDebugSnapshot.missingValue
+        }
+
+        return values
+            .keys
+            .sorted()
+            .map { key in
+                let value = values[key]
+                return "\(valuePrefix)\(key): \(debugPercent(value))"
+            }
             .joined(separator: ", ")
     }
 }

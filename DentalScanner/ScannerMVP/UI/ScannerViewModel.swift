@@ -682,6 +682,10 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var normalFinalizationMinObservationsByMarker: [Int: Int] = [:]
     @Published private(set) var normalFinalizationAverageObservationsPerMarker: Double?
     @Published private(set) var normalFinalizationWorstNormalStdDegrees: Double?
+    @Published private(set) var normalFinalizationAllExpectedMarkersAt100Percent: Bool = false
+    @Published private(set) var normalFinalizationExpectedMarkerProgressById: [Int: Double] = [:]
+    @Published private(set) var normalFinalizationCanStart: Bool = false
+    @Published private(set) var normalFinalizationCanAutoExport: Bool = false
     @Published private(set) var guidedStaticCaptureEnabled: Bool = false
     @Published private(set) var guidedStaticRequiredStages: Int =
         GuidedStaticCaptureConfiguration.defaultRequiredStages
@@ -2461,6 +2465,10 @@ final class ScannerViewModel: ObservableObject {
         normalFinalizationMinObservationsByMarker = [:]
         normalFinalizationAverageObservationsPerMarker = nil
         normalFinalizationWorstNormalStdDegrees = nil
+        normalFinalizationAllExpectedMarkersAt100Percent = false
+        normalFinalizationExpectedMarkerProgressById = [:]
+        normalFinalizationCanStart = false
+        normalFinalizationCanAutoExport = false
         normalFinalizationLastAcceptedFrameTimestamp = nil
     }
 
@@ -2758,13 +2766,33 @@ final class ScannerViewModel: ObservableObject {
         return Double(counts.reduce(0, +)) / Double(counts.count)
     }
 
+    private func expectedV1MarkerProgressById() -> [Int: Double] {
+        Dictionary(uniqueKeysWithValues: expectedExportMarkerIds(for: .singleArucoV1).map {
+            ($0, coverage(forPhysicalMarkerId: $0).progress)
+        })
+    }
+
+    private func areAllExpectedV1MarkersAtOneHundredPercent(
+        progressByMarkerId: [Int: Double]
+    ) -> Bool {
+        expectedExportMarkerIds(for: .singleArucoV1).allSatisfy { markerId in
+            let progress = progressByMarkerId[markerId] ?? 0
+            return progress.isFinite && progress >= 100.0
+        }
+    }
+
     private func normalFinalizationBlockedReason(
+        allExpectedMarkersAt100Percent: Bool,
         hasStableWindow: Bool,
         minObservationsReached: Bool,
         averageObservationsReached: Bool,
         normalGatePassed: Bool,
         reprojectionGatePassed: Bool
     ) -> String? {
+        guard allExpectedMarkersAt100Percent else {
+            return "waiting_all_markers_100_percent"
+        }
+
         guard hasStableWindow else {
             return "waiting_stable_window"
         }
@@ -3810,11 +3838,38 @@ final class ScannerViewModel: ObservableObject {
             return false
         }
 
+        let expectedMarkerProgressById = expectedV1MarkerProgressById()
+        let allExpectedMarkersAt100Percent = areAllExpectedV1MarkersAtOneHundredPercent(
+            progressByMarkerId: expectedMarkerProgressById
+        )
+        normalFinalizationExpectedMarkerProgressById = expectedMarkerProgressById
+        normalFinalizationAllExpectedMarkersAt100Percent = allExpectedMarkersAt100Percent
+
         guard evaluation.hasExportableTagPoses else {
             if normalFinalizationState != .notReady {
                 resetNormalScanFinalization()
+                normalFinalizationExpectedMarkerProgressById = expectedMarkerProgressById
+                normalFinalizationAllExpectedMarkersAt100Percent = allExpectedMarkersAt100Percent
             }
             return false
+        }
+
+        guard allExpectedMarkersAt100Percent else {
+            if normalFinalizationState != .notReady {
+                resetNormalScanFinalization()
+                normalFinalizationExpectedMarkerProgressById = expectedMarkerProgressById
+                normalFinalizationAllExpectedMarkersAt100Percent = false
+            }
+            normalFinalizationCanStart = false
+            normalFinalizationCanAutoExport = false
+            normalFinalizationBlockedReason = "waiting_all_markers_100_percent"
+            scanReadinessBlockerSummary = "waiting_all_markers_100_percent"
+            setScanState(.stabilizing)
+            scanProgress = min(scanProgress, 99)
+            scanReadinessMessage = "Continue escaneando ate todos os markers chegarem em 100%"
+            scanQualityStatus = scanReadinessMessage
+            updateExportDiagnosticsIfNeeded(timestamp: timestamp)
+            return true
         }
 
         if normalFinalizationState == .notReady {
@@ -3822,7 +3877,12 @@ final class ScannerViewModel: ObservableObject {
             normalFinalizationStartedAtTimestamp = timestamp
             normalFinalizationStableSecondsCollected = 0
             normalFinalizationLastAcceptedFrameTimestamp = nil
-            recordDiagnosticEvent(name: "normal_finalization_started", timestamp: timestamp)
+            normalFinalizationCanStart = true
+            recordDiagnosticEvent(
+                name: "normal_finalization_started",
+                metadata: ["allExpectedMarkersAt100Percent": "true"],
+                timestamp: timestamp
+            )
         }
 
         if normalFinalizationState == .allMarkersExportable {
@@ -3853,6 +3913,7 @@ final class ScannerViewModel: ObservableObject {
             normalGatePassed &&
             reprojectionGatePassed
         let blockedReason = normalFinalizationBlockedReason(
+            allExpectedMarkersAt100Percent: allExpectedMarkersAt100Percent,
             hasStableWindow: hasStableWindow,
             minObservationsReached: minObservationsReached,
             averageObservationsReached: averageObservationsReached,
@@ -3867,6 +3928,7 @@ final class ScannerViewModel: ObservableObject {
         normalFinalizationNormalGatePassed = normalGatePassed
         normalFinalizationMaturityGatePassed = maturityGatePassed
         normalFinalizationBlockedReason = blockedReason
+        normalFinalizationCanStart = allExpectedMarkersAt100Percent && evaluation.hasExportableTagPoses
 
         let autoExportReason: String?
         if hasStableWindow && maturityGatePassed {
@@ -3876,8 +3938,9 @@ final class ScannerViewModel: ObservableObject {
         } else {
             autoExportReason = nil
         }
+        normalFinalizationCanAutoExport = autoExportReason != nil && allExpectedMarkersAt100Percent
 
-        if let autoExportReason {
+        if let autoExportReason, allExpectedMarkersAt100Percent {
             normalFinalizationState = .exporting
             normalFinalizationAutoExportTriggered = true
             normalFinalizationAutoExportReason = autoExportReason
@@ -3888,6 +3951,7 @@ final class ScannerViewModel: ObservableObject {
                     "stableSeconds": String(format: "%.2f", normalFinalizationStableSecondsCollected),
                     "reason": autoExportReason,
                     "blockedReason": blockedReason ?? "none",
+                    "allExpectedMarkersAt100Percent": "true",
                     "minObservationsReached": minObservationsReached ? "true" : "false",
                     "averageObservationsReached": averageObservationsReached ? "true" : "false",
                     "normalGatePassed": normalGatePassed ? "true" : "false",
@@ -3907,7 +3971,7 @@ final class ScannerViewModel: ObservableObject {
 
         setScanState(.stabilizing)
         scanProgress = 99
-        scanReadinessMessage = "Todos encontrados - mantenha parado para refinar"
+        scanReadinessMessage = "Todos capturados - mantenha parado para refinar"
         scanQualityStatus = scanReadinessMessage
         scanReadinessBlockerSummary = blockedReason ?? "Pronto: finalizando scan normal"
         updateExportDiagnosticsIfNeeded(timestamp: timestamp)
@@ -7177,6 +7241,8 @@ final class ScannerViewModel: ObservableObject {
             normalFinalizationAutoExportReason: normalFinalizationAutoExportReason,
             normalFinalizationBlockedReason: normalFinalizationBlockedReason,
             normalFinalizationMinObservationsByMarker: normalFinalizationMinObservationsByMarker,
+            allExpectedMarkersAt100Percent: normalFinalizationAllExpectedMarkersAt100Percent,
+            expectedMarkerProgressById: normalFinalizationExpectedMarkerProgressById,
             guidedStaticCaptureEnabled: guidedStaticCaptureEnabled,
             guidedStages: guidedStaticCaptureEnabled
                 ? guidedStaticStageSnapshots.map(diagnosticsGuidedStageSummary)
@@ -8505,6 +8571,11 @@ final class ScannerViewModel: ObservableObject {
                 normalFinalizationMinObservationsByMarker.isEmpty
                     ? nil
                     : normalFinalizationMinObservationsByMarker,
+            allExpectedMarkersAt100Percent: normalFinalizationAllExpectedMarkersAt100Percent,
+            expectedMarkerProgressById:
+                normalFinalizationExpectedMarkerProgressById.isEmpty
+                    ? nil
+                    : normalFinalizationExpectedMarkerProgressById,
             guidedStaticCaptureEnabled: guidedStaticCaptureEnabled,
             guidedStaticStages: guidedStaticCaptureEnabled
                 ? guidedStaticStageSnapshots.map(technicalReportGuidedStaticStage)

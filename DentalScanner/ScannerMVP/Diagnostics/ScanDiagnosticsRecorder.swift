@@ -319,6 +319,8 @@ final class ScanDiagnosticsRecorder {
         normalFinalizationAutoExportReason: String?,
         normalFinalizationBlockedReason: String?,
         normalFinalizationMinObservationsByMarker: [Int: Int]?,
+        allExpectedMarkersAt100Percent: Bool?,
+        expectedMarkerProgressById: [Int: Double]?,
         guidedStaticCaptureEnabled: Bool,
         guidedStages: [ScanDiagnosticsSnapshot.GuidedStageSummary]?
     ) -> ScanDiagnosticsSnapshot {
@@ -418,6 +420,8 @@ final class ScanDiagnosticsRecorder {
             normalFinalizationAutoExportReason: normalFinalizationAutoExportReason,
             normalFinalizationBlockedReason: normalFinalizationBlockedReason,
             normalFinalizationMinObservationsByMarker: normalFinalizationMinObservationsByMarker,
+            allExpectedMarkersAt100Percent: allExpectedMarkersAt100Percent,
+            expectedMarkerProgressById: sanitizedProgress(expectedMarkerProgressById),
             lastEventName: events.last?.name,
             eventsCount: events.count,
             events: events,
@@ -479,5 +483,21 @@ final class ScanDiagnosticsRecorder {
         }
 
         return value
+    }
+
+    private func sanitizedProgress(_ values: [Int: Double]?) -> [Int: Double]? {
+        guard let values else {
+            return nil
+        }
+
+        let sanitized = values.reduce(into: [Int: Double]()) { partialResult, entry in
+            guard entry.value.isFinite else {
+                return
+            }
+
+            partialResult[entry.key] = entry.value
+        }
+
+        return sanitized.isEmpty ? nil : sanitized
     }
 }

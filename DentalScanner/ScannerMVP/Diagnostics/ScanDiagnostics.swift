@@ -81,6 +81,8 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
     var normalFinalizationAutoExportReason: String?
     var normalFinalizationBlockedReason: String?
     var normalFinalizationMinObservationsByMarker: [Int: Int]?
+    var allExpectedMarkersAt100Percent: Bool?
+    var expectedMarkerProgressById: [Int: Double]?
     var lastEventName: String?
     var eventsCount: Int
     var events: [ScanDiagnosticEvent]
@@ -143,6 +145,8 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
         normalFinalizationAutoExportReason: nil,
         normalFinalizationBlockedReason: nil,
         normalFinalizationMinObservationsByMarker: nil,
+        allExpectedMarkersAt100Percent: nil,
+        expectedMarkerProgressById: nil,
         lastEventName: nil,
         eventsCount: 0,
         events: [],
