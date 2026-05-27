@@ -3888,6 +3888,10 @@ final class ScannerViewModel: ObservableObject {
             !isGeneratingSTL
     }
 
+    var normalFinalizationMinFinalObservationsPerMarkerForDebug: Int {
+        ScanConfiguration.normalFinalizationMinFinalObservationsPerMarker
+    }
+
     func normalFinalizationElapsedSeconds(at timestamp: Double? = nil) -> Double? {
         guard let normalFinalizationStartedAtTimestamp else {
             return nil

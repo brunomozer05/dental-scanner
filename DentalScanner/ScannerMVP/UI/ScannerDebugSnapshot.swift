@@ -472,7 +472,7 @@ extension ScannerViewModel {
                 normalFinalizationWillAutoExport: shouldUseNormalScanFinalization &&
                     normalFinalizationState == .stabilizing,
                 normalFinalizationMinFinalObservationsPerMarker:
-                    ScanConfiguration.normalFinalizationMinFinalObservationsPerMarker,
+                    normalFinalizationMinFinalObservationsPerMarkerForDebug,
                 normalFinalizationMinObservationsByMarker:
                     normalFinalizationMinObservationsByMarker,
                 normalFinalizationMinObservationsReached:
