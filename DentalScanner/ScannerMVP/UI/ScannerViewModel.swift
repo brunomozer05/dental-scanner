@@ -316,8 +316,10 @@ final class ScannerViewModel: ObservableObject {
         static let diagnosticsUpdateIntervalSeconds: Double = 0.25
         static let finalObservationDiagnosticsUpdateIntervalSeconds: Double = 0.25
         static let staticPoseDiagnosticsUpdateIntervalSeconds: Double = 0.25
-        static let normalFinalizationStableSeconds: Double = 3.0
-        static let normalFinalizationMaxSeconds: Double = 6.0
+        static let normalFinalizationStableSeconds: Double = 5.0
+        static let normalFinalizationMaxSeconds: Double = 12.0
+        static let normalFinalizationMinFinalObservationsPerMarker: Int = 80
+        static let normalFinalizationMaxNormalStdDegrees: Double = 10.0
         static let normalFinalizationRequireCameraStable: Bool = true
         static let normalFinalizationRequireDistanceValid: Bool = true
         static let normalFinalizationRequireFocusStable: Bool = true
@@ -670,6 +672,13 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var normalFinalizationFramesRejectedByReprojection: Int = 0
     @Published private(set) var normalFinalizationFramesRejectedByNormal: Int = 0
     @Published private(set) var normalFinalizationAutoExportTriggered: Bool = false
+    @Published private(set) var normalFinalizationMinObservationsReached: Bool = false
+    @Published private(set) var normalFinalizationNormalGatePassed: Bool = true
+    @Published private(set) var normalFinalizationMaturityGatePassed: Bool = false
+    @Published private(set) var normalFinalizationAutoExportReason: String?
+    @Published private(set) var normalFinalizationBlockedReason: String?
+    @Published private(set) var normalFinalizationMinObservationsByMarker: [Int: Int] = [:]
+    @Published private(set) var normalFinalizationWorstNormalStdDegrees: Double?
     @Published private(set) var guidedStaticCaptureEnabled: Bool = false
     @Published private(set) var guidedStaticRequiredStages: Int =
         GuidedStaticCaptureConfiguration.defaultRequiredStages
@@ -2440,6 +2449,13 @@ final class ScannerViewModel: ObservableObject {
         normalFinalizationFramesRejectedByReprojection = 0
         normalFinalizationFramesRejectedByNormal = 0
         normalFinalizationAutoExportTriggered = false
+        normalFinalizationMinObservationsReached = false
+        normalFinalizationNormalGatePassed = true
+        normalFinalizationMaturityGatePassed = false
+        normalFinalizationAutoExportReason = nil
+        normalFinalizationBlockedReason = nil
+        normalFinalizationMinObservationsByMarker = [:]
+        normalFinalizationWorstNormalStdDegrees = nil
         normalFinalizationLastAcceptedFrameTimestamp = nil
     }
 
@@ -2696,6 +2712,56 @@ final class ScannerViewModel: ObservableObject {
         case .reprojection:
             normalFinalizationFramesRejectedByReprojection += 1
         }
+    }
+
+    private func normalFinalizationObservationCountsByMarker() -> [Int: Int] {
+        let expectedIds = expectedExportMarkerIds(for: .singleArucoV1)
+        var counts = Dictionary(uniqueKeysWithValues: expectedIds.map { ($0, 0) })
+
+        for observation in finalPoseObservations where counts.keys.contains(observation.markerId) {
+            counts[observation.markerId, default: 0] += 1
+        }
+
+        return counts
+    }
+
+    private func normalFinalizationWorstNormalStdDegreesForExpectedMarkers() -> Double? {
+        expectedExportMarkerIds(for: .singleArucoV1)
+            .compactMap { markerId -> Double? in
+                guard let value = finalObservationDiagnosticsByMarkerId[markerId]?.finalNormalStdDevDegrees,
+                      value.isFinite
+                else {
+                    return nil
+                }
+
+                return value
+            }
+            .max()
+    }
+
+    private func normalFinalizationBlockedReason(
+        hasStableWindow: Bool,
+        minObservationsReached: Bool,
+        normalGatePassed: Bool,
+        reprojectionGatePassed: Bool
+    ) -> String? {
+        guard hasStableWindow else {
+            return "waiting_stable_window"
+        }
+
+        if !minObservationsReached {
+            return "waiting_min_observations"
+        }
+
+        if !normalGatePassed {
+            return "waiting_normal_stability"
+        }
+
+        if !reprojectionGatePassed {
+            return "waiting_reprojection"
+        }
+
+        return nil
     }
 
     private func cameraFrameQualityBlocker(
@@ -3743,16 +3809,54 @@ final class ScannerViewModel: ObservableObject {
         let hasStableWindow = normalFinalizationStableSecondsCollected >=
             ScanConfiguration.normalFinalizationStableSeconds
         let hitMaxWindow = elapsedSeconds >= ScanConfiguration.normalFinalizationMaxSeconds
+        let observationsByMarker = normalFinalizationObservationCountsByMarker()
+        let minObservationsReached = observationsByMarker.values.allSatisfy {
+            $0 >= ScanConfiguration.normalFinalizationMinFinalObservationsPerMarker
+        }
+        let worstNormalStdDegrees = normalFinalizationWorstNormalStdDegreesForExpectedMarkers()
+        let normalGatePassed = worstNormalStdDegrees.map {
+            $0 <= ScanConfiguration.normalFinalizationMaxNormalStdDegrees
+        } ?? true
+        let reprojectionGatePassed = evaluation.hasAcceptableReprojectionError
+        let maturityGatePassed = minObservationsReached &&
+            normalGatePassed &&
+            reprojectionGatePassed
+        let blockedReason = normalFinalizationBlockedReason(
+            hasStableWindow: hasStableWindow,
+            minObservationsReached: minObservationsReached,
+            normalGatePassed: normalGatePassed,
+            reprojectionGatePassed: reprojectionGatePassed
+        )
+        normalFinalizationMinObservationsByMarker = observationsByMarker
+        normalFinalizationMinObservationsReached = minObservationsReached
+        normalFinalizationWorstNormalStdDegrees = worstNormalStdDegrees
+        normalFinalizationNormalGatePassed = normalGatePassed
+        normalFinalizationMaturityGatePassed = maturityGatePassed
+        normalFinalizationBlockedReason = blockedReason
 
-        if hasStableWindow || hitMaxWindow {
+        let autoExportReason: String?
+        if hasStableWindow && maturityGatePassed {
+            autoExportReason = "stable_window_completed"
+        } else if hitMaxWindow {
+            autoExportReason = "max_seconds_reached_export_gate_valid"
+        } else {
+            autoExportReason = nil
+        }
+
+        if let autoExportReason {
             normalFinalizationState = .exporting
             normalFinalizationAutoExportTriggered = true
+            normalFinalizationAutoExportReason = autoExportReason
             recordDiagnosticEvent(
                 name: "normal_finalization_export_triggered",
                 metadata: [
                     "elapsedSeconds": String(format: "%.2f", elapsedSeconds),
                     "stableSeconds": String(format: "%.2f", normalFinalizationStableSecondsCollected),
-                    "reason": hasStableWindow ? "stable_window" : "max_window"
+                    "reason": autoExportReason,
+                    "blockedReason": blockedReason ?? "none",
+                    "minObservationsReached": minObservationsReached ? "true" : "false",
+                    "normalGatePassed": normalGatePassed ? "true" : "false",
+                    "maturityGatePassed": maturityGatePassed ? "true" : "false"
                 ],
                 timestamp: timestamp
             )
@@ -3768,9 +3872,9 @@ final class ScannerViewModel: ObservableObject {
 
         setScanState(.stabilizing)
         scanProgress = 99
-        scanReadinessMessage = "Todos capturados - mantenha parado"
-        scanQualityStatus = "Finalizando STL..."
-        scanReadinessBlockerSummary = "Pronto: finalizando scan normal"
+        scanReadinessMessage = "Todos encontrados - mantenha parado para refinar"
+        scanQualityStatus = scanReadinessMessage
+        scanReadinessBlockerSummary = blockedReason ?? "Pronto: finalizando scan normal"
         updateExportDiagnosticsIfNeeded(timestamp: timestamp)
         return true
     }
@@ -7014,6 +7118,16 @@ final class ScannerViewModel: ObservableObject {
             normalFinalizationFramesRejectedByReprojection: normalFinalizationFramesRejectedByReprojection,
             normalFinalizationFramesRejectedByNormal: normalFinalizationFramesRejectedByNormal,
             autoExportTriggered: normalFinalizationAutoExportTriggered,
+            normalFinalizationMinFinalObservationsPerMarker:
+                ScanConfiguration.normalFinalizationMinFinalObservationsPerMarker,
+            normalFinalizationMinObservationsReached: normalFinalizationMinObservationsReached,
+            normalFinalizationMaxNormalStdDegrees:
+                ScanConfiguration.normalFinalizationMaxNormalStdDegrees,
+            normalFinalizationNormalGatePassed: normalFinalizationNormalGatePassed,
+            normalFinalizationMaturityGatePassed: normalFinalizationMaturityGatePassed,
+            normalFinalizationAutoExportReason: normalFinalizationAutoExportReason,
+            normalFinalizationBlockedReason: normalFinalizationBlockedReason,
+            normalFinalizationMinObservationsByMarker: normalFinalizationMinObservationsByMarker,
             guidedStaticCaptureEnabled: guidedStaticCaptureEnabled,
             guidedStages: guidedStaticCaptureEnabled
                 ? guidedStaticStageSnapshots.map(diagnosticsGuidedStageSummary)
@@ -8323,6 +8437,19 @@ final class ScannerViewModel: ObservableObject {
             normalFinalizationFramesRejectedByReprojection: normalFinalizationFramesRejectedByReprojection,
             normalFinalizationFramesRejectedByNormal: normalFinalizationFramesRejectedByNormal,
             autoExportTriggered: normalFinalizationAutoExportTriggered,
+            normalFinalizationMinFinalObservationsPerMarker:
+                ScanConfiguration.normalFinalizationMinFinalObservationsPerMarker,
+            normalFinalizationMinObservationsReached: normalFinalizationMinObservationsReached,
+            normalFinalizationMaxNormalStdDegrees:
+                finiteReportDouble(ScanConfiguration.normalFinalizationMaxNormalStdDegrees),
+            normalFinalizationNormalGatePassed: normalFinalizationNormalGatePassed,
+            normalFinalizationMaturityGatePassed: normalFinalizationMaturityGatePassed,
+            normalFinalizationAutoExportReason: normalFinalizationAutoExportReason,
+            normalFinalizationBlockedReason: normalFinalizationBlockedReason,
+            normalFinalizationMinObservationsByMarker:
+                normalFinalizationMinObservationsByMarker.isEmpty
+                    ? nil
+                    : normalFinalizationMinObservationsByMarker,
             guidedStaticCaptureEnabled: guidedStaticCaptureEnabled,
             guidedStaticStages: guidedStaticCaptureEnabled
                 ? guidedStaticStageSnapshots.map(technicalReportGuidedStaticStage)

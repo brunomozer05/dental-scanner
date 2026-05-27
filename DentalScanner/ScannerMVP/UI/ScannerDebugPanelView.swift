@@ -203,6 +203,38 @@ struct ScannerDebugPanelView: View {
                         )
                         debugRow(title: "Final reject normal", value: snapshot.diagnostics.normalFinalizationRejectedByNormal)
                         debugRow(title: "Auto export", value: snapshot.diagnostics.normalFinalizationWillAutoExport)
+                        debugRow(
+                            title: "Min obs per marker",
+                            value: snapshot.diagnostics.normalFinalizationMinObservationsPerMarker
+                        )
+                        debugRow(
+                            title: "Obs per marker",
+                            value: snapshot.diagnostics.normalFinalizationObservationsByMarker
+                        )
+                        debugRow(
+                            title: "Min obs reached",
+                            value: snapshot.diagnostics.normalFinalizationMinObservationsReached
+                        )
+                        debugRow(
+                            title: "Normal gate",
+                            value: snapshot.diagnostics.normalFinalizationNormalGatePassed
+                        )
+                        debugRow(
+                            title: "Worst normal std",
+                            value: snapshot.diagnostics.normalFinalizationWorstNormalStd
+                        )
+                        debugRow(
+                            title: "Maturity gate",
+                            value: snapshot.diagnostics.normalFinalizationMaturityGatePassed
+                        )
+                        debugRow(
+                            title: "Auto export reason",
+                            value: snapshot.diagnostics.normalFinalizationAutoExportReason
+                        )
+                        debugRow(
+                            title: "Final blocked reason",
+                            value: snapshot.diagnostics.normalFinalizationBlockedReason
+                        )
                     }
 
                     debugSection(title: "Camera / Focus") {

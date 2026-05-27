@@ -33,6 +33,14 @@ struct ScanTechnicalReport: Codable {
     var normalFinalizationFramesRejectedByReprojection: Int?
     var normalFinalizationFramesRejectedByNormal: Int?
     var autoExportTriggered: Bool?
+    var normalFinalizationMinFinalObservationsPerMarker: Int?
+    var normalFinalizationMinObservationsReached: Bool?
+    var normalFinalizationMaxNormalStdDegrees: Double?
+    var normalFinalizationNormalGatePassed: Bool?
+    var normalFinalizationMaturityGatePassed: Bool?
+    var normalFinalizationAutoExportReason: String?
+    var normalFinalizationBlockedReason: String?
+    var normalFinalizationMinObservationsByMarker: [Int: Int]?
     var guidedStaticCaptureEnabled: Bool?
     var guidedStaticStages: [GuidedStaticStage]?
 

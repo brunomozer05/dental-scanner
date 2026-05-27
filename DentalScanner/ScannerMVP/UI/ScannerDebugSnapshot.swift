@@ -220,6 +220,14 @@ struct ScannerDebugSnapshot: Equatable {
         let normalFinalizationRejectedByReprojection: String
         let normalFinalizationRejectedByNormal: String
         let normalFinalizationWillAutoExport: String
+        let normalFinalizationMinObservationsPerMarker: String
+        let normalFinalizationObservationsByMarker: String
+        let normalFinalizationMinObservationsReached: String
+        let normalFinalizationNormalGatePassed: String
+        let normalFinalizationWorstNormalStd: String
+        let normalFinalizationMaturityGatePassed: String
+        let normalFinalizationAutoExportReason: String
+        let normalFinalizationBlockedReason: String
     }
 
     struct GuidedStaticSection: Equatable {
@@ -462,7 +470,23 @@ extension ScannerViewModel {
                 normalFinalizationFramesRejectedByReprojection: normalFinalizationFramesRejectedByReprojection,
                 normalFinalizationFramesRejectedByNormal: normalFinalizationFramesRejectedByNormal,
                 normalFinalizationWillAutoExport: shouldUseNormalScanFinalization &&
-                    normalFinalizationState == .stabilizing
+                    normalFinalizationState == .stabilizing,
+                normalFinalizationMinFinalObservationsPerMarker:
+                    ScanConfiguration.normalFinalizationMinFinalObservationsPerMarker,
+                normalFinalizationMinObservationsByMarker:
+                    normalFinalizationMinObservationsByMarker,
+                normalFinalizationMinObservationsReached:
+                    normalFinalizationMinObservationsReached,
+                normalFinalizationNormalGatePassed:
+                    normalFinalizationNormalGatePassed,
+                normalFinalizationWorstNormalStdDegrees:
+                    normalFinalizationWorstNormalStdDegrees,
+                normalFinalizationMaturityGatePassed:
+                    normalFinalizationMaturityGatePassed,
+                normalFinalizationAutoExportReason:
+                    normalFinalizationAutoExportReason,
+                normalFinalizationBlockedReason:
+                    normalFinalizationBlockedReason
             ),
             guidedStatic: Self.debugGuidedStaticSection(
                 enabled: guidedStaticCaptureEnabled,
@@ -562,7 +586,15 @@ extension ScannerViewModel {
         normalFinalizationFramesRejectedByMotion: Int,
         normalFinalizationFramesRejectedByReprojection: Int,
         normalFinalizationFramesRejectedByNormal: Int,
-        normalFinalizationWillAutoExport: Bool
+        normalFinalizationWillAutoExport: Bool,
+        normalFinalizationMinFinalObservationsPerMarker: Int,
+        normalFinalizationMinObservationsByMarker: [Int: Int],
+        normalFinalizationMinObservationsReached: Bool,
+        normalFinalizationNormalGatePassed: Bool,
+        normalFinalizationWorstNormalStdDegrees: Double?,
+        normalFinalizationMaturityGatePassed: Bool,
+        normalFinalizationAutoExportReason: String?,
+        normalFinalizationBlockedReason: String?
     ) -> ScannerDebugSnapshot.DiagnosticsSection {
         ScannerDebugSnapshot.DiagnosticsSection(
             enabled: enabled ? "Sim" : "Nao",
@@ -596,7 +628,25 @@ extension ScannerViewModel {
             normalFinalizationRejectedByMotion: "\(normalFinalizationFramesRejectedByMotion)",
             normalFinalizationRejectedByReprojection: "\(normalFinalizationFramesRejectedByReprojection)",
             normalFinalizationRejectedByNormal: "\(normalFinalizationFramesRejectedByNormal)",
-            normalFinalizationWillAutoExport: normalFinalizationWillAutoExport ? "Sim" : "Nao"
+            normalFinalizationWillAutoExport: normalFinalizationWillAutoExport ? "Sim" : "Nao",
+            normalFinalizationMinObservationsPerMarker:
+                "\(normalFinalizationMinFinalObservationsPerMarker)",
+            normalFinalizationObservationsByMarker: debugIntDictionary(
+                normalFinalizationMinObservationsByMarker,
+                valuePrefix: "M"
+            ),
+            normalFinalizationMinObservationsReached:
+                normalFinalizationMinObservationsReached ? "Sim" : "Nao",
+            normalFinalizationNormalGatePassed:
+                normalFinalizationNormalGatePassed ? "Sim" : "Nao",
+            normalFinalizationWorstNormalStd:
+                debugDegrees(normalFinalizationWorstNormalStdDegrees),
+            normalFinalizationMaturityGatePassed:
+                normalFinalizationMaturityGatePassed ? "Sim" : "Nao",
+            normalFinalizationAutoExportReason:
+                debugText(normalFinalizationAutoExportReason),
+            normalFinalizationBlockedReason:
+                debugText(normalFinalizationBlockedReason)
         )
     }
 
