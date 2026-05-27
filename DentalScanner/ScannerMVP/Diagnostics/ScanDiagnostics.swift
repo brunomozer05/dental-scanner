@@ -32,6 +32,8 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
     var timeToAllMarkersSeenSeconds: Double?
     var timeToAllMarkersExportableSeconds: Double?
     var extraTimeAfterAllMarkers100PercentSeconds: Double?
+    var expectedMarkerIds: [Int]
+    var unexpectedMarkerIdsSeen: [Int]
     var fpsMean: Double?
     var fpsMin: Double?
     var framesProcessed: Int
@@ -50,11 +52,15 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
     var centerFocusRecoveryCount: Int
     var distanceGuideState: String?
     var lastDistanceMm: Double?
+    var distanceSamplesTotal: Int
+    var distanceSamplesValid: Int
     var distanceValidPercent: Double?
     var guidedStaticCaptureEnabled: Bool
     var guidedStages: [GuidedStageSummary]?
     var slowestMarkerId: Int?
+    var slowestExpectedMarkerId: Int?
     var currentBlockingReason: String?
+    var lastBlockingReasonBeforeExport: String?
     var lastEventName: String?
     var eventsCount: Int
     var events: [ScanDiagnosticEvent]
@@ -68,6 +74,8 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
         timeToAllMarkersSeenSeconds: nil,
         timeToAllMarkersExportableSeconds: nil,
         extraTimeAfterAllMarkers100PercentSeconds: nil,
+        expectedMarkerIds: [],
+        unexpectedMarkerIdsSeen: [],
         fpsMean: nil,
         fpsMin: nil,
         framesProcessed: 0,
@@ -86,11 +94,15 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
         centerFocusRecoveryCount: 0,
         distanceGuideState: nil,
         lastDistanceMm: nil,
+        distanceSamplesTotal: 0,
+        distanceSamplesValid: 0,
         distanceValidPercent: nil,
         guidedStaticCaptureEnabled: false,
         guidedStages: nil,
         slowestMarkerId: nil,
+        slowestExpectedMarkerId: nil,
         currentBlockingReason: nil,
+        lastBlockingReasonBeforeExport: nil,
         lastEventName: nil,
         eventsCount: 0,
         events: [],

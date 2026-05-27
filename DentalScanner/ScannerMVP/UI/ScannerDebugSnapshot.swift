@@ -198,12 +198,18 @@ struct ScannerDebugSnapshot: Equatable {
         let fpsMean: String
         let fpsMin: String
         let scanDuration: String
+        let expectedMarkerIds: String
+        let unexpectedMarkerIdsSeen: String
         let currentBlockingReason: String
         let lastExportBlockReason: String
+        let lastBlockingReasonBeforeExport: String
         let slowestMarker: String
+        let slowestExpectedMarker: String
         let timeToAllMarkersSeen: String
         let timeToAllMarkersExportable: String
         let extraTimeAfter100Percent: String
+        let distanceSamples: String
+        let distanceValidPercent: String
     }
 
     struct GuidedStaticSection: Equatable {
@@ -535,12 +541,19 @@ extension ScannerViewModel {
             fpsMean: debugNumber(snapshot.fpsMean, decimals: 1),
             fpsMin: debugNumber(snapshot.fpsMin, decimals: 1),
             scanDuration: debugSeconds(snapshot.scanDurationSeconds),
+            expectedMarkerIds: debugIntList(snapshot.expectedMarkerIds),
+            unexpectedMarkerIdsSeen: debugIntList(snapshot.unexpectedMarkerIdsSeen),
             currentBlockingReason: debugText(snapshot.currentBlockingReason),
             lastExportBlockReason: debugText(lastExportBlockReason),
+            lastBlockingReasonBeforeExport: debugText(snapshot.lastBlockingReasonBeforeExport),
             slowestMarker: snapshot.slowestMarkerId.map { "M\($0)" } ?? ScannerDebugSnapshot.missingValue,
+            slowestExpectedMarker: snapshot.slowestExpectedMarkerId.map { "M\($0)" } ??
+                ScannerDebugSnapshot.missingValue,
             timeToAllMarkersSeen: debugSeconds(snapshot.timeToAllMarkersSeenSeconds),
             timeToAllMarkersExportable: debugSeconds(snapshot.timeToAllMarkersExportableSeconds),
-            extraTimeAfter100Percent: debugSeconds(snapshot.extraTimeAfterAllMarkers100PercentSeconds)
+            extraTimeAfter100Percent: debugSeconds(snapshot.extraTimeAfterAllMarkers100PercentSeconds),
+            distanceSamples: "\(snapshot.distanceSamplesValid)/\(snapshot.distanceSamplesTotal)",
+            distanceValidPercent: debugPercent(snapshot.distanceValidPercent)
         )
     }
 

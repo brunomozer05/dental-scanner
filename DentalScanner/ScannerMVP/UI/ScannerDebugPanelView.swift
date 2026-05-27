@@ -175,12 +175,21 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "FPS mean", value: snapshot.diagnostics.fpsMean)
                         debugRow(title: "FPS min", value: snapshot.diagnostics.fpsMin)
                         debugRow(title: "Scan duration", value: snapshot.diagnostics.scanDuration)
+                        debugRow(title: "Expected markers", value: snapshot.diagnostics.expectedMarkerIds)
+                        debugRow(title: "Unexpected markers", value: snapshot.diagnostics.unexpectedMarkerIdsSeen)
                         debugRow(title: "Current block", value: snapshot.diagnostics.currentBlockingReason)
                         debugRow(title: "Last export block", value: snapshot.diagnostics.lastExportBlockReason)
+                        debugRow(
+                            title: "Block before export",
+                            value: snapshot.diagnostics.lastBlockingReasonBeforeExport
+                        )
                         debugRow(title: "Slowest marker", value: snapshot.diagnostics.slowestMarker)
+                        debugRow(title: "Slowest expected", value: snapshot.diagnostics.slowestExpectedMarker)
                         debugRow(title: "All markers seen", value: snapshot.diagnostics.timeToAllMarkersSeen)
                         debugRow(title: "All markers exportable", value: snapshot.diagnostics.timeToAllMarkersExportable)
                         debugRow(title: "Extra after 100%", value: snapshot.diagnostics.extraTimeAfter100Percent)
+                        debugRow(title: "Distance samples", value: snapshot.diagnostics.distanceSamples)
+                        debugRow(title: "Distance valid", value: snapshot.diagnostics.distanceValidPercent)
                     }
 
                     debugSection(title: "Camera / Focus") {

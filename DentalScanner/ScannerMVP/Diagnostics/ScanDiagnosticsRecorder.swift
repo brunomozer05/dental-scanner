@@ -22,6 +22,9 @@ final class ScanDiagnosticsRecorder {
     private var scanStartedAt: Double?
     private var createdAt: String?
     private var markerProfile: String?
+    private var expectedMarkerIds: [Int] = []
+    private var expectedMarkerIdSet: Set<Int> = []
+    private var unexpectedMarkerIdsSeen: Set<Int> = []
     private var allMarkersSeenAt: Double?
     private var allMarkersExportableAt: Double?
     private var firstMarkerSeenAt: Double?
@@ -50,6 +53,9 @@ final class ScanDiagnosticsRecorder {
         scanStartedAt = sanitizedTimestamp(timestamp)
         self.createdAt = createdAt
         self.markerProfile = markerProfile
+        self.expectedMarkerIds = expectedMarkerIds.sorted()
+        expectedMarkerIdSet = Set(expectedMarkerIds)
+        unexpectedMarkerIdsSeen = []
         allMarkersSeenAt = nil
         allMarkersExportableAt = nil
         firstMarkerSeenAt = nil
@@ -159,7 +165,7 @@ final class ScanDiagnosticsRecorder {
         timestamp: Double
     ) {
         distanceSampleCount += 1
-        if isReliable {
+        if isReliableDistanceSample(state: state, distanceMm: distanceMm, isReliable: isReliable) {
             distanceValidSampleCount += 1
         }
 
@@ -183,6 +189,17 @@ final class ScanDiagnosticsRecorder {
     ) {
         let relativeTimestamp = relativeTime(from: timestamp)
         for markerId in markerIds {
+            guard expectedMarkerIdSet.contains(markerId) else {
+                if unexpectedMarkerIdsSeen.insert(markerId).inserted {
+                    record(
+                        name: "unexpected_marker_seen",
+                        timestamp: timestamp,
+                        markerId: markerId
+                    )
+                }
+                continue
+            }
+
             var state = markerStates[markerId] ?? MarkerState()
             if state.firstSeenAt == nil {
                 state.firstSeenAt = relativeTimestamp
@@ -202,9 +219,8 @@ final class ScanDiagnosticsRecorder {
         }
 
         if allMarkersSeenAt == nil {
-            let expectedSet = Set(expectedMarkerIds)
-            if !expectedSet.isEmpty,
-               expectedSet.allSatisfy({ markerStates[$0]?.firstSeenAt != nil }) {
+            if !expectedMarkerIdSet.isEmpty,
+               expectedMarkerIdSet.allSatisfy({ markerStates[$0]?.firstSeenAt != nil }) {
                 allMarkersSeenAt = relativeTimestamp
             }
         }
@@ -220,6 +236,18 @@ final class ScanDiagnosticsRecorder {
         let previousExportableIds = Set(markerStates.compactMap { $0.value.exportable ? $0.key : nil })
 
         for validation in validations {
+            guard expectedMarkerIdSet.contains(validation.markerId) else {
+                if unexpectedMarkerIdsSeen.insert(validation.markerId).inserted {
+                    record(
+                        name: "unexpected_marker_seen",
+                        timestamp: timestamp,
+                        markerId: validation.markerId,
+                        message: "export_validation"
+                    )
+                }
+                continue
+            }
+
             var state = markerStates[validation.markerId] ?? MarkerState()
             state.observationsAccumulated = validation.accumulatedObservationCount
             state.finalObservationsUsed = validation.finalObservationsUsed
@@ -246,10 +274,9 @@ final class ScanDiagnosticsRecorder {
         }
 
         let exportableIds = Set(markerStates.compactMap { $0.value.exportable ? $0.key : nil })
-        let expectedSet = Set(expectedMarkerIds)
         if allMarkersExportableAt == nil,
-           !expectedSet.isEmpty,
-           expectedSet.allSatisfy({ exportableIds.contains($0) }) {
+           !expectedMarkerIdSet.isEmpty,
+           expectedMarkerIdSet.allSatisfy({ exportableIds.contains($0) }) {
             allMarkersExportableAt = relativeTimestamp
         }
 
@@ -271,12 +298,13 @@ final class ScanDiagnosticsRecorder {
         distanceGuideState: String?,
         lastDistanceMm: Double?,
         currentBlockingReason: String?,
+        lastBlockingReasonBeforeExport: String?,
         guidedStaticCaptureEnabled: Bool,
         guidedStages: [ScanDiagnosticsSnapshot.GuidedStageSummary]?
     ) -> ScanDiagnosticsSnapshot {
         let currentRelativeTime = relativeTime(from: timestamp)
-        let slowestMarkerId = markerStates
-            .filter { $0.value.becameExportableAt != nil || $0.value.firstSeenAt != nil }
+        let slowestExpectedMarkerId = markerStates
+            .filter { expectedMarkerIdSet.contains($0.key) && ($0.value.becameExportableAt != nil || $0.value.firstSeenAt != nil) }
             .max { lhs, rhs in
                 let lhsTime = lhs.value.becameExportableAt ?? currentRelativeTime
                 let rhsTime = rhs.value.becameExportableAt ?? currentRelativeTime
@@ -288,8 +316,7 @@ final class ScanDiagnosticsRecorder {
             ? Double(distanceValidSampleCount) / Double(distanceSampleCount) * 100.0
             : nil
 
-        let markerSummaries = markerStates
-            .keys
+        let markerSummaries = expectedMarkerIds
             .sorted()
             .map { markerId in
                 let state = markerStates[markerId] ?? MarkerState()
@@ -319,6 +346,8 @@ final class ScanDiagnosticsRecorder {
             extraTimeAfterAllMarkers100PercentSeconds: extraTimeAfterAllMarkersExportable(
                 currentRelativeTime: currentRelativeTime
             ),
+            expectedMarkerIds: expectedMarkerIds,
+            unexpectedMarkerIdsSeen: unexpectedMarkerIdsSeen.sorted(),
             fpsMean: fpsSampleCount > 0 ? finite(fpsSum / Double(fpsSampleCount)) : nil,
             fpsMin: finite(fpsMinValue),
             framesProcessed: lastSnapshot.framesProcessed,
@@ -337,11 +366,15 @@ final class ScanDiagnosticsRecorder {
             centerFocusRecoveryCount: centerFocusRecoveryCount,
             distanceGuideState: distanceGuideState,
             lastDistanceMm: finite(lastDistanceMm),
+            distanceSamplesTotal: distanceSampleCount,
+            distanceSamplesValid: distanceValidSampleCount,
             distanceValidPercent: finite(distanceValidPercent),
             guidedStaticCaptureEnabled: guidedStaticCaptureEnabled,
             guidedStages: guidedStages,
-            slowestMarkerId: slowestMarkerId,
+            slowestMarkerId: slowestExpectedMarkerId?.key,
+            slowestExpectedMarkerId: slowestExpectedMarkerId?.key,
             currentBlockingReason: currentBlockingReason,
+            lastBlockingReasonBeforeExport: lastBlockingReasonBeforeExport,
             lastEventName: events.last?.name,
             eventsCount: events.count,
             events: events,
@@ -361,6 +394,31 @@ final class ScanDiagnosticsRecorder {
 
     private func sanitizedTimestamp(_ timestamp: Double) -> Double {
         timestamp.isFinite ? timestamp : Date().timeIntervalSinceReferenceDate
+    }
+
+    private func isReliableDistanceSample(
+        state: String,
+        distanceMm: Double?,
+        isReliable: Bool
+    ) -> Bool {
+        guard let distanceMm,
+              distanceMm.isFinite,
+              distanceMm > 0
+        else {
+            return false
+        }
+
+        if isReliable {
+            return true
+        }
+
+        let unstableStates = [
+            "Sem marker confiavel",
+            "Pose instavel",
+            "Foco ruim",
+            "Distancia indisponivel"
+        ]
+        return !unstableStates.contains(state)
     }
 
     private func relativeTime(from timestamp: Double) -> Double {

@@ -754,6 +754,7 @@ final class ScannerViewModel: ObservableObject {
     private var lastFinalObservationDiagnosticsUpdateTimestamp: Double?
     private var lastStaticPoseDiagnosticsUpdateTimestamp: Double?
     private var lastDiagnosticsSnapshotPublishTimestamp: Double?
+    private var lastBlockingReasonBeforeExport: String?
     private var staticPoseSamples: [StaticPoseSample] = []
     private var staticPosePairDistanceSamples: [StaticPosePairDistanceSample] = []
     private var staticPosePlaneSamples: [StaticPosePlaneSample] = []
@@ -1539,6 +1540,7 @@ final class ScannerViewModel: ObservableObject {
         let timestamp = lastFrameTimestamp ?? Date().timeIntervalSinceReferenceDate
         diagnosticsFileAvailable = false
         lastDiagnosticsFileURL = nil
+        lastBlockingReasonBeforeExport = nil
         diagnosticsRecorder.startScan(
             markerProfile: markerProfile.rawValue,
             expectedMarkerIds: expectedExportMarkerIds(for: markerProfile),
@@ -6747,7 +6749,11 @@ final class ScannerViewModel: ObservableObject {
         return timestamp
     }
 
-    private func makeCurrentDiagnosticsSnapshot(timestamp: Double? = nil) -> ScanDiagnosticsSnapshot {
+    private func makeCurrentDiagnosticsSnapshot(
+        timestamp: Double? = nil,
+        currentBlockingReasonOverride: String? = nil,
+        lastBlockingReasonBeforeExportOverride: String? = nil
+    ) -> ScanDiagnosticsSnapshot {
         diagnosticsRecorder.makeSnapshot(
             timestamp: sanitizedDiagnosticsTimestamp(timestamp ?? lastFrameTimestamp),
             markerProfile: markerProfile.rawValue,
@@ -6760,12 +6766,21 @@ final class ScannerViewModel: ObservableObject {
             centerFocusRecoveryCount: centerFocusRecoveryCount,
             distanceGuideState: distanceGuideStateTitle,
             lastDistanceMm: lastDistanceGuideDistanceMm ?? poseDistanceMm,
-            currentBlockingReason: scanReadinessBlockerSummary,
+            currentBlockingReason: currentBlockingReasonOverride ?? diagnosticsCurrentBlockingReason(),
+            lastBlockingReasonBeforeExport: lastBlockingReasonBeforeExportOverride ?? lastBlockingReasonBeforeExport,
             guidedStaticCaptureEnabled: guidedStaticCaptureEnabled,
             guidedStages: guidedStaticCaptureEnabled
                 ? guidedStaticStageSnapshots.map(diagnosticsGuidedStageSummary)
                 : nil
         )
+    }
+
+    private func diagnosticsCurrentBlockingReason() -> String {
+        if hasSTLExportURL || stlExportURL != nil {
+            return "none"
+        }
+
+        return scanReadinessBlockerSummary
     }
 
     private func diagnosticsGuidedStageSummary(
@@ -7525,7 +7540,7 @@ final class ScannerViewModel: ObservableObject {
     private func expectedExportMarkerIds(for markerProfile: MarkerProfile) -> [Int] {
         switch markerProfile {
         case .singleArucoV1:
-            return []
+            return Array(0..<ScanConfiguration.expectedSingleArucoPhysicalMarkerCount)
         case .dualArucoV2:
             return Array(MarkerConfiguration.dualMarkers
                 .map(\.physicalMarkerId)
@@ -7872,10 +7887,17 @@ final class ScannerViewModel: ObservableObject {
             markerProfile: currentMarkerProfile,
             tagPoses: currentTagPoses
         )
-        recordDiagnosticEvent(name: "export_success")
+        let blockingReasonBeforeExport = scanReadinessBlockerSummary
+        lastBlockingReasonBeforeExport = blockingReasonBeforeExport
+        recordDiagnosticEvent(
+            name: "export_success",
+            metadata: ["lastBlockingReasonBeforeExport": blockingReasonBeforeExport]
+        )
         recordDiagnosticEvent(name: "scan_finished")
         let diagnosticsSnapshot = makeCurrentDiagnosticsSnapshot(
-            timestamp: lastFrameTimestamp ?? Date().timeIntervalSinceReferenceDate
+            timestamp: lastFrameTimestamp ?? Date().timeIntervalSinceReferenceDate,
+            currentBlockingReasonOverride: "export_success",
+            lastBlockingReasonBeforeExportOverride: blockingReasonBeforeExport
         )
         let exportedTagCount = currentTagPoses.count
         let exportGenerationID = UUID()
