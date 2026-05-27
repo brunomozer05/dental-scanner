@@ -60,6 +60,8 @@ struct ScannerDebugPanelView: View {
     private let enableStaticStabilityDebugSection = false
     private let enablePlanarDebugSection = false
     private let enableQualityDebugSection = false
+    private let enableRuntimeHeavyDebugSections = false
+    private let enableEditableDebugControls = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -124,6 +126,48 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "dualAngularReady", value: snapshot.readiness.dualAngularReady)
                     }
 
+                    debugSection(title: "Scan feedback") {
+                        debugRow(title: "Estado usuario", value: snapshot.diagnostics.userFeedbackState)
+                        debugRow(title: "Mensagem", value: snapshot.diagnostics.userFeedbackMessage)
+                        debugRow(title: "Captura", value: snapshot.diagnostics.captureProgress)
+                        debugRow(title: "Refinamento", value: snapshot.diagnostics.refinementProgress)
+                        debugRow(title: "Motivo amigavel", value: snapshot.diagnostics.friendlyBlockingReason)
+                        debugRow(title: "Motivo tecnico", value: snapshot.diagnostics.currentBlockingReason)
+                        debugRow(
+                            title: "All markers 100%",
+                            value: snapshot.diagnostics.allExpectedMarkersAt100Percent
+                        )
+                        debugRow(
+                            title: "Expected progress",
+                            value: snapshot.diagnostics.expectedMarkerProgressById
+                        )
+                        debugRow(
+                            title: "Finalization elapsed",
+                            value: snapshot.diagnostics.normalFinalizationElapsed
+                        )
+                        debugRow(
+                            title: "Finalization max",
+                            value: snapshot.diagnostics.normalFinalizationMaxSeconds
+                        )
+                        debugRow(
+                            title: "Maturity gate",
+                            value: snapshot.diagnostics.normalFinalizationMaturityGatePassed
+                        )
+                        debugRow(
+                            title: "Normal gate",
+                            value: snapshot.diagnostics.normalFinalizationNormalGatePassed
+                        )
+                        debugRow(
+                            title: "Reprojection gate",
+                            value: snapshot.readiness.reprojectionReady
+                        )
+                        debugRow(
+                            title: "Auto export reason",
+                            value: snapshot.diagnostics.normalFinalizationAutoExportReason
+                        )
+                    }
+
+                    if enableRuntimeHeavyDebugSections {
                     debugSection(title: "Guided Static Capture") {
                         debugRow(title: "Ligado", value: snapshot.guidedStatic.enabled)
                         debugRow(title: "Etapa atual", value: snapshot.guidedStatic.currentStage)
@@ -366,6 +410,14 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Rejeitadas motion", value: snapshot.exportQuality.rejectedByMotion)
                         debugRow(title: "Penalizadas ARKit", value: snapshot.exportQuality.penalizedByARKit)
                     }
+                    } else {
+                        debugSection(title: "Debug seguro") {
+                            debugRow(
+                                title: "Status",
+                                value: "Secoes pesadas ocultas; painel seguro ativo"
+                            )
+                        }
+                    }
 
                     debugSection(title: "Config") {
                         debugRow(title: "Perfil marker", value: snapshot.configuration.markerProfile)
@@ -394,6 +446,7 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Focus settle", value: snapshot.configuration.focusSettleTimeSeconds)
                     }
 
+                    if enableEditableDebugControls {
                     debugSection(title: "Config scan") {
                         Picker("Perfil marker", selection: $markerProfile) {
                             ForEach(markerProfiles) { profile in
@@ -535,6 +588,14 @@ struct ScannerDebugPanelView: View {
                             Toggle("Precision mode v2", isOn: $precisionModeV2)
                             Toggle("Preferir dual-tag no export", isOn: $preferDualTagForFinalExport)
                             Toggle("Static Pose Stability Test", isOn: $staticPoseStabilityMode)
+                        }
+                    }
+                    } else {
+                        debugSection(title: "Config scan") {
+                            debugRow(
+                                title: "Controles",
+                                value: "Temporariamente ocultos para evitar crash ao abrir debug"
+                            )
                         }
                     }
 

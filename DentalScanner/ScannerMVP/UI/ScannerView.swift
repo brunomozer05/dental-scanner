@@ -76,6 +76,9 @@ struct ScannerView: View {
 
                 Spacer()
 
+                scannerFeedbackPanel
+                    .padding(.bottom, 10)
+
                 ZStack(alignment: .bottom) {
                     scannerBottomBar
 
@@ -309,6 +312,10 @@ struct ScannerView: View {
 
                 ScannerDivider()
 
+                scannerBottomMetric(title: "Refinamento", value: formattedRefinementProgress)
+
+                ScannerDivider()
+
                 scannerBottomMetric(title: "Qualidade", value: scannerQualityLabel)
 
                 ScannerDivider()
@@ -344,6 +351,49 @@ struct ScannerView: View {
                 }
             }
         }
+    }
+
+    private var scannerFeedbackPanel: some View {
+        ScannerGlassPanel(cornerRadius: 16) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(viewModel.scanUserFeedbackMessage)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+
+                    Spacer(minLength: 10)
+
+                    Text("Captura \(formattedUserProgress(viewModel.scanCaptureProgressPercent))")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .monospacedDigit()
+                }
+
+                Text(viewModel.scanUserFeedbackDetail)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.70))
+                    .lineLimit(2)
+
+                if let refinementProgress = viewModel.scanRefinementProgressPercent {
+                    HStack(spacing: 8) {
+                        ProgressView(value: min(max(refinementProgress, 0), 100), total: 100)
+                            .progressViewStyle(.linear)
+                            .tint(scannerAccentColor)
+
+                        Text("Refinamento \(formattedUserProgress(refinementProgress))")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .monospacedDigit()
+                    }
+                }
+
+                Text(viewModel.scanFriendlyBlockingReason)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: 520)
     }
 
     private var cancelScanButton: some View {
@@ -408,6 +458,24 @@ struct ScannerView: View {
         default:
             return "Aguardando"
         }
+    }
+
+    private var formattedRefinementProgress: String {
+        guard let progress = viewModel.scanRefinementProgressPercent,
+              progress.isFinite
+        else {
+            return "N/A"
+        }
+
+        return formattedUserProgress(progress)
+    }
+
+    private func formattedUserProgress(_ progress: Double) -> String {
+        guard progress.isFinite else {
+            return "N/A"
+        }
+
+        return "\(Int(round(min(max(progress, 0), 100))))%"
     }
 
     private var scannerTagCoverageItems: [ScannerTagCoverageItem] {

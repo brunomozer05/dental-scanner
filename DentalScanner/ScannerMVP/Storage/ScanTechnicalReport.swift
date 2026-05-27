@@ -24,6 +24,11 @@ struct ScanTechnicalReport: Codable {
     var distanceGuideState: String?
     var lastDistanceMm: Double?
     var tagAreaPixelsMean: Double?
+    var userFeedbackState: String?
+    var userFeedbackMessage: String?
+    var captureProgressPercent: Double?
+    var refinementProgressPercent: Double?
+    var friendlyBlockingReason: String?
     var normalFinalizationState: String?
     var normalFinalizationStartedAtSeconds: Double?
     var normalFinalizationDurationSeconds: Double?

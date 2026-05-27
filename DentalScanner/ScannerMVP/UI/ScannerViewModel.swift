@@ -565,6 +565,12 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var scanQualityStatus: String = "Aguardando inicio"
     @Published private(set) var scanReadinessMessage: String = "Aguardando inicio"
     @Published private(set) var scanReadinessBlockerSummary: String = "Aguardando inicio"
+    @Published private(set) var scanUserFeedbackState: String = "idle"
+    @Published private(set) var scanUserFeedbackMessage: String = "Aguardando inicio"
+    @Published private(set) var scanUserFeedbackDetail: String = "Toque em iniciar para comecar"
+    @Published private(set) var scanCaptureProgressPercent: Double = 0
+    @Published private(set) var scanRefinementProgressPercent: Double?
+    @Published private(set) var scanFriendlyBlockingReason: String = "Aguardando inicio"
     @Published private(set) var scanCoverageReady: Bool = false
     @Published private(set) var scanGoodFramesReady: Bool = false
     @Published private(set) var scanDistanceReady: Bool = false
@@ -2324,6 +2330,14 @@ final class ScannerViewModel: ObservableObject {
         scanQualityStatus = "Aguardando inicio"
         scanReadinessMessage = "Aguardando inicio"
         scanReadinessBlockerSummary = "Aguardando inicio"
+        updateScanUserFeedback(
+            state: "idle",
+            message: "Aguardando inicio",
+            detail: "Toque em iniciar para comecar",
+            captureProgress: 0,
+            refinementProgress: nil,
+            blockingReason: "Aguardando inicio"
+        )
         scanCoverageReady = false
         scanGoodFramesReady = false
         scanDistanceReady = false
@@ -2778,6 +2792,129 @@ final class ScannerViewModel: ObservableObject {
         expectedExportMarkerIds(for: .singleArucoV1).allSatisfy { markerId in
             let progress = progressByMarkerId[markerId] ?? 0
             return progress.isFinite && progress >= 100.0
+        }
+    }
+
+    private func expectedV1MarkerProgressSummary(
+        progressByMarkerId: [Int: Double]
+    ) -> String {
+        expectedExportMarkerIds(for: .singleArucoV1)
+            .map { markerId in
+                let progress = min(max(progressByMarkerId[markerId] ?? 0, 0), 100)
+                return "M\(markerId) \(Int(round(progress)))%"
+            }
+            .joined(separator: " | ")
+    }
+
+    private func captureProgressPercent(
+        progressByMarkerId: [Int: Double]
+    ) -> Double {
+        let expectedIds = expectedExportMarkerIds(for: .singleArucoV1)
+        guard !expectedIds.isEmpty else {
+            return min(max(scanProgress, 0), 100)
+        }
+
+        let values = expectedIds.map {
+            min(max(progressByMarkerId[$0] ?? 0, 0), 100)
+        }
+        return values.min() ?? 0
+    }
+
+    private func normalFinalizationRefinementProgressPercent(
+        elapsedSeconds: Double,
+        observationsByMarker: [Int: Int],
+        averageObservations: Double?,
+        normalGatePassed: Bool,
+        reprojectionGatePassed: Bool
+    ) -> Double {
+        let elapsedRatio = min(
+            max(elapsedSeconds / ScanConfiguration.normalFinalizationMaxSeconds, 0),
+            1
+        )
+        let stableRatio = min(
+            max(
+                normalFinalizationStableSecondsCollected /
+                    ScanConfiguration.normalFinalizationStableSeconds,
+                0
+            ),
+            1
+        )
+        let expectedIds = expectedExportMarkerIds(for: .singleArucoV1)
+        let minObservationRatio = expectedIds
+            .map {
+                Double(observationsByMarker[$0] ?? 0) /
+                    Double(ScanConfiguration.normalFinalizationMinFinalObservationsPerMarker)
+            }
+            .min()
+            .map { min(max($0, 0), 1) } ?? 0
+        let averageObservationRatio = min(
+            max(
+                (averageObservations ?? 0) /
+                    Double(ScanConfiguration.normalFinalizationTargetAverageObservationsPerMarker),
+                0
+            ),
+            1
+        )
+        let normalRatio = normalGatePassed ? 1.0 : 0.55
+        let reprojectionRatio = reprojectionGatePassed ? 1.0 : 0.55
+        let progress = elapsedRatio * 0.25 +
+            stableRatio * 0.20 +
+            minObservationRatio * 0.20 +
+            averageObservationRatio * 0.20 +
+            normalRatio * 0.075 +
+            reprojectionRatio * 0.075
+
+        return min(max(progress * 100.0, 0), 99)
+    }
+
+    private func updateScanUserFeedback(
+        state: String,
+        message: String,
+        detail: String? = nil,
+        captureProgress: Double? = nil,
+        refinementProgress: Double? = nil,
+        blockingReason: String? = nil
+    ) {
+        scanUserFeedbackState = state.isEmpty ? "unknown" : state
+        scanUserFeedbackMessage = message.isEmpty ? "Scan em andamento" : message
+        if let detail, !detail.isEmpty {
+            scanUserFeedbackDetail = detail
+        } else {
+            scanUserFeedbackDetail = scanUserFeedbackMessage
+        }
+        scanCaptureProgressPercent = min(max(captureProgress ?? scanProgress, 0), 100)
+        if let refinementProgress, refinementProgress.isFinite {
+            scanRefinementProgressPercent = min(max(refinementProgress, 0), 100)
+        } else {
+            scanRefinementProgressPercent = nil
+        }
+        scanFriendlyBlockingReason = friendlyBlockingReason(blockingReason)
+    }
+
+    private func friendlyBlockingReason(_ reason: String?) -> String {
+        guard let reason, !reason.isEmpty else {
+            return "Sem bloqueio"
+        }
+
+        switch reason {
+        case "waiting_all_markers_100_percent":
+            return "Aguardando: todos os markers chegarem em 100%"
+        case "waiting_stable_window":
+            return "Refinando: mantenha parado para estabilizar"
+        case "waiting_min_observations":
+            return "Refinando: coletando mais observacoes por marker"
+        case "waiting_average_observations":
+            return "Refinando: aumentando maturidade dos markers"
+        case "waiting_normal_stability":
+            return "Refinando orientacao; mantenha a camera estavel"
+        case "waiting_reprojection":
+            return "Refinando reprojecao; mova bem devagar"
+        case "maturity_gate_passed":
+            return "Quase pronto... gerando STL em breve"
+        case "max_seconds_reached_export_gate_valid":
+            return "Tempo maximo atingido; finalizando com dados validos"
+        default:
+            return reason
         }
     }
 
@@ -3785,6 +3922,14 @@ final class ScannerViewModel: ObservableObject {
             scanReadinessMessage = "Teste estatico coletando"
             scanQualityStatus = scanReadinessMessage
             scanReadinessBlockerSummary = "Teste estatico: export desativado"
+            updateScanUserFeedback(
+                state: "static_pose_test",
+                message: "Teste estatico coletando",
+                detail: "Mantenha a camera parada",
+                captureProgress: scanProgress,
+                refinementProgress: nil,
+                blockingReason: scanReadinessBlockerSummary
+            )
             updateExportDiagnosticsIfNeeded(timestamp: timestamp)
             return
         }
@@ -3798,6 +3943,14 @@ final class ScannerViewModel: ObservableObject {
             scanReadinessMessage = guidedStaticReadinessMessage()
             scanQualityStatus = scanReadinessMessage
             scanReadinessBlockerSummary = "Bloqueio principal: captura guiada"
+            updateScanUserFeedback(
+                state: "guided_static",
+                message: scanReadinessMessage,
+                detail: "Siga as etapas guiadas",
+                captureProgress: scanProgress,
+                refinementProgress: nil,
+                blockingReason: scanReadinessBlockerSummary
+            )
             updateExportDiagnosticsIfNeeded(timestamp: timestamp)
             return
         }
@@ -3812,6 +3965,14 @@ final class ScannerViewModel: ObservableObject {
         if isReady {
             setScanState(.ready)
             scanProgress = 100
+            updateScanUserFeedback(
+                state: "exporting",
+                message: "Finalizando STL...",
+                detail: "Gerando modelo 3D",
+                captureProgress: 100,
+                refinementProgress: 100,
+                blockingReason: "maturity_gate_passed"
+            )
             handleScanBecameReady()
             return
         }
@@ -3826,6 +3987,22 @@ final class ScannerViewModel: ObservableObject {
             hasStableDuration: hasStableDuration
         )
         scanQualityStatus = scanReadinessMessage
+        let progressByMarkerId = markerProfile == .singleArucoV1
+            ? expectedV1MarkerProgressById()
+            : [:]
+        let progressSummary = markerProfile == .singleArucoV1
+            ? expectedV1MarkerProgressSummary(progressByMarkerId: progressByMarkerId)
+            : scanReadinessMessage
+        updateScanUserFeedback(
+            state: "scanning",
+            message: "Escaneando markers...",
+            detail: "\(progressSummary)\nContinue movendo devagar",
+            captureProgress: markerProfile == .singleArucoV1
+                ? captureProgressPercent(progressByMarkerId: progressByMarkerId)
+                : scanProgress,
+            refinementProgress: nil,
+            blockingReason: scanReadinessBlockerSummary
+        )
         updateExportDiagnosticsIfNeeded(timestamp: timestamp)
     }
 
@@ -3866,8 +4043,19 @@ final class ScannerViewModel: ObservableObject {
             scanReadinessBlockerSummary = "waiting_all_markers_100_percent"
             setScanState(.stabilizing)
             scanProgress = min(scanProgress, 99)
+            let progressSummary = expectedV1MarkerProgressSummary(
+                progressByMarkerId: expectedMarkerProgressById
+            )
             scanReadinessMessage = "Continue escaneando ate todos os markers chegarem em 100%"
             scanQualityStatus = scanReadinessMessage
+            updateScanUserFeedback(
+                state: "scanning",
+                message: "Escaneando markers...",
+                detail: "\(progressSummary)\nContinue movendo devagar",
+                captureProgress: captureProgressPercent(progressByMarkerId: expectedMarkerProgressById),
+                refinementProgress: nil,
+                blockingReason: normalFinalizationBlockedReason
+            )
             updateExportDiagnosticsIfNeeded(timestamp: timestamp)
             return true
         }
@@ -3929,6 +4117,13 @@ final class ScannerViewModel: ObservableObject {
         normalFinalizationMaturityGatePassed = maturityGatePassed
         normalFinalizationBlockedReason = blockedReason
         normalFinalizationCanStart = allExpectedMarkersAt100Percent && evaluation.hasExportableTagPoses
+        let refinementProgress = normalFinalizationRefinementProgressPercent(
+            elapsedSeconds: elapsedSeconds,
+            observationsByMarker: observationsByMarker,
+            averageObservations: averageObservations,
+            normalGatePassed: normalGatePassed,
+            reprojectionGatePassed: reprojectionGatePassed
+        )
 
         let autoExportReason: String?
         if hasStableWindow && maturityGatePassed {
@@ -3964,6 +4159,14 @@ final class ScannerViewModel: ObservableObject {
             scanReadinessMessage = "Finalizando STL..."
             scanQualityStatus = "Finalizando STL..."
             scanReadinessBlockerSummary = "Pronto: finalizacao normal"
+            updateScanUserFeedback(
+                state: "exporting",
+                message: "Finalizando STL...",
+                detail: friendlyBlockingReason(autoExportReason),
+                captureProgress: 100,
+                refinementProgress: 100,
+                blockingReason: autoExportReason
+            )
             handleScanBecameReady()
             normalFinalizationState = .completed
             return true
@@ -3971,9 +4174,23 @@ final class ScannerViewModel: ObservableObject {
 
         setScanState(.stabilizing)
         scanProgress = 99
-        scanReadinessMessage = "Todos capturados - mantenha parado para refinar"
+        let finalizationMessage = refinementProgress >= 85
+            ? "Quase pronto..."
+            : "Todos capturados - mantenha parado para refinar"
+        let finalizationDetail = refinementProgress >= 85
+            ? "Gerando STL em breve"
+            : friendlyBlockingReason(blockedReason)
+        scanReadinessMessage = finalizationMessage
         scanQualityStatus = scanReadinessMessage
         scanReadinessBlockerSummary = blockedReason ?? "Pronto: finalizando scan normal"
+        updateScanUserFeedback(
+            state: "refining",
+            message: finalizationMessage,
+            detail: finalizationDetail,
+            captureProgress: 100,
+            refinementProgress: refinementProgress,
+            blockingReason: blockedReason
+        )
         updateExportDiagnosticsIfNeeded(timestamp: timestamp)
         return true
     }
@@ -3993,6 +4210,10 @@ final class ScannerViewModel: ObservableObject {
 
     var normalFinalizationTargetAverageObservationsPerMarkerForDebug: Int {
         ScanConfiguration.normalFinalizationTargetAverageObservationsPerMarker
+    }
+
+    var normalFinalizationMaxSecondsForDebug: Double {
+        ScanConfiguration.normalFinalizationMaxSeconds
     }
 
     func normalFinalizationElapsedSeconds(at timestamp: Double? = nil) -> Double? {
@@ -7214,6 +7435,11 @@ final class ScannerViewModel: ObservableObject {
             centerFocusRecoveryCount: centerFocusRecoveryCount,
             distanceGuideState: distanceGuideStateTitle,
             lastDistanceMm: lastDistanceGuideDistanceMm ?? poseDistanceMm,
+            userFeedbackState: scanUserFeedbackState,
+            userFeedbackMessage: scanUserFeedbackMessage,
+            captureProgressPercent: scanCaptureProgressPercent,
+            refinementProgressPercent: scanRefinementProgressPercent,
+            friendlyBlockingReason: scanFriendlyBlockingReason,
             currentBlockingReason: currentBlockingReasonOverride ?? diagnosticsCurrentBlockingReason(),
             lastBlockingReasonBeforeExport: lastBlockingReasonBeforeExportOverride ?? lastBlockingReasonBeforeExport,
             normalFinalizationState: normalFinalizationState.rawValue,
@@ -8541,6 +8767,11 @@ final class ScannerViewModel: ObservableObject {
             distanceGuideState: distanceGuideStateTitle,
             lastDistanceMm: finiteReportDouble(lastDistanceGuideDistanceMm ?? poseDistanceMm),
             tagAreaPixelsMean: finiteReportDouble(averageTagAreaPixelsForReport()),
+            userFeedbackState: scanUserFeedbackState,
+            userFeedbackMessage: scanUserFeedbackMessage,
+            captureProgressPercent: finiteReportDouble(scanCaptureProgressPercent),
+            refinementProgressPercent: finiteReportDouble(scanRefinementProgressPercent),
+            friendlyBlockingReason: scanFriendlyBlockingReason,
             normalFinalizationState: normalFinalizationState.rawValue,
             normalFinalizationStartedAtSeconds: finiteReportDouble(
                 currentScanDiagnosticsSnapshot.normalFinalizationStartedAtSeconds

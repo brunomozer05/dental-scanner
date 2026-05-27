@@ -191,6 +191,11 @@ struct ScannerDebugSnapshot: Equatable {
     }
 
     struct DiagnosticsSection: Equatable {
+        let userFeedbackState: String
+        let userFeedbackMessage: String
+        let captureProgress: String
+        let refinementProgress: String
+        let friendlyBlockingReason: String
         let enabled: String
         let eventsCount: String
         let lastEvent: String
@@ -213,6 +218,7 @@ struct ScannerDebugSnapshot: Equatable {
         let normalFinalizationState: String
         let normalFinalizationStartedAt: String
         let normalFinalizationElapsed: String
+        let normalFinalizationMaxSeconds: String
         let normalFinalizationStableSeconds: String
         let normalFinalizationFramesAccepted: String
         let normalFinalizationRejectedByFocus: String
@@ -470,6 +476,7 @@ extension ScannerViewModel {
                 normalFinalizationState: normalFinalizationState,
                 normalFinalizationStartedAtTimestamp: normalFinalizationStartedAtTimestamp,
                 normalFinalizationElapsedSeconds: normalFinalizationElapsedSeconds(),
+                normalFinalizationMaxSeconds: normalFinalizationMaxSecondsForDebug,
                 normalFinalizationStableSecondsCollected: normalFinalizationStableSecondsCollected,
                 normalFinalizationFramesAccepted: normalFinalizationFramesAccepted,
                 normalFinalizationFramesRejectedByFocus: normalFinalizationFramesRejectedByFocus,
@@ -507,7 +514,12 @@ extension ScannerViewModel {
                 normalFinalizationCanStart:
                     normalFinalizationCanStart,
                 normalFinalizationCanAutoExport:
-                    normalFinalizationCanAutoExport
+                    normalFinalizationCanAutoExport,
+                userFeedbackState: scanUserFeedbackState,
+                userFeedbackMessage: scanUserFeedbackMessage,
+                captureProgressPercent: scanCaptureProgressPercent,
+                refinementProgressPercent: scanRefinementProgressPercent,
+                friendlyBlockingReason: scanFriendlyBlockingReason
             ),
             guidedStatic: Self.debugGuidedStaticSection(
                 enabled: guidedStaticCaptureEnabled,
@@ -601,6 +613,7 @@ extension ScannerViewModel {
         normalFinalizationState: NormalScanFinalizationState,
         normalFinalizationStartedAtTimestamp: Double?,
         normalFinalizationElapsedSeconds: Double?,
+        normalFinalizationMaxSeconds: Double,
         normalFinalizationStableSecondsCollected: Double,
         normalFinalizationFramesAccepted: Int,
         normalFinalizationFramesRejectedByFocus: Int,
@@ -622,9 +635,19 @@ extension ScannerViewModel {
         allExpectedMarkersAt100Percent: Bool,
         expectedMarkerProgressById: [Int: Double],
         normalFinalizationCanStart: Bool,
-        normalFinalizationCanAutoExport: Bool
+        normalFinalizationCanAutoExport: Bool,
+        userFeedbackState: String,
+        userFeedbackMessage: String,
+        captureProgressPercent: Double,
+        refinementProgressPercent: Double?,
+        friendlyBlockingReason: String
     ) -> ScannerDebugSnapshot.DiagnosticsSection {
         ScannerDebugSnapshot.DiagnosticsSection(
+            userFeedbackState: debugText(userFeedbackState),
+            userFeedbackMessage: debugText(userFeedbackMessage),
+            captureProgress: debugPercent(captureProgressPercent),
+            refinementProgress: debugPercent(refinementProgressPercent),
+            friendlyBlockingReason: debugText(friendlyBlockingReason),
             enabled: enabled ? "Sim" : "Nao",
             eventsCount: "\(snapshot.eventsCount)",
             lastEvent: debugText(snapshot.lastEventName),
@@ -650,6 +673,7 @@ extension ScannerViewModel {
                 ? ScannerDebugSnapshot.missingValue
                 : "Sim",
             normalFinalizationElapsed: debugSeconds(normalFinalizationElapsedSeconds),
+            normalFinalizationMaxSeconds: debugSeconds(normalFinalizationMaxSeconds),
             normalFinalizationStableSeconds: debugSeconds(normalFinalizationStableSecondsCollected),
             normalFinalizationFramesAccepted: "\(normalFinalizationFramesAccepted)",
             normalFinalizationRejectedByFocus: "\(normalFinalizationFramesRejectedByFocus)",

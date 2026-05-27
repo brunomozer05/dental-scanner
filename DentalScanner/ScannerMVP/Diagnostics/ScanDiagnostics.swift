@@ -55,6 +55,11 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
     var distanceSamplesTotal: Int
     var distanceSamplesValid: Int
     var distanceValidPercent: Double?
+    var userFeedbackState: String?
+    var userFeedbackMessage: String?
+    var captureProgressPercent: Double?
+    var refinementProgressPercent: Double?
+    var friendlyBlockingReason: String?
     var guidedStaticCaptureEnabled: Bool
     var guidedStages: [GuidedStageSummary]?
     var slowestMarkerId: Int?
@@ -119,6 +124,11 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
         distanceSamplesTotal: 0,
         distanceSamplesValid: 0,
         distanceValidPercent: nil,
+        userFeedbackState: nil,
+        userFeedbackMessage: nil,
+        captureProgressPercent: nil,
+        refinementProgressPercent: nil,
+        friendlyBlockingReason: nil,
         guidedStaticCaptureEnabled: false,
         guidedStages: nil,
         slowestMarkerId: nil,
