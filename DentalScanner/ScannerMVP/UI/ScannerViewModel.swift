@@ -3775,7 +3775,7 @@ final class ScannerViewModel: ObservableObject {
         return true
     }
 
-    private var shouldUseNormalScanFinalization: Bool {
+    var shouldUseNormalScanFinalization: Bool {
         markerProfile == .singleArucoV1 &&
             !guidedStaticCaptureEnabled &&
             !staticPoseStabilityMode &&
@@ -3784,7 +3784,7 @@ final class ScannerViewModel: ObservableObject {
             !isGeneratingSTL
     }
 
-    private func normalFinalizationElapsedSeconds(at timestamp: Double? = nil) -> Double? {
+    func normalFinalizationElapsedSeconds(at timestamp: Double? = nil) -> Double? {
         guard let normalFinalizationStartedAtTimestamp else {
             return nil
         }
