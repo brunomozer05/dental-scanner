@@ -2881,17 +2881,16 @@ final class ScannerViewModel: ObservableObject {
         let distanceMm = pose?.distanceMm
         lastDistanceGuideDistanceMm = distanceMm?.isFinite == true ? distanceMm : nil
         defer {
-            guard diagnosticsEnabled else {
-                return
+            if diagnosticsEnabled {
+                let timestamp = lastFrameTimestamp ?? Date().timeIntervalSinceReferenceDate
+                diagnosticsRecorder.recordDistanceState(
+                    state: distanceGuideStateTitle,
+                    distanceMm: lastDistanceGuideDistanceMm,
+                    isReliable: distanceGuideSourceReliable,
+                    timestamp: timestamp
+                )
+                publishDiagnosticsSnapshotIfNeeded(timestamp: timestamp)
             }
-            let timestamp = lastFrameTimestamp ?? Date().timeIntervalSinceReferenceDate
-            diagnosticsRecorder.recordDistanceState(
-                state: distanceGuideStateTitle,
-                distanceMm: lastDistanceGuideDistanceMm,
-                isReliable: distanceGuideSourceReliable,
-                timestamp: timestamp
-            )
-            publishDiagnosticsSnapshotIfNeeded(timestamp: timestamp)
         }
 
         if cameraQuality.isAdjustingFocus ||
@@ -7793,6 +7792,7 @@ final class ScannerViewModel: ObservableObject {
         return Double(recentFrameTimestamps.count - 1) / elapsed
     }
 
+    @MainActor
     private func handleCameraError(_ error: Error) {
         cameraState = .failed
         shouldRunCamera = false
