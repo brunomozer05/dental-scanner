@@ -71,7 +71,10 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
     var normalFinalizationFramesRejectedByNormal: Int
     var autoExportTriggered: Bool
     var normalFinalizationMinFinalObservationsPerMarker: Int?
+    var normalFinalizationTargetAverageObservationsPerMarker: Int?
     var normalFinalizationMinObservationsReached: Bool?
+    var normalFinalizationAverageObservationsReached: Bool?
+    var normalFinalizationAverageObservationsPerMarker: Double?
     var normalFinalizationMaxNormalStdDegrees: Double?
     var normalFinalizationNormalGatePassed: Bool?
     var normalFinalizationMaturityGatePassed: Bool?
@@ -130,7 +133,10 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
         normalFinalizationFramesRejectedByNormal: 0,
         autoExportTriggered: false,
         normalFinalizationMinFinalObservationsPerMarker: nil,
+        normalFinalizationTargetAverageObservationsPerMarker: nil,
         normalFinalizationMinObservationsReached: nil,
+        normalFinalizationAverageObservationsReached: nil,
+        normalFinalizationAverageObservationsPerMarker: nil,
         normalFinalizationMaxNormalStdDegrees: nil,
         normalFinalizationNormalGatePassed: nil,
         normalFinalizationMaturityGatePassed: nil,

@@ -318,7 +318,8 @@ final class ScannerViewModel: ObservableObject {
         static let staticPoseDiagnosticsUpdateIntervalSeconds: Double = 0.25
         static let normalFinalizationStableSeconds: Double = 5.0
         static let normalFinalizationMaxSeconds: Double = 12.0
-        static let normalFinalizationMinFinalObservationsPerMarker: Int = 80
+        static let normalFinalizationMinFinalObservationsPerMarker: Int = 50
+        static let normalFinalizationTargetAverageObservationsPerMarker: Int = 75
         static let normalFinalizationMaxNormalStdDegrees: Double = 10.0
         static let normalFinalizationRequireCameraStable: Bool = true
         static let normalFinalizationRequireDistanceValid: Bool = true
@@ -673,11 +674,13 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var normalFinalizationFramesRejectedByNormal: Int = 0
     @Published private(set) var normalFinalizationAutoExportTriggered: Bool = false
     @Published private(set) var normalFinalizationMinObservationsReached: Bool = false
+    @Published private(set) var normalFinalizationAverageObservationsReached: Bool = false
     @Published private(set) var normalFinalizationNormalGatePassed: Bool = true
     @Published private(set) var normalFinalizationMaturityGatePassed: Bool = false
     @Published private(set) var normalFinalizationAutoExportReason: String?
     @Published private(set) var normalFinalizationBlockedReason: String?
     @Published private(set) var normalFinalizationMinObservationsByMarker: [Int: Int] = [:]
+    @Published private(set) var normalFinalizationAverageObservationsPerMarker: Double?
     @Published private(set) var normalFinalizationWorstNormalStdDegrees: Double?
     @Published private(set) var guidedStaticCaptureEnabled: Bool = false
     @Published private(set) var guidedStaticRequiredStages: Int =
@@ -2450,11 +2453,13 @@ final class ScannerViewModel: ObservableObject {
         normalFinalizationFramesRejectedByNormal = 0
         normalFinalizationAutoExportTriggered = false
         normalFinalizationMinObservationsReached = false
+        normalFinalizationAverageObservationsReached = false
         normalFinalizationNormalGatePassed = true
         normalFinalizationMaturityGatePassed = false
         normalFinalizationAutoExportReason = nil
         normalFinalizationBlockedReason = nil
         normalFinalizationMinObservationsByMarker = [:]
+        normalFinalizationAverageObservationsPerMarker = nil
         normalFinalizationWorstNormalStdDegrees = nil
         normalFinalizationLastAcceptedFrameTimestamp = nil
     }
@@ -2739,9 +2744,24 @@ final class ScannerViewModel: ObservableObject {
             .max()
     }
 
+    private func normalFinalizationAverageObservationsPerMarker(
+        from observationsByMarker: [Int: Int]
+    ) -> Double? {
+        let counts = expectedExportMarkerIds(for: .singleArucoV1).compactMap {
+            observationsByMarker[$0]
+        }
+
+        guard !counts.isEmpty else {
+            return nil
+        }
+
+        return Double(counts.reduce(0, +)) / Double(counts.count)
+    }
+
     private func normalFinalizationBlockedReason(
         hasStableWindow: Bool,
         minObservationsReached: Bool,
+        averageObservationsReached: Bool,
         normalGatePassed: Bool,
         reprojectionGatePassed: Bool
     ) -> String? {
@@ -2751,6 +2771,10 @@ final class ScannerViewModel: ObservableObject {
 
         if !minObservationsReached {
             return "waiting_min_observations"
+        }
+
+        if !averageObservationsReached {
+            return "waiting_average_observations"
         }
 
         if !normalGatePassed {
@@ -3813,22 +3837,32 @@ final class ScannerViewModel: ObservableObject {
         let minObservationsReached = observationsByMarker.values.allSatisfy {
             $0 >= ScanConfiguration.normalFinalizationMinFinalObservationsPerMarker
         }
+        let averageObservations = normalFinalizationAverageObservationsPerMarker(
+            from: observationsByMarker
+        )
+        let averageObservationsReached = averageObservations.map {
+            $0 >= Double(ScanConfiguration.normalFinalizationTargetAverageObservationsPerMarker)
+        } ?? false
         let worstNormalStdDegrees = normalFinalizationWorstNormalStdDegreesForExpectedMarkers()
         let normalGatePassed = worstNormalStdDegrees.map {
             $0 <= ScanConfiguration.normalFinalizationMaxNormalStdDegrees
         } ?? true
         let reprojectionGatePassed = evaluation.hasAcceptableReprojectionError
         let maturityGatePassed = minObservationsReached &&
+            averageObservationsReached &&
             normalGatePassed &&
             reprojectionGatePassed
         let blockedReason = normalFinalizationBlockedReason(
             hasStableWindow: hasStableWindow,
             minObservationsReached: minObservationsReached,
+            averageObservationsReached: averageObservationsReached,
             normalGatePassed: normalGatePassed,
             reprojectionGatePassed: reprojectionGatePassed
         )
         normalFinalizationMinObservationsByMarker = observationsByMarker
         normalFinalizationMinObservationsReached = minObservationsReached
+        normalFinalizationAverageObservationsPerMarker = averageObservations
+        normalFinalizationAverageObservationsReached = averageObservationsReached
         normalFinalizationWorstNormalStdDegrees = worstNormalStdDegrees
         normalFinalizationNormalGatePassed = normalGatePassed
         normalFinalizationMaturityGatePassed = maturityGatePassed
@@ -3836,7 +3870,7 @@ final class ScannerViewModel: ObservableObject {
 
         let autoExportReason: String?
         if hasStableWindow && maturityGatePassed {
-            autoExportReason = "stable_window_completed"
+            autoExportReason = "maturity_gate_passed"
         } else if hitMaxWindow {
             autoExportReason = "max_seconds_reached_export_gate_valid"
         } else {
@@ -3855,6 +3889,7 @@ final class ScannerViewModel: ObservableObject {
                     "reason": autoExportReason,
                     "blockedReason": blockedReason ?? "none",
                     "minObservationsReached": minObservationsReached ? "true" : "false",
+                    "averageObservationsReached": averageObservationsReached ? "true" : "false",
                     "normalGatePassed": normalGatePassed ? "true" : "false",
                     "maturityGatePassed": maturityGatePassed ? "true" : "false"
                 ],
@@ -3890,6 +3925,10 @@ final class ScannerViewModel: ObservableObject {
 
     var normalFinalizationMinFinalObservationsPerMarkerForDebug: Int {
         ScanConfiguration.normalFinalizationMinFinalObservationsPerMarker
+    }
+
+    var normalFinalizationTargetAverageObservationsPerMarkerForDebug: Int {
+        ScanConfiguration.normalFinalizationTargetAverageObservationsPerMarker
     }
 
     func normalFinalizationElapsedSeconds(at timestamp: Double? = nil) -> Double? {
@@ -7124,7 +7163,13 @@ final class ScannerViewModel: ObservableObject {
             autoExportTriggered: normalFinalizationAutoExportTriggered,
             normalFinalizationMinFinalObservationsPerMarker:
                 ScanConfiguration.normalFinalizationMinFinalObservationsPerMarker,
+            normalFinalizationTargetAverageObservationsPerMarker:
+                ScanConfiguration.normalFinalizationTargetAverageObservationsPerMarker,
             normalFinalizationMinObservationsReached: normalFinalizationMinObservationsReached,
+            normalFinalizationAverageObservationsReached:
+                normalFinalizationAverageObservationsReached,
+            normalFinalizationAverageObservationsPerMarker:
+                normalFinalizationAverageObservationsPerMarker,
             normalFinalizationMaxNormalStdDegrees:
                 ScanConfiguration.normalFinalizationMaxNormalStdDegrees,
             normalFinalizationNormalGatePassed: normalFinalizationNormalGatePassed,
@@ -8443,7 +8488,13 @@ final class ScannerViewModel: ObservableObject {
             autoExportTriggered: normalFinalizationAutoExportTriggered,
             normalFinalizationMinFinalObservationsPerMarker:
                 ScanConfiguration.normalFinalizationMinFinalObservationsPerMarker,
+            normalFinalizationTargetAverageObservationsPerMarker:
+                ScanConfiguration.normalFinalizationTargetAverageObservationsPerMarker,
             normalFinalizationMinObservationsReached: normalFinalizationMinObservationsReached,
+            normalFinalizationAverageObservationsReached:
+                normalFinalizationAverageObservationsReached,
+            normalFinalizationAverageObservationsPerMarker:
+                finiteReportDouble(normalFinalizationAverageObservationsPerMarker),
             normalFinalizationMaxNormalStdDegrees:
                 finiteReportDouble(ScanConfiguration.normalFinalizationMaxNormalStdDegrees),
             normalFinalizationNormalGatePassed: normalFinalizationNormalGatePassed,

@@ -221,8 +221,11 @@ struct ScannerDebugSnapshot: Equatable {
         let normalFinalizationRejectedByNormal: String
         let normalFinalizationWillAutoExport: String
         let normalFinalizationMinObservationsPerMarker: String
+        let normalFinalizationTargetAverageObservationsPerMarker: String
         let normalFinalizationObservationsByMarker: String
+        let normalFinalizationAverageObservationsPerMarker: String
         let normalFinalizationMinObservationsReached: String
+        let normalFinalizationAverageObservationsReached: String
         let normalFinalizationNormalGatePassed: String
         let normalFinalizationWorstNormalStd: String
         let normalFinalizationMaturityGatePassed: String
@@ -473,10 +476,16 @@ extension ScannerViewModel {
                     normalFinalizationState == .stabilizing,
                 normalFinalizationMinFinalObservationsPerMarker:
                     normalFinalizationMinFinalObservationsPerMarkerForDebug,
+                normalFinalizationTargetAverageObservationsPerMarker:
+                    normalFinalizationTargetAverageObservationsPerMarkerForDebug,
                 normalFinalizationMinObservationsByMarker:
                     normalFinalizationMinObservationsByMarker,
+                normalFinalizationAverageObservationsPerMarker:
+                    normalFinalizationAverageObservationsPerMarker,
                 normalFinalizationMinObservationsReached:
                     normalFinalizationMinObservationsReached,
+                normalFinalizationAverageObservationsReached:
+                    normalFinalizationAverageObservationsReached,
                 normalFinalizationNormalGatePassed:
                     normalFinalizationNormalGatePassed,
                 normalFinalizationWorstNormalStdDegrees:
@@ -588,8 +597,11 @@ extension ScannerViewModel {
         normalFinalizationFramesRejectedByNormal: Int,
         normalFinalizationWillAutoExport: Bool,
         normalFinalizationMinFinalObservationsPerMarker: Int,
+        normalFinalizationTargetAverageObservationsPerMarker: Int,
         normalFinalizationMinObservationsByMarker: [Int: Int],
+        normalFinalizationAverageObservationsPerMarker: Double?,
         normalFinalizationMinObservationsReached: Bool,
+        normalFinalizationAverageObservationsReached: Bool,
         normalFinalizationNormalGatePassed: Bool,
         normalFinalizationWorstNormalStdDegrees: Double?,
         normalFinalizationMaturityGatePassed: Bool,
@@ -631,12 +643,18 @@ extension ScannerViewModel {
             normalFinalizationWillAutoExport: normalFinalizationWillAutoExport ? "Sim" : "Nao",
             normalFinalizationMinObservationsPerMarker:
                 "\(normalFinalizationMinFinalObservationsPerMarker)",
+            normalFinalizationTargetAverageObservationsPerMarker:
+                "\(normalFinalizationTargetAverageObservationsPerMarker)",
             normalFinalizationObservationsByMarker: debugIntDictionary(
                 normalFinalizationMinObservationsByMarker,
                 valuePrefix: "M"
             ),
+            normalFinalizationAverageObservationsPerMarker:
+                debugNumber(normalFinalizationAverageObservationsPerMarker, decimals: 1),
             normalFinalizationMinObservationsReached:
                 normalFinalizationMinObservationsReached ? "Sim" : "Nao",
+            normalFinalizationAverageObservationsReached:
+                normalFinalizationAverageObservationsReached ? "Sim" : "Nao",
             normalFinalizationNormalGatePassed:
                 normalFinalizationNormalGatePassed ? "Sim" : "Nao",
             normalFinalizationWorstNormalStd:

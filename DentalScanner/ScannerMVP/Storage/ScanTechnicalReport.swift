@@ -34,7 +34,10 @@ struct ScanTechnicalReport: Codable {
     var normalFinalizationFramesRejectedByNormal: Int?
     var autoExportTriggered: Bool?
     var normalFinalizationMinFinalObservationsPerMarker: Int?
+    var normalFinalizationTargetAverageObservationsPerMarker: Int?
     var normalFinalizationMinObservationsReached: Bool?
+    var normalFinalizationAverageObservationsReached: Bool?
+    var normalFinalizationAverageObservationsPerMarker: Double?
     var normalFinalizationMaxNormalStdDegrees: Double?
     var normalFinalizationNormalGatePassed: Bool?
     var normalFinalizationMaturityGatePassed: Bool?

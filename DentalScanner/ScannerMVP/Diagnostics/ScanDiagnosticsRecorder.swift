@@ -309,7 +309,10 @@ final class ScanDiagnosticsRecorder {
         normalFinalizationFramesRejectedByNormal: Int,
         autoExportTriggered: Bool,
         normalFinalizationMinFinalObservationsPerMarker: Int?,
+        normalFinalizationTargetAverageObservationsPerMarker: Int?,
         normalFinalizationMinObservationsReached: Bool?,
+        normalFinalizationAverageObservationsReached: Bool?,
+        normalFinalizationAverageObservationsPerMarker: Double?,
         normalFinalizationMaxNormalStdDegrees: Double?,
         normalFinalizationNormalGatePassed: Bool?,
         normalFinalizationMaturityGatePassed: Bool?,
@@ -403,7 +406,12 @@ final class ScanDiagnosticsRecorder {
             autoExportTriggered: autoExportTriggered,
             normalFinalizationMinFinalObservationsPerMarker:
                 normalFinalizationMinFinalObservationsPerMarker,
+            normalFinalizationTargetAverageObservationsPerMarker:
+                normalFinalizationTargetAverageObservationsPerMarker,
             normalFinalizationMinObservationsReached: normalFinalizationMinObservationsReached,
+            normalFinalizationAverageObservationsReached: normalFinalizationAverageObservationsReached,
+            normalFinalizationAverageObservationsPerMarker:
+                finite(normalFinalizationAverageObservationsPerMarker),
             normalFinalizationMaxNormalStdDegrees: finite(normalFinalizationMaxNormalStdDegrees),
             normalFinalizationNormalGatePassed: normalFinalizationNormalGatePassed,
             normalFinalizationMaturityGatePassed: normalFinalizationMaturityGatePassed,

@@ -204,16 +204,28 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Final reject normal", value: snapshot.diagnostics.normalFinalizationRejectedByNormal)
                         debugRow(title: "Auto export", value: snapshot.diagnostics.normalFinalizationWillAutoExport)
                         debugRow(
-                            title: "Min obs per marker",
+                            title: "Min obs absolute",
                             value: snapshot.diagnostics.normalFinalizationMinObservationsPerMarker
+                        )
+                        debugRow(
+                            title: "Target avg obs",
+                            value: snapshot.diagnostics.normalFinalizationTargetAverageObservationsPerMarker
                         )
                         debugRow(
                             title: "Obs per marker",
                             value: snapshot.diagnostics.normalFinalizationObservationsByMarker
                         )
                         debugRow(
+                            title: "Avg obs",
+                            value: snapshot.diagnostics.normalFinalizationAverageObservationsPerMarker
+                        )
+                        debugRow(
                             title: "Min obs reached",
                             value: snapshot.diagnostics.normalFinalizationMinObservationsReached
+                        )
+                        debugRow(
+                            title: "Avg obs reached",
+                            value: snapshot.diagnostics.normalFinalizationAverageObservationsReached
                         )
                         debugRow(
                             title: "Normal gate",
