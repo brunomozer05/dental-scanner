@@ -114,7 +114,37 @@ struct ScannerView: View {
                                 marker2ProgressPercent: viewModel.debugExpectedMarker2Progress,
                                 marker3ProgressPercent: viewModel.debugExpectedMarker3Progress,
                                 allExpectedMarkersAt100Percent:
-                                    viewModel.debugAllExpectedMarkersAt100Percent
+                                    viewModel.debugAllExpectedMarkersAt100Percent,
+                                normalFinalizationState:
+                                    viewModel.debugNormalFinalizationStateText,
+                                normalFinalizationElapsedSeconds:
+                                    viewModel.debugNormalFinalizationElapsedSeconds,
+                                normalFinalizationMaxSeconds:
+                                    viewModel.debugNormalFinalizationMaxSeconds,
+                                normalFinalizationStableSeconds:
+                                    viewModel.debugNormalFinalizationStableSeconds,
+                                normalFinalizationMaturityGatePassed:
+                                    viewModel.debugNormalFinalizationMaturityGatePassed,
+                                normalFinalizationMinObservationsReached:
+                                    viewModel.debugNormalFinalizationMinObservationsReached,
+                                normalFinalizationAverageObservationsReached:
+                                    viewModel.debugNormalFinalizationAverageObservationsReached,
+                                normalFinalizationNormalGatePassed:
+                                    viewModel.debugNormalFinalizationNormalGatePassed,
+                                normalFinalizationReprojectionGatePassed:
+                                    viewModel.debugNormalFinalizationReprojectionGatePassed,
+                                normalFinalizationWorstNormalStd:
+                                    viewModel.debugNormalFinalizationWorstNormalStd,
+                                normalFinalizationAutoExportReason:
+                                    viewModel.debugNormalFinalizationAutoExportReason,
+                                normalFinalizationBlockedReason:
+                                    viewModel.debugNormalFinalizationBlockedReason,
+                                finalObservationsM0: viewModel.debugFinalObservationsM0,
+                                finalObservationsM1: viewModel.debugFinalObservationsM1,
+                                finalObservationsM2: viewModel.debugFinalObservationsM2,
+                                finalObservationsM3: viewModel.debugFinalObservationsM3,
+                                finalObservationsAverage:
+                                    viewModel.debugFinalObservationsAverage
                             ) {
                                 print("[DEBUG_GEAR] emergency debug panel close tapped")
                                 scannerDebugPanelVisible = false
@@ -1683,6 +1713,23 @@ private struct ScannerDebugEmergencyPanelView: View {
     let marker2ProgressPercent: Double?
     let marker3ProgressPercent: Double?
     let allExpectedMarkersAt100Percent: Bool
+    let normalFinalizationState: String?
+    let normalFinalizationElapsedSeconds: Double?
+    let normalFinalizationMaxSeconds: Double?
+    let normalFinalizationStableSeconds: Double?
+    let normalFinalizationMaturityGatePassed: Bool?
+    let normalFinalizationMinObservationsReached: Bool?
+    let normalFinalizationAverageObservationsReached: Bool?
+    let normalFinalizationNormalGatePassed: Bool?
+    let normalFinalizationReprojectionGatePassed: Bool?
+    let normalFinalizationWorstNormalStd: Double?
+    let normalFinalizationAutoExportReason: String?
+    let normalFinalizationBlockedReason: String?
+    let finalObservationsM0: Int?
+    let finalObservationsM1: Int?
+    let finalObservationsM2: Int?
+    let finalObservationsM3: Int?
+    let finalObservationsAverage: Double?
     let onClose: () -> Void
 
     var body: some View {
@@ -1693,29 +1740,89 @@ private struct ScannerDebugEmergencyPanelView: View {
             Text("App alive: yes")
                 .font(.subheadline.weight(.semibold))
 
-            VStack(alignment: .leading, spacing: 6) {
-                debugRow(title: "Scanner state", value: safeText(scannerState))
-                debugRow(title: "Feedback state", value: safeText(feedbackState))
-                debugRow(title: "Message", value: safeText(feedbackMessage))
-                debugRow(title: "Capture", value: safePercent(captureProgressPercent))
-                debugRow(title: "Refinement", value: safePercent(refinementProgressPercent))
-                debugRow(title: "Reason", value: safeText(friendlyBlockingReason))
-            }
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        debugRow(title: "Scanner state", value: safeText(scannerState))
+                        debugRow(title: "Feedback state", value: safeText(feedbackState))
+                        debugRow(title: "Message", value: safeText(feedbackMessage))
+                        debugRow(title: "Capture", value: safePercent(captureProgressPercent))
+                        debugRow(title: "Refinement", value: safePercent(refinementProgressPercent))
+                        debugRow(title: "Reason", value: safeText(friendlyBlockingReason))
+                    }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Markers:")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white.opacity(0.82))
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Markers:")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white.opacity(0.82))
 
-                debugRow(title: "M0", value: safePercent(marker0ProgressPercent))
-                debugRow(title: "M1", value: safePercent(marker1ProgressPercent))
-                debugRow(title: "M2", value: safePercent(marker2ProgressPercent))
-                debugRow(title: "M3", value: safePercent(marker3ProgressPercent))
-                debugRow(
-                    title: "All markers 100%",
-                    value: allExpectedMarkersAt100Percent ? "yes" : "no"
-                )
+                        debugRow(title: "M0", value: safePercent(marker0ProgressPercent))
+                        debugRow(title: "M1", value: safePercent(marker1ProgressPercent))
+                        debugRow(title: "M2", value: safePercent(marker2ProgressPercent))
+                        debugRow(title: "M3", value: safePercent(marker3ProgressPercent))
+                        debugRow(
+                            title: "All markers 100%",
+                            value: allExpectedMarkersAt100Percent ? "yes" : "no"
+                        )
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Finalization:")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white.opacity(0.82))
+
+                        debugRow(title: "State", value: safeText(normalFinalizationState))
+                        debugRow(title: "Elapsed", value: safeSeconds(normalFinalizationElapsedSeconds))
+                        debugRow(title: "Max", value: safeSeconds(normalFinalizationMaxSeconds))
+                        debugRow(title: "Stable", value: safeSeconds(normalFinalizationStableSeconds))
+                        debugRow(
+                            title: "Maturity gate",
+                            value: safeBool(normalFinalizationMaturityGatePassed)
+                        )
+                        debugRow(
+                            title: "Min obs",
+                            value: safeBool(normalFinalizationMinObservationsReached)
+                        )
+                        debugRow(
+                            title: "Avg obs",
+                            value: safeBool(normalFinalizationAverageObservationsReached)
+                        )
+                        debugRow(
+                            title: "Normal gate",
+                            value: safeBool(normalFinalizationNormalGatePassed)
+                        )
+                        debugRow(
+                            title: "Reprojection gate",
+                            value: safeBool(normalFinalizationReprojectionGatePassed)
+                        )
+                        debugRow(
+                            title: "Worst normal",
+                            value: safeDegrees(normalFinalizationWorstNormalStd)
+                        )
+                        debugRow(
+                            title: "Auto export",
+                            value: safeText(normalFinalizationAutoExportReason)
+                        )
+                        debugRow(
+                            title: "Blocked",
+                            value: safeText(normalFinalizationBlockedReason)
+                        )
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Observations:")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white.opacity(0.82))
+
+                        debugRow(title: "M0", value: safeInt(finalObservationsM0))
+                        debugRow(title: "M1", value: safeInt(finalObservationsM1))
+                        debugRow(title: "M2", value: safeInt(finalObservationsM2))
+                        debugRow(title: "M3", value: safeInt(finalObservationsM3))
+                        debugRow(title: "Average", value: safeNumber(finalObservationsAverage))
+                    }
+                }
             }
+            .frame(maxHeight: 520)
 
             Button("Fechar", action: onClose)
                 .buttonStyle(.borderedProminent)
@@ -1741,13 +1848,56 @@ private struct ScannerDebugEmergencyPanelView: View {
         .font(.caption2.weight(.semibold))
     }
 
-    private func safeText(_ value: String) -> String {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func safeText(_ value: String?) -> String {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !trimmed.isEmpty else {
             return "N/A"
         }
 
         return trimmed
+    }
+
+    private func safeBool(_ value: Bool?) -> String {
+        guard let value else {
+            return "N/A"
+        }
+
+        return value ? "yes" : "no"
+    }
+
+    private func safeNumber(_ value: Double?, digits: Int = 2) -> String {
+        guard let value, value.isFinite else {
+            return "N/A"
+        }
+
+        let clampedDigits = min(max(digits, 0), 4)
+        return String(format: "%.\(clampedDigits)f", value)
+    }
+
+    private func safeInt(_ value: Int?) -> String {
+        guard let value else {
+            return "N/A"
+        }
+
+        return "\(value)"
+    }
+
+    private func safeSeconds(_ value: Double?) -> String {
+        let text = safeNumber(value)
+        guard text != "N/A" else {
+            return text
+        }
+
+        return "\(text)s"
+    }
+
+    private func safeDegrees(_ value: Double?) -> String {
+        let text = safeNumber(value)
+        guard text != "N/A" else {
+            return text
+        }
+
+        return "\(text) deg"
     }
 
     private func safePercent(_ value: Double?) -> String {

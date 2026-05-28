@@ -594,6 +594,73 @@ final class ScannerViewModel: ObservableObject {
             return progress >= 100.0
         }
     }
+    var debugNormalFinalizationStateText: String {
+        normalFinalizationState.debugTitle
+    }
+    var debugNormalFinalizationElapsedSeconds: Double? {
+        normalFinalizationElapsedSeconds()
+    }
+    var debugNormalFinalizationMaxSeconds: Double? {
+        normalFinalizationMaxSecondsForDebug
+    }
+    var debugNormalFinalizationStableSeconds: Double? {
+        guard normalFinalizationStableSecondsCollected.isFinite else {
+            return nil
+        }
+
+        return normalFinalizationStableSecondsCollected
+    }
+    var debugNormalFinalizationMaturityGatePassed: Bool {
+        normalFinalizationMaturityGatePassed
+    }
+    var debugNormalFinalizationMinObservationsReached: Bool {
+        normalFinalizationMinObservationsReached
+    }
+    var debugNormalFinalizationAverageObservationsReached: Bool {
+        normalFinalizationAverageObservationsReached
+    }
+    var debugNormalFinalizationNormalGatePassed: Bool {
+        normalFinalizationNormalGatePassed
+    }
+    var debugNormalFinalizationReprojectionGatePassed: Bool {
+        scanReprojectionReady
+    }
+    var debugNormalFinalizationWorstNormalStd: Double? {
+        guard let value = normalFinalizationWorstNormalStdDegrees,
+              value.isFinite
+        else {
+            return nil
+        }
+
+        return value
+    }
+    var debugNormalFinalizationAutoExportReason: String? {
+        normalFinalizationAutoExportReason
+    }
+    var debugNormalFinalizationBlockedReason: String? {
+        normalFinalizationBlockedReason
+    }
+    var debugFinalObservationsM0: Int? {
+        debugFinalObservations(markerId: 0)
+    }
+    var debugFinalObservationsM1: Int? {
+        debugFinalObservations(markerId: 1)
+    }
+    var debugFinalObservationsM2: Int? {
+        debugFinalObservations(markerId: 2)
+    }
+    var debugFinalObservationsM3: Int? {
+        debugFinalObservations(markerId: 3)
+    }
+    var debugFinalObservationsAverage: Double? {
+        guard let value = normalFinalizationAverageObservationsPerMarker,
+              value.isFinite
+        else {
+            return nil
+        }
+
+        return value
+    }
     @Published private(set) var scanCoverageReady: Bool = false
     @Published private(set) var scanGoodFramesReady: Bool = false
     @Published private(set) var scanDistanceReady: Bool = false
@@ -2925,6 +2992,14 @@ final class ScannerViewModel: ObservableObject {
         }
 
         return min(max(progress, 0), 100)
+    }
+
+    private func debugFinalObservations(markerId: Int) -> Int? {
+        guard (0...3).contains(markerId) else {
+            return nil
+        }
+
+        return normalFinalizationMinObservationsByMarker[markerId]
     }
 
     private func friendlyBlockingReason(_ reason: String?) -> String {
