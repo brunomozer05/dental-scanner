@@ -60,8 +60,9 @@ struct ScannerDebugPanelView: View {
     private let enableStaticStabilityDebugSection = false
     private let enablePlanarDebugSection = false
     private let enableQualityDebugSection = false
-    private let enableRuntimeHeavyDebugSections = false
-    private let enableEditableDebugControls = false
+    private let debugPanelFallbackMode = false
+    private let enableRuntimeHeavyDebugSections = true
+    private let enableEditableDebugControls = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -72,6 +73,9 @@ struct ScannerDebugPanelView: View {
 
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 12) {
+                    if debugPanelFallbackMode {
+                        debugUnavailableSection
+                    } else {
                     debugSection(title: "Estado") {
                         debugRow(title: "Estado", value: snapshot.state.scanState)
                         debugRow(title: "Perfil marker", value: snapshot.state.markerProfile)
@@ -623,6 +627,7 @@ struct ScannerDebugPanelView: View {
                             debugRow(title: "Status", value: "Secoes avancadas desligadas")
                         }
                     }
+                    }
                 }
                 .padding(.trailing, 4)
             }
@@ -662,6 +667,13 @@ struct ScannerDebugPanelView: View {
         }
     }
 
+    private var debugUnavailableSection: some View {
+        debugSection(title: "Debug") {
+            debugRow(title: "Status", value: "Debug indisponivel no momento")
+            debugRow(title: "Painel", value: "Fallback seguro ativo")
+        }
+    }
+
     private func debugSection<Content: View>(
         title: String,
         @ViewBuilder content: () -> Content
@@ -683,12 +695,34 @@ struct ScannerDebugPanelView: View {
 
             Spacer(minLength: 8)
 
-            Text(value.isEmpty ? ScannerDebugSnapshot.missingValue : value)
+            Text(safeRowValue(value))
                 .multilineTextAlignment(.trailing)
                 .lineLimit(2)
                 .monospacedDigit()
         }
         .font(.caption2.weight(.semibold))
+    }
+
+    private func safeRowValue(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return ScannerDebugSnapshot.missingValue
+        }
+
+        let lowercased = trimmed.lowercased()
+        if lowercased == "nan" ||
+            lowercased == "inf" ||
+            lowercased == "infinity" ||
+            lowercased == "-inf" ||
+            lowercased == "-infinity" {
+            return ScannerDebugSnapshot.missingValue
+        }
+
+        if trimmed.count > 180 {
+            return "\(trimmed.prefix(177))..."
+        }
+
+        return trimmed
     }
 
     private func debugIntStepper(

@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 
 struct ScannerDebugSnapshot: Equatable {
-    static let missingValue = "\u{2014}"
+    static let missingValue = "N/A"
 
     struct StateSection: Equatable {
         let scanState: String
@@ -1050,7 +1050,21 @@ extension ScannerViewModel {
             return ScannerDebugSnapshot.missingValue
         }
 
-        return value
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return ScannerDebugSnapshot.missingValue
+        }
+
+        let lowercased = trimmed.lowercased()
+        if lowercased == "nan" ||
+            lowercased == "inf" ||
+            lowercased == "infinity" ||
+            lowercased == "-inf" ||
+            lowercased == "-infinity" {
+            return ScannerDebugSnapshot.missingValue
+        }
+
+        return trimmed
     }
 
     private static func debugIntList(_ values: [Int]) -> String {
@@ -1072,6 +1086,7 @@ extension ScannerViewModel {
         return values
             .keys
             .sorted()
+            .prefix(16)
             .map { key in "\(valuePrefix)\(key): \(values[key] ?? 0)" }
             .joined(separator: ", ")
     }
@@ -1087,6 +1102,7 @@ extension ScannerViewModel {
         return values
             .keys
             .sorted()
+            .prefix(16)
             .map { key in
                 let value = values[key]
                 return "\(valuePrefix)\(key): \(debugPercent(value))"
