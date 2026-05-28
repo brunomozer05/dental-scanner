@@ -102,7 +102,14 @@ struct ScannerView: View {
                         Spacer()
 
                         if forceEmergencyDebugPanel {
-                            ScannerDebugEmergencyPanelView {
+                            ScannerDebugEmergencyPanelView(
+                                scannerState: formattedScanState(viewModel.scanState),
+                                feedbackState: viewModel.scanUserFeedbackState,
+                                feedbackMessage: viewModel.scanUserFeedbackMessage,
+                                captureProgressPercent: viewModel.scanCaptureProgressPercent,
+                                refinementProgressPercent: viewModel.scanRefinementProgressPercent,
+                                friendlyBlockingReason: viewModel.scanFriendlyBlockingReason
+                            ) {
                                 print("[DEBUG_GEAR] emergency debug panel close tapped")
                                 scannerDebugPanelVisible = false
                             }
@@ -1659,15 +1666,30 @@ private struct ScannerDivider: View {
 }
 
 private struct ScannerDebugEmergencyPanelView: View {
+    let scannerState: String
+    let feedbackState: String
+    let feedbackMessage: String
+    let captureProgressPercent: Double?
+    let refinementProgressPercent: Double?
+    let friendlyBlockingReason: String
     let onClose: () -> Void
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("Debug mode: emergency")
                 .font(.headline)
 
             Text("App alive: yes")
                 .font(.subheadline.weight(.semibold))
+
+            VStack(alignment: .leading, spacing: 6) {
+                debugRow(title: "Scanner state", value: safeText(scannerState))
+                debugRow(title: "Feedback state", value: safeText(feedbackState))
+                debugRow(title: "Message", value: safeText(feedbackMessage))
+                debugRow(title: "Capture", value: safePercent(captureProgressPercent))
+                debugRow(title: "Refinement", value: safePercent(refinementProgressPercent))
+                debugRow(title: "Reason", value: safeText(friendlyBlockingReason))
+            }
 
             Button("Fechar", action: onClose)
                 .buttonStyle(.borderedProminent)
@@ -1676,6 +1698,39 @@ private struct ScannerDebugEmergencyPanelView: View {
         .foregroundStyle(.white)
         .background(Color.black.opacity(0.92))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func debugRow(title: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("\(title):")
+                .foregroundStyle(.white.opacity(0.58))
+
+            Spacer(minLength: 8)
+
+            Text(value)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(2)
+                .monospacedDigit()
+        }
+        .font(.caption2.weight(.semibold))
+    }
+
+    private func safeText(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return "N/A"
+        }
+
+        return trimmed
+    }
+
+    private func safePercent(_ value: Double?) -> String {
+        guard let value, value.isFinite else {
+            return "N/A"
+        }
+
+        let normalized = value > 1.0 ? value : value * 100.0
+        return "\(Int(round(min(max(normalized, 0), 100))))%"
     }
 }
 
