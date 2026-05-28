@@ -112,3 +112,22 @@ Futuro:
 ```
 
 Não implementar antes de estabilizar v1/v2 e câmera.
+
+## Tarefa futura - Best Final Pose Candidate
+
+Implementar a spec `10_best_final_pose_candidate.md`.
+
+Objetivo:
+
+* durante o refinamento apos 4 markers em 100%, avaliar candidatos com throttle;
+* salvar o melhor conjunto de poses final encontrado;
+* exportar usando esse melhor candidato quando valido;
+* manter fallback seguro para o fluxo atual;
+* registrar uso, score, idade e metricas do candidato em diagnostics/report;
+* expor campos simples no debug emergencial.
+
+Commit sugerido:
+
+```txt
+Add best final pose candidate tracking
+```

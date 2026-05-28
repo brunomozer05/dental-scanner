@@ -11,6 +11,17 @@ Antes de qualquer alteração no código, o agente deve ler:
 
 Estas specs são a fonte de verdade do projeto.
 
+## Indice
+
+* `00_project_context.md` - contexto geral do projeto.
+* `03_scan_pipeline.md` - pipeline principal de scan/export.
+* `05_pose_quality_and_readiness.md` - qualidade de pose e readiness.
+* `06_export_and_reports.md` - export STL e reports.
+* `07_debug_panel.md` - regras do debug seguro.
+* `08_known_issues.md` - problemas conhecidos.
+* `09_next_tasks.md` - backlog tecnico.
+* `10_best_final_pose_candidate.md` - plano futuro para exportar o melhor candidato de pose final.
+
 ## Regras gerais
 
 * Não reativar código antigo de debug que já causou crash.
