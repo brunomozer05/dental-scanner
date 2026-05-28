@@ -108,7 +108,13 @@ struct ScannerView: View {
                                 feedbackMessage: viewModel.scanUserFeedbackMessage,
                                 captureProgressPercent: viewModel.scanCaptureProgressPercent,
                                 refinementProgressPercent: viewModel.scanRefinementProgressPercent,
-                                friendlyBlockingReason: viewModel.scanFriendlyBlockingReason
+                                friendlyBlockingReason: viewModel.scanFriendlyBlockingReason,
+                                marker0ProgressPercent: viewModel.debugExpectedMarker0Progress,
+                                marker1ProgressPercent: viewModel.debugExpectedMarker1Progress,
+                                marker2ProgressPercent: viewModel.debugExpectedMarker2Progress,
+                                marker3ProgressPercent: viewModel.debugExpectedMarker3Progress,
+                                allExpectedMarkersAt100Percent:
+                                    viewModel.debugAllExpectedMarkersAt100Percent
                             ) {
                                 print("[DEBUG_GEAR] emergency debug panel close tapped")
                                 scannerDebugPanelVisible = false
@@ -1672,6 +1678,11 @@ private struct ScannerDebugEmergencyPanelView: View {
     let captureProgressPercent: Double?
     let refinementProgressPercent: Double?
     let friendlyBlockingReason: String
+    let marker0ProgressPercent: Double?
+    let marker1ProgressPercent: Double?
+    let marker2ProgressPercent: Double?
+    let marker3ProgressPercent: Double?
+    let allExpectedMarkersAt100Percent: Bool
     let onClose: () -> Void
 
     var body: some View {
@@ -1689,6 +1700,21 @@ private struct ScannerDebugEmergencyPanelView: View {
                 debugRow(title: "Capture", value: safePercent(captureProgressPercent))
                 debugRow(title: "Refinement", value: safePercent(refinementProgressPercent))
                 debugRow(title: "Reason", value: safeText(friendlyBlockingReason))
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Markers:")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.82))
+
+                debugRow(title: "M0", value: safePercent(marker0ProgressPercent))
+                debugRow(title: "M1", value: safePercent(marker1ProgressPercent))
+                debugRow(title: "M2", value: safePercent(marker2ProgressPercent))
+                debugRow(title: "M3", value: safePercent(marker3ProgressPercent))
+                debugRow(
+                    title: "All markers 100%",
+                    value: allExpectedMarkersAt100Percent ? "yes" : "no"
+                )
             }
 
             Button("Fechar", action: onClose)

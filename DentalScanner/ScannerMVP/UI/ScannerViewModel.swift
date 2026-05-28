@@ -571,6 +571,29 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var scanCaptureProgressPercent: Double = 0
     @Published private(set) var scanRefinementProgressPercent: Double?
     @Published private(set) var scanFriendlyBlockingReason: String = "Aguardando inicio"
+    var debugExpectedMarker0Progress: Double? {
+        debugExpectedMarkerProgress(markerId: 0)
+    }
+    var debugExpectedMarker1Progress: Double? {
+        debugExpectedMarkerProgress(markerId: 1)
+    }
+    var debugExpectedMarker2Progress: Double? {
+        debugExpectedMarkerProgress(markerId: 2)
+    }
+    var debugExpectedMarker3Progress: Double? {
+        debugExpectedMarkerProgress(markerId: 3)
+    }
+    var debugAllExpectedMarkersAt100Percent: Bool {
+        [0, 1, 2, 3].allSatisfy { markerId in
+            guard let progress = debugExpectedMarkerProgress(markerId: markerId),
+                  progress.isFinite
+            else {
+                return false
+            }
+
+            return progress >= 100.0
+        }
+    }
     @Published private(set) var scanCoverageReady: Bool = false
     @Published private(set) var scanGoodFramesReady: Bool = false
     @Published private(set) var scanDistanceReady: Bool = false
@@ -2889,6 +2912,19 @@ final class ScannerViewModel: ObservableObject {
             scanRefinementProgressPercent = nil
         }
         scanFriendlyBlockingReason = friendlyBlockingReason(blockingReason)
+    }
+
+    private func debugExpectedMarkerProgress(markerId: Int) -> Double? {
+        guard (0...3).contains(markerId) else {
+            return nil
+        }
+
+        let progress = coverage(forPhysicalMarkerId: markerId).progress
+        guard progress.isFinite else {
+            return nil
+        }
+
+        return min(max(progress, 0), 100)
     }
 
     private func friendlyBlockingReason(_ reason: String?) -> String {
