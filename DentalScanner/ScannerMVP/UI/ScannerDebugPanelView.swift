@@ -61,8 +61,8 @@ struct ScannerDebugPanelView: View {
     private let enablePlanarDebugSection = false
     private let enableQualityDebugSection = false
     private let debugPanelFallbackMode = false
-    private let enableRuntimeHeavyDebugSections = true
-    private let enableEditableDebugControls = true
+    private let enableRuntimeHeavyDebugSections = false
+    private let enableEditableDebugControls = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {

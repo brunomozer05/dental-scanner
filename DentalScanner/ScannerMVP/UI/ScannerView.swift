@@ -14,6 +14,7 @@ struct ScannerView: View {
     private let panelBackgroundColor = Color(red: 0.11, green: 0.11, blue: 0.12)
     private let chipBackgroundColor = Color(red: 0.16, green: 0.16, blue: 0.18)
     private let scannerAccentColor = Color(red: 0.23, green: 0.51, blue: 0.96)
+    private let forceEmergencyDebugPanel = true
 
     init(onCancel: (() -> Void)? = nil) {
         self.onCancel = onCancel
@@ -100,6 +101,14 @@ struct ScannerView: View {
                     HStack {
                         Spacer()
 
+                        if forceEmergencyDebugPanel {
+                            ScannerDebugEmergencyPanelView {
+                                print("[DEBUG_GEAR] emergency debug panel close tapped")
+                                scannerDebugPanelVisible = false
+                            }
+                            .frame(width: 300)
+                            .padding(12)
+                        } else {
                         ScannerDebugPanelView(
                             snapshot: viewModel.scannerDebugSnapshot,
                             markerProfiles: viewModel.markerProfiles,
@@ -164,6 +173,7 @@ struct ScannerView: View {
                         }
                         .frame(width: 340)
                         .padding(12)
+                        }
                     }
                 }
                 .zIndex(4)
@@ -1645,6 +1655,27 @@ private struct ScannerDivider: View {
         Rectangle()
             .fill(Color.white.opacity(0.12))
             .frame(width: 1, height: 28)
+    }
+}
+
+private struct ScannerDebugEmergencyPanelView: View {
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Debug mode: emergency")
+                .font(.headline)
+
+            Text("App alive: yes")
+                .font(.subheadline.weight(.semibold))
+
+            Button("Fechar", action: onClose)
+                .buttonStyle(.borderedProminent)
+        }
+        .padding(20)
+        .foregroundStyle(.white)
+        .background(Color.black.opacity(0.92))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
