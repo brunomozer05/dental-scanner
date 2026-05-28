@@ -51,6 +51,15 @@ struct ScanTechnicalReport: Codable {
     var normalFinalizationMinObservationsByMarker: [Int: Int]?
     var allExpectedMarkersAt100Percent: Bool?
     var expectedMarkerProgressById: [Int: Double]?
+    var usedBestFinalPoseCandidate: Bool?
+    var bestFinalPoseCandidateScore: Double?
+    var bestFinalPoseCandidateTimestampSeconds: Double?
+    var bestFinalPoseCandidateAgeSeconds: Double?
+    var bestFinalPoseCandidateWorstNormalStd: Double?
+    var bestFinalPoseCandidateWorstReprojection: Double?
+    var bestFinalPoseCandidateObservationsByMarker: [Int: Int]?
+    var bestFinalPoseCandidateAcceptedCount: Int?
+    var bestFinalPoseCandidateLastRejectReason: String?
     var guidedStaticCaptureEnabled: Bool?
     var guidedStaticStages: [GuidedStaticStage]?
 

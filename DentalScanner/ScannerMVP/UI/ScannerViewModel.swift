@@ -113,6 +113,15 @@ enum NormalScanFinalizationState: String, Equatable {
     }
 }
 
+struct BestFinalPoseCandidateSnapshot: Equatable {
+    let score: Double
+    let timestamp: Double
+    let observationsByMarker: [Int: Int]
+    let worstNormalStdDegrees: Double?
+    let worstReprojectionError: Double?
+    let reason: String
+}
+
 struct GuidedStaticStageSnapshot: Equatable, Identifiable {
     let stageIndex: Int
     let stageName: String
@@ -324,6 +333,7 @@ final class ScannerViewModel: ObservableObject {
         static let normalFinalizationRequireCameraStable: Bool = true
         static let normalFinalizationRequireDistanceValid: Bool = true
         static let normalFinalizationRequireFocusStable: Bool = true
+        static let normalBestCandidateEvaluationIntervalSeconds: Double = 1.0
         static let maximumStaticPoseSamplesPerMarker: Int = 180
         static let maximumStaticPosePairSamplesPerPair: Int = 180
         static let maximumStaticPosePlaneSamples: Int = 180
@@ -661,6 +671,44 @@ final class ScannerViewModel: ObservableObject {
 
         return value
     }
+    var debugBestFinalPoseCandidateScore: Double? {
+        bestFinalPoseCandidate?.score
+    }
+    var debugBestFinalPoseCandidateAgeSeconds: Double? {
+        guard let timestamp = bestFinalPoseCandidate?.timestamp else {
+            return nil
+        }
+
+        let currentTimestamp = lastFrameTimestamp ?? Date().timeIntervalSinceReferenceDate
+        guard currentTimestamp.isFinite,
+              currentTimestamp >= timestamp
+        else {
+            return nil
+        }
+
+        return currentTimestamp - timestamp
+    }
+    var debugBestFinalPoseCandidateWorstNormalStd: Double? {
+        bestFinalPoseCandidate?.worstNormalStdDegrees
+    }
+    var debugBestFinalPoseCandidateWorstReprojection: Double? {
+        bestFinalPoseCandidate?.worstReprojectionError
+    }
+    var debugBestFinalPoseCandidateObservationsM0: Int? {
+        bestFinalPoseCandidate?.observationsByMarker[0]
+    }
+    var debugBestFinalPoseCandidateObservationsM1: Int? {
+        bestFinalPoseCandidate?.observationsByMarker[1]
+    }
+    var debugBestFinalPoseCandidateObservationsM2: Int? {
+        bestFinalPoseCandidate?.observationsByMarker[2]
+    }
+    var debugBestFinalPoseCandidateObservationsM3: Int? {
+        bestFinalPoseCandidate?.observationsByMarker[3]
+    }
+    var debugUsedBestFinalPoseCandidate: Bool {
+        usedBestFinalPoseCandidate
+    }
     @Published private(set) var scanCoverageReady: Bool = false
     @Published private(set) var scanGoodFramesReady: Bool = false
     @Published private(set) var scanDistanceReady: Bool = false
@@ -782,6 +830,10 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var normalFinalizationExpectedMarkerProgressById: [Int: Double] = [:]
     @Published private(set) var normalFinalizationCanStart: Bool = false
     @Published private(set) var normalFinalizationCanAutoExport: Bool = false
+    @Published private(set) var bestFinalPoseCandidate: BestFinalPoseCandidateSnapshot?
+    @Published private(set) var bestFinalPoseCandidateAcceptedCount: Int = 0
+    @Published private(set) var bestFinalPoseCandidateLastRejectReason: String?
+    @Published private(set) var usedBestFinalPoseCandidate: Bool = false
     @Published private(set) var guidedStaticCaptureEnabled: Bool = false
     @Published private(set) var guidedStaticRequiredStages: Int =
         GuidedStaticCaptureConfiguration.defaultRequiredStages
@@ -903,6 +955,7 @@ final class ScannerViewModel: ObservableObject {
     private var lastFinalObservationDiagnosticsUpdateTimestamp: Double?
     private var lastStaticPoseDiagnosticsUpdateTimestamp: Double?
     private var lastDiagnosticsSnapshotPublishTimestamp: Double?
+    private var lastBestFinalPoseCandidateEvaluationTimestamp: Double?
     private var lastBlockingReasonBeforeExport: String?
     private var normalFinalizationLastAcceptedFrameTimestamp: Double?
     private var staticPoseSamples: [StaticPoseSample] = []
@@ -2573,6 +2626,11 @@ final class ScannerViewModel: ObservableObject {
         normalFinalizationExpectedMarkerProgressById = [:]
         normalFinalizationCanStart = false
         normalFinalizationCanAutoExport = false
+        bestFinalPoseCandidate = nil
+        bestFinalPoseCandidateAcceptedCount = 0
+        bestFinalPoseCandidateLastRejectReason = nil
+        usedBestFinalPoseCandidate = false
+        lastBestFinalPoseCandidateEvaluationTimestamp = nil
         normalFinalizationLastAcceptedFrameTimestamp = nil
     }
 
@@ -2868,6 +2926,174 @@ final class ScannerViewModel: ObservableObject {
         }
 
         return Double(counts.reduce(0, +)) / Double(counts.count)
+    }
+
+    private func normalFinalizationWorstReprojectionForExpectedMarkers() -> Double? {
+        expectedExportMarkerIds(for: .singleArucoV1)
+            .compactMap { markerId -> Double? in
+                guard let value = finalObservationDiagnosticsByMarkerId[markerId]?.finalAverageReprojectionError,
+                      value.isFinite
+                else {
+                    return nil
+                }
+
+                return value
+            }
+            .max()
+    }
+
+    private func normalFinalizationAverageQualityForExpectedMarkers() -> Double? {
+        let values = expectedExportMarkerIds(for: .singleArucoV1)
+            .compactMap { markerId -> Double? in
+                guard let value = finalObservationDiagnosticsByMarkerId[markerId]?.finalAverageQualityScore,
+                      value.isFinite
+                else {
+                    return nil
+                }
+
+                return value > 1.0 ? value / 100.0 : value
+            }
+
+        guard !values.isEmpty else {
+            return nil
+        }
+
+        return values.reduce(0, +) / Double(values.count)
+    }
+
+    private func updateBestFinalPoseCandidateIfNeeded(
+        timestamp: Double,
+        evaluation: ScanReadinessEvaluation,
+        allExpectedMarkersAt100Percent: Bool,
+        observationsByMarker: [Int: Int],
+        averageObservations: Double?,
+        worstNormalStdDegrees: Double?,
+        reprojectionGatePassed: Bool
+    ) {
+        guard shouldUseNormalScanFinalization,
+              normalFinalizationState == .stabilizing,
+              allExpectedMarkersAt100Percent,
+              evaluation.hasExportableTagPoses
+        else {
+            bestFinalPoseCandidateLastRejectReason = "not_in_normal_finalization"
+            return
+        }
+
+        if let lastBestFinalPoseCandidateEvaluationTimestamp,
+           timestamp - lastBestFinalPoseCandidateEvaluationTimestamp <
+                ScanConfiguration.normalBestCandidateEvaluationIntervalSeconds {
+            return
+        }
+
+        lastBestFinalPoseCandidateEvaluationTimestamp = timestamp
+
+        guard expectedExportMarkerIds(for: .singleArucoV1).allSatisfy({
+            (observationsByMarker[$0] ?? 0) > 0
+        }) else {
+            bestFinalPoseCandidateLastRejectReason = "missing_marker_observations"
+            return
+        }
+
+        let worstReprojection = normalFinalizationWorstReprojectionForExpectedMarkers()
+        let averageQuality = normalFinalizationAverageQualityForExpectedMarkers()
+        let score = bestFinalPoseCandidateScore(
+            observationsByMarker: observationsByMarker,
+            averageObservations: averageObservations,
+            worstNormalStdDegrees: worstNormalStdDegrees,
+            worstReprojectionError: worstReprojection,
+            averageQualityScore: averageQuality,
+            reprojectionGatePassed: reprojectionGatePassed
+        )
+
+        guard score.isFinite else {
+            bestFinalPoseCandidateLastRejectReason = "invalid_score"
+            return
+        }
+
+        let candidate = BestFinalPoseCandidateSnapshot(
+            score: score,
+            timestamp: timestamp,
+            observationsByMarker: observationsByMarker,
+            worstNormalStdDegrees: worstNormalStdDegrees,
+            worstReprojectionError: worstReprojection,
+            reason: "score_improved"
+        )
+
+        if bestFinalPoseCandidate.map({ score > $0.score }) ?? true {
+            bestFinalPoseCandidate = candidate
+            bestFinalPoseCandidateAcceptedCount += 1
+            bestFinalPoseCandidateLastRejectReason = nil
+        } else {
+            bestFinalPoseCandidateLastRejectReason = "score_not_improved"
+        }
+    }
+
+    private func bestFinalPoseCandidateScore(
+        observationsByMarker: [Int: Int],
+        averageObservations: Double?,
+        worstNormalStdDegrees: Double?,
+        worstReprojectionError: Double?,
+        averageQualityScore: Double?,
+        reprojectionGatePassed: Bool
+    ) -> Double {
+        let expectedIds = expectedExportMarkerIds(for: .singleArucoV1)
+        let counts = expectedIds.map { observationsByMarker[$0] ?? 0 }
+        let minimumObservations = Double(counts.min() ?? 0)
+        let averageObservationCount = averageObservations ?? 0
+        let minObservationScore = min(
+            max(
+                minimumObservations /
+                    Double(ScanConfiguration.normalFinalizationMinFinalObservationsPerMarker),
+                0
+            ),
+            1
+        )
+        let averageObservationScore = min(
+            max(
+                averageObservationCount /
+                    Double(ScanConfiguration.normalFinalizationTargetAverageObservationsPerMarker),
+                0
+            ),
+            1
+        )
+        let balanceScore = averageObservationCount > 0
+            ? min(max(minimumObservations / averageObservationCount, 0), 1)
+            : 0
+        let normalScore = bestCandidateInverseScore(
+            value: worstNormalStdDegrees,
+            preferredMaximum: ScanConfiguration.normalFinalizationMaxNormalStdDegrees
+        )
+        let reprojectionScore = reprojectionGatePassed
+            ? bestCandidateInverseScore(
+                value: worstReprojectionError,
+                preferredMaximum: scanReadinessConfiguration.maximumAverageReprojectionError
+            )
+            : 0.35
+        let qualityScore = min(max(averageQualityScore ?? 0.7, 0), 1)
+
+        let score = minObservationScore * 0.18 +
+            averageObservationScore * 0.18 +
+            balanceScore * 0.14 +
+            normalScore * 0.22 +
+            reprojectionScore * 0.18 +
+            qualityScore * 0.10
+
+        return min(max(score * 100.0, 0), 100)
+    }
+
+    private func bestCandidateInverseScore(
+        value: Double?,
+        preferredMaximum: Double
+    ) -> Double {
+        guard let value,
+              value.isFinite,
+              preferredMaximum.isFinite,
+              preferredMaximum > 0
+        else {
+            return 0.70
+        }
+
+        return min(max(1.0 - value / (preferredMaximum * 2.0), 0), 1)
     }
 
     private func expectedV1MarkerProgressById() -> [Int: Double] {
@@ -4228,6 +4454,15 @@ final class ScannerViewModel: ObservableObject {
         normalFinalizationMaturityGatePassed = maturityGatePassed
         normalFinalizationBlockedReason = blockedReason
         normalFinalizationCanStart = allExpectedMarkersAt100Percent && evaluation.hasExportableTagPoses
+        updateBestFinalPoseCandidateIfNeeded(
+            timestamp: timestamp,
+            evaluation: evaluation,
+            allExpectedMarkersAt100Percent: allExpectedMarkersAt100Percent,
+            observationsByMarker: observationsByMarker,
+            averageObservations: averageObservations,
+            worstNormalStdDegrees: worstNormalStdDegrees,
+            reprojectionGatePassed: reprojectionGatePassed
+        )
         let refinementProgress = normalFinalizationRefinementProgressPercent(
             elapsedSeconds: elapsedSeconds,
             observationsByMarker: observationsByMarker,
@@ -7580,6 +7815,15 @@ final class ScannerViewModel: ObservableObject {
             normalFinalizationMinObservationsByMarker: normalFinalizationMinObservationsByMarker,
             allExpectedMarkersAt100Percent: normalFinalizationAllExpectedMarkersAt100Percent,
             expectedMarkerProgressById: normalFinalizationExpectedMarkerProgressById,
+            usedBestFinalPoseCandidate: usedBestFinalPoseCandidate,
+            bestFinalPoseCandidateScore: bestFinalPoseCandidate?.score,
+            bestFinalPoseCandidateTimestamp: bestFinalPoseCandidate?.timestamp,
+            bestFinalPoseCandidateAgeSeconds: debugBestFinalPoseCandidateAgeSeconds,
+            bestFinalPoseCandidateWorstNormalStd: bestFinalPoseCandidate?.worstNormalStdDegrees,
+            bestFinalPoseCandidateWorstReprojection: bestFinalPoseCandidate?.worstReprojectionError,
+            bestFinalPoseCandidateObservationsByMarker: bestFinalPoseCandidate?.observationsByMarker,
+            bestFinalPoseCandidateAcceptedCount: bestFinalPoseCandidateAcceptedCount,
+            bestFinalPoseCandidateLastRejectReason: bestFinalPoseCandidateLastRejectReason,
             guidedStaticCaptureEnabled: guidedStaticCaptureEnabled,
             guidedStages: guidedStaticCaptureEnabled
                 ? guidedStaticStageSnapshots.map(diagnosticsGuidedStageSummary)
@@ -8918,6 +9162,20 @@ final class ScannerViewModel: ObservableObject {
                 normalFinalizationExpectedMarkerProgressById.isEmpty
                     ? nil
                     : normalFinalizationExpectedMarkerProgressById,
+            usedBestFinalPoseCandidate: usedBestFinalPoseCandidate,
+            bestFinalPoseCandidateScore: finiteReportDouble(bestFinalPoseCandidate?.score),
+            bestFinalPoseCandidateTimestampSeconds: finiteReportDouble(
+                currentScanDiagnosticsSnapshot.bestFinalPoseCandidateTimestampSeconds
+            ),
+            bestFinalPoseCandidateAgeSeconds: finiteReportDouble(debugBestFinalPoseCandidateAgeSeconds),
+            bestFinalPoseCandidateWorstNormalStd:
+                finiteReportDouble(bestFinalPoseCandidate?.worstNormalStdDegrees),
+            bestFinalPoseCandidateWorstReprojection:
+                finiteReportDouble(bestFinalPoseCandidate?.worstReprojectionError),
+            bestFinalPoseCandidateObservationsByMarker:
+                bestFinalPoseCandidateObservationsForReport(),
+            bestFinalPoseCandidateAcceptedCount: bestFinalPoseCandidateAcceptedCount,
+            bestFinalPoseCandidateLastRejectReason: bestFinalPoseCandidateLastRejectReason,
             guidedStaticCaptureEnabled: guidedStaticCaptureEnabled,
             guidedStaticStages: guidedStaticCaptureEnabled
                 ? guidedStaticStageSnapshots.map(technicalReportGuidedStaticStage)
@@ -8939,6 +9197,16 @@ final class ScannerViewModel: ObservableObject {
             markersAccepted: stage.markersAccepted.isEmpty ? nil : stage.markersAccepted,
             normalStdDegreesMean: finiteReportDouble(stage.normalStdDegreesMean)
         )
+    }
+
+    private func bestFinalPoseCandidateObservationsForReport() -> [Int: Int]? {
+        guard let observationsByMarker = bestFinalPoseCandidate?.observationsByMarker,
+              !observationsByMarker.isEmpty
+        else {
+            return nil
+        }
+
+        return observationsByMarker
     }
 
     private func technicalReportScanConfiguration(

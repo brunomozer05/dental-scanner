@@ -144,7 +144,25 @@ struct ScannerView: View {
                                 finalObservationsM2: viewModel.debugFinalObservationsM2,
                                 finalObservationsM3: viewModel.debugFinalObservationsM3,
                                 finalObservationsAverage:
-                                    viewModel.debugFinalObservationsAverage
+                                    viewModel.debugFinalObservationsAverage,
+                                bestCandidateScore:
+                                    viewModel.debugBestFinalPoseCandidateScore,
+                                bestCandidateAgeSeconds:
+                                    viewModel.debugBestFinalPoseCandidateAgeSeconds,
+                                bestCandidateWorstNormalStd:
+                                    viewModel.debugBestFinalPoseCandidateWorstNormalStd,
+                                bestCandidateWorstReprojection:
+                                    viewModel.debugBestFinalPoseCandidateWorstReprojection,
+                                bestCandidateObservationsM0:
+                                    viewModel.debugBestFinalPoseCandidateObservationsM0,
+                                bestCandidateObservationsM1:
+                                    viewModel.debugBestFinalPoseCandidateObservationsM1,
+                                bestCandidateObservationsM2:
+                                    viewModel.debugBestFinalPoseCandidateObservationsM2,
+                                bestCandidateObservationsM3:
+                                    viewModel.debugBestFinalPoseCandidateObservationsM3,
+                                usedBestCandidate:
+                                    viewModel.debugUsedBestFinalPoseCandidate
                             ) {
                                 print("[DEBUG_GEAR] emergency debug panel close tapped")
                                 scannerDebugPanelVisible = false
@@ -1730,6 +1748,15 @@ private struct ScannerDebugEmergencyPanelView: View {
     let finalObservationsM2: Int?
     let finalObservationsM3: Int?
     let finalObservationsAverage: Double?
+    let bestCandidateScore: Double?
+    let bestCandidateAgeSeconds: Double?
+    let bestCandidateWorstNormalStd: Double?
+    let bestCandidateWorstReprojection: Double?
+    let bestCandidateObservationsM0: Int?
+    let bestCandidateObservationsM1: Int?
+    let bestCandidateObservationsM2: Int?
+    let bestCandidateObservationsM3: Int?
+    let usedBestCandidate: Bool
     let onClose: () -> Void
 
     var body: some View {
@@ -1819,6 +1846,22 @@ private struct ScannerDebugEmergencyPanelView: View {
                         debugRow(title: "M2", value: safeInt(finalObservationsM2))
                         debugRow(title: "M3", value: safeInt(finalObservationsM3))
                         debugRow(title: "Average", value: safeNumber(finalObservationsAverage))
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Best candidate:")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white.opacity(0.82))
+
+                        debugRow(title: "Score", value: safeNumber(bestCandidateScore))
+                        debugRow(title: "Age", value: safeSeconds(bestCandidateAgeSeconds))
+                        debugRow(title: "Normal", value: safeDegrees(bestCandidateWorstNormalStd))
+                        debugRow(title: "Reprojection", value: safeNumber(bestCandidateWorstReprojection))
+                        debugRow(title: "Obs M0", value: safeInt(bestCandidateObservationsM0))
+                        debugRow(title: "Obs M1", value: safeInt(bestCandidateObservationsM1))
+                        debugRow(title: "Obs M2", value: safeInt(bestCandidateObservationsM2))
+                        debugRow(title: "Obs M3", value: safeInt(bestCandidateObservationsM3))
+                        debugRow(title: "Used", value: usedBestCandidate ? "yes" : "no")
                     }
                 }
             }

@@ -88,6 +88,15 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
     var normalFinalizationMinObservationsByMarker: [Int: Int]?
     var allExpectedMarkersAt100Percent: Bool?
     var expectedMarkerProgressById: [Int: Double]?
+    var usedBestFinalPoseCandidate: Bool?
+    var bestFinalPoseCandidateScore: Double?
+    var bestFinalPoseCandidateTimestampSeconds: Double?
+    var bestFinalPoseCandidateAgeSeconds: Double?
+    var bestFinalPoseCandidateWorstNormalStd: Double?
+    var bestFinalPoseCandidateWorstReprojection: Double?
+    var bestFinalPoseCandidateObservationsByMarker: [Int: Int]?
+    var bestFinalPoseCandidateAcceptedCount: Int?
+    var bestFinalPoseCandidateLastRejectReason: String?
     var lastEventName: String?
     var eventsCount: Int
     var events: [ScanDiagnosticEvent]
@@ -157,6 +166,15 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
         normalFinalizationMinObservationsByMarker: nil,
         allExpectedMarkersAt100Percent: nil,
         expectedMarkerProgressById: nil,
+        usedBestFinalPoseCandidate: nil,
+        bestFinalPoseCandidateScore: nil,
+        bestFinalPoseCandidateTimestampSeconds: nil,
+        bestFinalPoseCandidateAgeSeconds: nil,
+        bestFinalPoseCandidateWorstNormalStd: nil,
+        bestFinalPoseCandidateWorstReprojection: nil,
+        bestFinalPoseCandidateObservationsByMarker: nil,
+        bestFinalPoseCandidateAcceptedCount: nil,
+        bestFinalPoseCandidateLastRejectReason: nil,
         lastEventName: nil,
         eventsCount: 0,
         events: [],
