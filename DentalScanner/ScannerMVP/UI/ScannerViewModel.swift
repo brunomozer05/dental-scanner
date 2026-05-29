@@ -128,6 +128,23 @@ struct BestFinalPoseCandidateSnapshot: Equatable {
     }
 }
 
+struct RelativeMarkerGeometryDiagnostics: Equatable {
+    var distanceM01: Double?
+    var distanceM02: Double?
+    var distanceM03: Double?
+    var distanceM12: Double?
+    var distanceM13: Double?
+    var distanceM23: Double?
+    var distanceStdMean: Double?
+    var distanceStdMax: Double?
+    var geometryScore: Double?
+    var candidateVsFinalTranslationDeltaMean: Double?
+    var candidateVsFinalRotationDeltaMean: Double?
+    var candidateVsFinalGeometryDelta: Double?
+
+    static let empty = RelativeMarkerGeometryDiagnostics()
+}
+
 struct GuidedStaticStageSnapshot: Equatable, Identifiable {
     let stageIndex: Int
     let stageName: String
@@ -737,6 +754,36 @@ final class ScannerViewModel: ObservableObject {
     var debugUsedBestFinalPoseCandidate: Bool {
         usedBestFinalPoseCandidate
     }
+    var debugRelativeMarkerGeometryScore: Double? {
+        relativeMarkerGeometryDiagnostics.geometryScore
+    }
+    var debugRelativeMarkerDistanceM01: Double? {
+        relativeMarkerGeometryDiagnostics.distanceM01
+    }
+    var debugRelativeMarkerDistanceM02: Double? {
+        relativeMarkerGeometryDiagnostics.distanceM02
+    }
+    var debugRelativeMarkerDistanceM03: Double? {
+        relativeMarkerGeometryDiagnostics.distanceM03
+    }
+    var debugRelativeMarkerDistanceM12: Double? {
+        relativeMarkerGeometryDiagnostics.distanceM12
+    }
+    var debugRelativeMarkerDistanceM13: Double? {
+        relativeMarkerGeometryDiagnostics.distanceM13
+    }
+    var debugRelativeMarkerDistanceM23: Double? {
+        relativeMarkerGeometryDiagnostics.distanceM23
+    }
+    var debugCandidateVsFinalTranslationDeltaMean: Double? {
+        relativeMarkerGeometryDiagnostics.candidateVsFinalTranslationDeltaMean
+    }
+    var debugCandidateVsFinalRotationDeltaMean: Double? {
+        relativeMarkerGeometryDiagnostics.candidateVsFinalRotationDeltaMean
+    }
+    var debugCandidateVsFinalGeometryDelta: Double? {
+        relativeMarkerGeometryDiagnostics.candidateVsFinalGeometryDelta
+    }
     @Published private(set) var scanCoverageReady: Bool = false
     @Published private(set) var scanGoodFramesReady: Bool = false
     @Published private(set) var scanDistanceReady: Bool = false
@@ -862,6 +909,7 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var bestFinalPoseCandidateAcceptedCount: Int = 0
     @Published private(set) var bestFinalPoseCandidateLastRejectReason: String?
     @Published private(set) var usedBestFinalPoseCandidate: Bool = false
+    @Published private(set) var relativeMarkerGeometryDiagnostics: RelativeMarkerGeometryDiagnostics = .empty
     @Published private(set) var guidedStaticCaptureEnabled: Bool = false
     @Published private(set) var guidedStaticRequiredStages: Int =
         GuidedStaticCaptureConfiguration.defaultRequiredStages
@@ -2664,6 +2712,7 @@ final class ScannerViewModel: ObservableObject {
         bestFinalPoseCandidateAcceptedCount = 0
         bestFinalPoseCandidateLastRejectReason = nil
         usedBestFinalPoseCandidate = false
+        relativeMarkerGeometryDiagnostics = .empty
         lastBestFinalPoseCandidateEvaluationTimestamp = nil
     }
 
@@ -3071,6 +3120,8 @@ final class ScannerViewModel: ObservableObject {
         } else {
             bestFinalPoseCandidateLastRejectReason = "score_not_improved"
         }
+
+        updateRelativeMarkerGeometryDiagnostics(exportablePoses: exportablePoses)
     }
 
     private func bestFinalPoseCandidateScore(
@@ -3139,6 +3190,176 @@ final class ScannerViewModel: ObservableObject {
         }
 
         return min(max(1.0 - value / (preferredMaximum * 2.0), 0), 1)
+    }
+
+    private func updateRelativeMarkerGeometryDiagnostics(
+        exportablePoses: [PoseResult]
+    ) {
+        relativeMarkerGeometryDiagnostics = makeRelativeMarkerGeometryDiagnostics(
+            finalPoses: exportablePoses,
+            candidatePoses: bestFinalPoseCandidate?.exportablePoses
+        )
+    }
+
+    private func makeRelativeMarkerGeometryDiagnostics(
+        finalPoses: [PoseResult],
+        candidatePoses: [PoseResult]?
+    ) -> RelativeMarkerGeometryDiagnostics {
+        let finalDistances = relativeMarkerPairDistances(from: finalPoses)
+        let candidateDistances = relativeMarkerPairDistances(from: candidatePoses ?? [])
+        let validDistanceCount = finalDistances.values.compactMap { $0 }.count
+        let geometryScore: Double? = validDistanceCount > 0
+            ? Double(validDistanceCount) / 6.0 * 100.0
+            : nil
+
+        return RelativeMarkerGeometryDiagnostics(
+            distanceM01: finalDistances["01"] ?? nil,
+            distanceM02: finalDistances["02"] ?? nil,
+            distanceM03: finalDistances["03"] ?? nil,
+            distanceM12: finalDistances["12"] ?? nil,
+            distanceM13: finalDistances["13"] ?? nil,
+            distanceM23: finalDistances["23"] ?? nil,
+            // TODO: replace nil with rolling distance stability once per-candidate history exists.
+            distanceStdMean: nil,
+            distanceStdMax: nil,
+            geometryScore: geometryScore,
+            candidateVsFinalTranslationDeltaMean: candidateVsFinalTranslationDeltaMean(
+                candidatePoses: candidatePoses,
+                finalPoses: finalPoses
+            ),
+            candidateVsFinalRotationDeltaMean: candidateVsFinalRotationDeltaMean(
+                candidatePoses: candidatePoses,
+                finalPoses: finalPoses
+            ),
+            candidateVsFinalGeometryDelta: candidateVsFinalGeometryDelta(
+                candidateDistances: candidateDistances,
+                finalDistances: finalDistances
+            )
+        )
+    }
+
+    private func relativeMarkerPairDistances(
+        from poses: [PoseResult]
+    ) -> [String: Double?] {
+        let posesByMarker = poses.reduce(into: [Int: PoseResult]()) { result, pose in
+            result[pose.markerId] = pose
+        }
+        return [
+            "01": relativeMarkerDistance(between: 0, and: 1, posesByMarker: posesByMarker),
+            "02": relativeMarkerDistance(between: 0, and: 2, posesByMarker: posesByMarker),
+            "03": relativeMarkerDistance(between: 0, and: 3, posesByMarker: posesByMarker),
+            "12": relativeMarkerDistance(between: 1, and: 2, posesByMarker: posesByMarker),
+            "13": relativeMarkerDistance(between: 1, and: 3, posesByMarker: posesByMarker),
+            "23": relativeMarkerDistance(between: 2, and: 3, posesByMarker: posesByMarker)
+        ]
+    }
+
+    private func relativeMarkerDistance(
+        between firstMarkerId: Int,
+        and secondMarkerId: Int,
+        posesByMarker: [Int: PoseResult]
+    ) -> Double? {
+        guard let firstPose = posesByMarker[firstMarkerId],
+              let secondPose = posesByMarker[secondMarkerId],
+              PoseMath.isFinite(firstPose.translationVector),
+              PoseMath.isFinite(secondPose.translationVector)
+        else {
+            return nil
+        }
+
+        let distance = simd_distance(firstPose.translationVector, secondPose.translationVector)
+        return distance.isFinite ? distance : nil
+    }
+
+    private func candidateVsFinalTranslationDeltaMean(
+        candidatePoses: [PoseResult]?,
+        finalPoses: [PoseResult]
+    ) -> Double? {
+        guard let candidatePoses else {
+            return nil
+        }
+
+        let candidateByMarker = candidatePoses.reduce(into: [Int: PoseResult]()) { result, pose in
+            result[pose.markerId] = pose
+        }
+        let finalByMarker = finalPoses.reduce(into: [Int: PoseResult]()) { result, pose in
+            result[pose.markerId] = pose
+        }
+        let deltas = expectedExportMarkerIds(for: .singleArucoV1).compactMap { markerId -> Double? in
+            guard let candidatePose = candidateByMarker[markerId],
+                  let finalPose = finalByMarker[markerId],
+                  PoseMath.isFinite(candidatePose.translationVector),
+                  PoseMath.isFinite(finalPose.translationVector)
+            else {
+                return nil
+            }
+
+            let delta = simd_distance(candidatePose.translationVector, finalPose.translationVector)
+            return delta.isFinite ? delta : nil
+        }
+
+        guard !deltas.isEmpty else {
+            return nil
+        }
+
+        return deltas.reduce(0, +) / Double(deltas.count)
+    }
+
+    private func candidateVsFinalRotationDeltaMean(
+        candidatePoses: [PoseResult]?,
+        finalPoses: [PoseResult]
+    ) -> Double? {
+        guard let candidatePoses else {
+            return nil
+        }
+
+        let candidateByMarker = candidatePoses.reduce(into: [Int: PoseResult]()) { result, pose in
+            result[pose.markerId] = pose
+        }
+        let finalByMarker = finalPoses.reduce(into: [Int: PoseResult]()) { result, pose in
+            result[pose.markerId] = pose
+        }
+        let deltas = expectedExportMarkerIds(for: .singleArucoV1).compactMap { markerId -> Double? in
+            guard let candidatePose = candidateByMarker[markerId],
+                  let finalPose = finalByMarker[markerId]
+            else {
+                return nil
+            }
+
+            let delta = rotationAngularDistanceDegrees(
+                candidatePose.rotationMatrix,
+                finalPose.rotationMatrix
+            )
+            return delta.isFinite ? delta : nil
+        }
+
+        guard !deltas.isEmpty else {
+            return nil
+        }
+
+        return deltas.reduce(0, +) / Double(deltas.count)
+    }
+
+    private func candidateVsFinalGeometryDelta(
+        candidateDistances: [String: Double?],
+        finalDistances: [String: Double?]
+    ) -> Double? {
+        let deltas = ["01", "02", "03", "12", "13", "23"].compactMap { key -> Double? in
+            guard let candidateDistance = candidateDistances[key] ?? nil,
+                  let finalDistance = finalDistances[key] ?? nil
+            else {
+                return nil
+            }
+
+            let delta = abs(candidateDistance - finalDistance)
+            return delta.isFinite ? delta : nil
+        }
+
+        guard !deltas.isEmpty else {
+            return nil
+        }
+
+        return deltas.reduce(0, +) / Double(deltas.count)
     }
 
     private func expectedV1MarkerProgressById() -> [Int: Double] {
@@ -7874,6 +8095,21 @@ final class ScannerViewModel: ObservableObject {
             bestFinalPoseCandidateHasExportablePoses: bestFinalPoseCandidate?.hasExportablePoses,
             bestFinalPoseCandidateAcceptedCount: bestFinalPoseCandidateAcceptedCount,
             bestFinalPoseCandidateLastRejectReason: bestFinalPoseCandidateLastRejectReason,
+            relativeMarkerDistanceM01: relativeMarkerGeometryDiagnostics.distanceM01,
+            relativeMarkerDistanceM02: relativeMarkerGeometryDiagnostics.distanceM02,
+            relativeMarkerDistanceM03: relativeMarkerGeometryDiagnostics.distanceM03,
+            relativeMarkerDistanceM12: relativeMarkerGeometryDiagnostics.distanceM12,
+            relativeMarkerDistanceM13: relativeMarkerGeometryDiagnostics.distanceM13,
+            relativeMarkerDistanceM23: relativeMarkerGeometryDiagnostics.distanceM23,
+            relativeMarkerDistanceStdMean: relativeMarkerGeometryDiagnostics.distanceStdMean,
+            relativeMarkerDistanceStdMax: relativeMarkerGeometryDiagnostics.distanceStdMax,
+            relativeMarkerGeometryScore: relativeMarkerGeometryDiagnostics.geometryScore,
+            candidateVsFinalTranslationDeltaMean:
+                relativeMarkerGeometryDiagnostics.candidateVsFinalTranslationDeltaMean,
+            candidateVsFinalRotationDeltaMean:
+                relativeMarkerGeometryDiagnostics.candidateVsFinalRotationDeltaMean,
+            candidateVsFinalGeometryDelta:
+                relativeMarkerGeometryDiagnostics.candidateVsFinalGeometryDelta,
             guidedStaticCaptureEnabled: guidedStaticCaptureEnabled,
             guidedStages: guidedStaticCaptureEnabled
                 ? guidedStaticStageSnapshots.map(diagnosticsGuidedStageSummary)
@@ -9119,6 +9355,11 @@ final class ScannerViewModel: ObservableObject {
         markerProfile: MarkerProfile,
         tagPoses: [PoseResult]
     ) -> ScanTechnicalReport {
+        let reportGeometryDiagnostics = makeRelativeMarkerGeometryDiagnostics(
+            finalPoses: tagPoses,
+            candidatePoses: bestFinalPoseCandidate?.exportablePoses
+        )
+
         ScanTechnicalReport(
             createdAt: Self.reportDateFormatter.string(from: createdAt),
             markerProfile: markerProfile.rawValue,
@@ -9236,6 +9477,34 @@ final class ScannerViewModel: ObservableObject {
             bestFinalPoseCandidateHasExportablePoses: bestFinalPoseCandidate?.hasExportablePoses,
             bestFinalPoseCandidateAcceptedCount: bestFinalPoseCandidateAcceptedCount,
             bestFinalPoseCandidateLastRejectReason: bestFinalPoseCandidateLastRejectReason,
+            relativeMarkerDistanceM01:
+                finiteReportDouble(reportGeometryDiagnostics.distanceM01),
+            relativeMarkerDistanceM02:
+                finiteReportDouble(reportGeometryDiagnostics.distanceM02),
+            relativeMarkerDistanceM03:
+                finiteReportDouble(reportGeometryDiagnostics.distanceM03),
+            relativeMarkerDistanceM12:
+                finiteReportDouble(reportGeometryDiagnostics.distanceM12),
+            relativeMarkerDistanceM13:
+                finiteReportDouble(reportGeometryDiagnostics.distanceM13),
+            relativeMarkerDistanceM23:
+                finiteReportDouble(reportGeometryDiagnostics.distanceM23),
+            relativeMarkerDistanceStdMean:
+                finiteReportDouble(reportGeometryDiagnostics.distanceStdMean),
+            relativeMarkerDistanceStdMax:
+                finiteReportDouble(reportGeometryDiagnostics.distanceStdMax),
+            relativeMarkerGeometryScore:
+                finiteReportDouble(reportGeometryDiagnostics.geometryScore),
+            candidateVsFinalTranslationDeltaMean:
+                finiteReportDouble(
+                    reportGeometryDiagnostics.candidateVsFinalTranslationDeltaMean
+                ),
+            candidateVsFinalRotationDeltaMean:
+                finiteReportDouble(
+                    reportGeometryDiagnostics.candidateVsFinalRotationDeltaMean
+                ),
+            candidateVsFinalGeometryDelta:
+                finiteReportDouble(reportGeometryDiagnostics.candidateVsFinalGeometryDelta),
             guidedStaticCaptureEnabled: guidedStaticCaptureEnabled,
             guidedStaticStages: guidedStaticCaptureEnabled
                 ? guidedStaticStageSnapshots.map(technicalReportGuidedStaticStage)

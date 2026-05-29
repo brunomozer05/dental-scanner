@@ -102,6 +102,18 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
     var bestFinalPoseCandidateHasExportablePoses: Bool?
     var bestFinalPoseCandidateAcceptedCount: Int?
     var bestFinalPoseCandidateLastRejectReason: String?
+    var relativeMarkerDistanceM01: Double?
+    var relativeMarkerDistanceM02: Double?
+    var relativeMarkerDistanceM03: Double?
+    var relativeMarkerDistanceM12: Double?
+    var relativeMarkerDistanceM13: Double?
+    var relativeMarkerDistanceM23: Double?
+    var relativeMarkerDistanceStdMean: Double?
+    var relativeMarkerDistanceStdMax: Double?
+    var relativeMarkerGeometryScore: Double?
+    var candidateVsFinalTranslationDeltaMean: Double?
+    var candidateVsFinalRotationDeltaMean: Double?
+    var candidateVsFinalGeometryDelta: Double?
     var lastEventName: String?
     var eventsCount: Int
     var events: [ScanDiagnosticEvent]
@@ -185,6 +197,18 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
         bestFinalPoseCandidateHasExportablePoses: nil,
         bestFinalPoseCandidateAcceptedCount: nil,
         bestFinalPoseCandidateLastRejectReason: nil,
+        relativeMarkerDistanceM01: nil,
+        relativeMarkerDistanceM02: nil,
+        relativeMarkerDistanceM03: nil,
+        relativeMarkerDistanceM12: nil,
+        relativeMarkerDistanceM13: nil,
+        relativeMarkerDistanceM23: nil,
+        relativeMarkerDistanceStdMean: nil,
+        relativeMarkerDistanceStdMax: nil,
+        relativeMarkerGeometryScore: nil,
+        candidateVsFinalTranslationDeltaMean: nil,
+        candidateVsFinalRotationDeltaMean: nil,
+        candidateVsFinalGeometryDelta: nil,
         lastEventName: nil,
         eventsCount: 0,
         events: [],

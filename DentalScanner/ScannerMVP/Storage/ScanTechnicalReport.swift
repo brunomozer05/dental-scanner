@@ -65,6 +65,18 @@ struct ScanTechnicalReport: Codable {
     var bestFinalPoseCandidateHasExportablePoses: Bool?
     var bestFinalPoseCandidateAcceptedCount: Int?
     var bestFinalPoseCandidateLastRejectReason: String?
+    var relativeMarkerDistanceM01: Double?
+    var relativeMarkerDistanceM02: Double?
+    var relativeMarkerDistanceM03: Double?
+    var relativeMarkerDistanceM12: Double?
+    var relativeMarkerDistanceM13: Double?
+    var relativeMarkerDistanceM23: Double?
+    var relativeMarkerDistanceStdMean: Double?
+    var relativeMarkerDistanceStdMax: Double?
+    var relativeMarkerGeometryScore: Double?
+    var candidateVsFinalTranslationDeltaMean: Double?
+    var candidateVsFinalRotationDeltaMean: Double?
+    var candidateVsFinalGeometryDelta: Double?
     var guidedStaticCaptureEnabled: Bool?
     var guidedStaticStages: [GuidedStaticStage]?
 

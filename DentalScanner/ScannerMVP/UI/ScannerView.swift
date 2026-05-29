@@ -172,7 +172,27 @@ struct ScannerView: View {
                                 useBestCandidateForExport:
                                     viewModel.debugUseBestFinalPoseCandidateForExport,
                                 usedBestCandidate:
-                                    viewModel.debugUsedBestFinalPoseCandidate
+                                    viewModel.debugUsedBestFinalPoseCandidate,
+                                relativeMarkerGeometryScore:
+                                    viewModel.debugRelativeMarkerGeometryScore,
+                                relativeMarkerDistanceM01:
+                                    viewModel.debugRelativeMarkerDistanceM01,
+                                relativeMarkerDistanceM02:
+                                    viewModel.debugRelativeMarkerDistanceM02,
+                                relativeMarkerDistanceM03:
+                                    viewModel.debugRelativeMarkerDistanceM03,
+                                relativeMarkerDistanceM12:
+                                    viewModel.debugRelativeMarkerDistanceM12,
+                                relativeMarkerDistanceM13:
+                                    viewModel.debugRelativeMarkerDistanceM13,
+                                relativeMarkerDistanceM23:
+                                    viewModel.debugRelativeMarkerDistanceM23,
+                                candidateVsFinalTranslationDeltaMean:
+                                    viewModel.debugCandidateVsFinalTranslationDeltaMean,
+                                candidateVsFinalRotationDeltaMean:
+                                    viewModel.debugCandidateVsFinalRotationDeltaMean,
+                                candidateVsFinalGeometryDelta:
+                                    viewModel.debugCandidateVsFinalGeometryDelta
                             ) {
                                 print("[DEBUG_GEAR] emergency debug panel close tapped")
                                 scannerDebugPanelVisible = false
@@ -1772,6 +1792,16 @@ private struct ScannerDebugEmergencyPanelView: View {
     let bestCandidateHasExportablePoses: Bool
     let useBestCandidateForExport: Bool
     let usedBestCandidate: Bool
+    let relativeMarkerGeometryScore: Double?
+    let relativeMarkerDistanceM01: Double?
+    let relativeMarkerDistanceM02: Double?
+    let relativeMarkerDistanceM03: Double?
+    let relativeMarkerDistanceM12: Double?
+    let relativeMarkerDistanceM13: Double?
+    let relativeMarkerDistanceM23: Double?
+    let candidateVsFinalTranslationDeltaMean: Double?
+    let candidateVsFinalRotationDeltaMean: Double?
+    let candidateVsFinalGeometryDelta: Double?
     let onClose: () -> Void
 
     var body: some View {
@@ -1889,6 +1919,32 @@ private struct ScannerDebugEmergencyPanelView: View {
                         )
                         debugRow(title: "Used", value: usedBestCandidate ? "yes" : "no")
                     }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Geometry:")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white.opacity(0.82))
+
+                        debugRow(title: "Score", value: safeNumber(relativeMarkerGeometryScore))
+                        debugRow(title: "Dist M01", value: safeMillimeters(relativeMarkerDistanceM01))
+                        debugRow(title: "Dist M02", value: safeMillimeters(relativeMarkerDistanceM02))
+                        debugRow(title: "Dist M03", value: safeMillimeters(relativeMarkerDistanceM03))
+                        debugRow(title: "Dist M12", value: safeMillimeters(relativeMarkerDistanceM12))
+                        debugRow(title: "Dist M13", value: safeMillimeters(relativeMarkerDistanceM13))
+                        debugRow(title: "Dist M23", value: safeMillimeters(relativeMarkerDistanceM23))
+                        debugRow(
+                            title: "Candidate vs final T",
+                            value: safeMillimeters(candidateVsFinalTranslationDeltaMean)
+                        )
+                        debugRow(
+                            title: "Candidate vs final R",
+                            value: safeDegrees(candidateVsFinalRotationDeltaMean)
+                        )
+                        debugRow(
+                            title: "Candidate vs final G",
+                            value: safeMillimeters(candidateVsFinalGeometryDelta)
+                        )
+                    }
                 }
             }
             .frame(maxHeight: 520)
@@ -1967,6 +2023,15 @@ private struct ScannerDebugEmergencyPanelView: View {
         }
 
         return "\(text) deg"
+    }
+
+    private func safeMillimeters(_ value: Double?) -> String {
+        let text = safeNumber(value)
+        guard text != "N/A" else {
+            return text
+        }
+
+        return "\(text) mm"
     }
 
     private func safePercent(_ value: Double?) -> String {
