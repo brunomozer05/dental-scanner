@@ -161,6 +161,16 @@ struct ScannerView: View {
                                     viewModel.debugBestFinalPoseCandidateObservationsM2,
                                 bestCandidateObservationsM3:
                                     viewModel.debugBestFinalPoseCandidateObservationsM3,
+                                bestCandidateSaved:
+                                    viewModel.debugBestFinalPoseCandidateSaved,
+                                bestCandidateUpdates:
+                                    viewModel.debugBestFinalPoseCandidateUpdateCount,
+                                bestCandidateMarkerIds:
+                                    viewModel.debugBestFinalPoseCandidateMarkerIds,
+                                bestCandidateHasExportablePoses:
+                                    viewModel.debugBestFinalPoseCandidateHasExportablePoses,
+                                useBestCandidateForExport:
+                                    viewModel.debugUseBestFinalPoseCandidateForExport,
                                 usedBestCandidate:
                                     viewModel.debugUsedBestFinalPoseCandidate
                             ) {
@@ -1756,6 +1766,11 @@ private struct ScannerDebugEmergencyPanelView: View {
     let bestCandidateObservationsM1: Int?
     let bestCandidateObservationsM2: Int?
     let bestCandidateObservationsM3: Int?
+    let bestCandidateSaved: Bool
+    let bestCandidateUpdates: Int
+    let bestCandidateMarkerIds: String
+    let bestCandidateHasExportablePoses: Bool
+    let useBestCandidateForExport: Bool
     let usedBestCandidate: Bool
     let onClose: () -> Void
 
@@ -1861,6 +1876,17 @@ private struct ScannerDebugEmergencyPanelView: View {
                         debugRow(title: "Obs M1", value: safeInt(bestCandidateObservationsM1))
                         debugRow(title: "Obs M2", value: safeInt(bestCandidateObservationsM2))
                         debugRow(title: "Obs M3", value: safeInt(bestCandidateObservationsM3))
+                        debugRow(title: "Saved", value: bestCandidateSaved ? "yes" : "no")
+                        debugRow(title: "Updates", value: safeInt(bestCandidateUpdates))
+                        debugRow(title: "Marker ids", value: safeText(bestCandidateMarkerIds))
+                        debugRow(
+                            title: "Has export poses",
+                            value: bestCandidateHasExportablePoses ? "yes" : "no"
+                        )
+                        debugRow(
+                            title: "Use for export",
+                            value: useBestCandidateForExport ? "yes" : "no"
+                        )
                         debugRow(title: "Used", value: usedBestCandidate ? "yes" : "no")
                     }
                 }

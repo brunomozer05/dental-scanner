@@ -89,12 +89,17 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
     var allExpectedMarkersAt100Percent: Bool?
     var expectedMarkerProgressById: [Int: Double]?
     var usedBestFinalPoseCandidate: Bool?
+    var bestFinalPoseCandidateSaved: Bool?
     var bestFinalPoseCandidateScore: Double?
     var bestFinalPoseCandidateTimestampSeconds: Double?
+    var bestFinalPoseCandidateLastUpdatedAtSeconds: Double?
     var bestFinalPoseCandidateAgeSeconds: Double?
     var bestFinalPoseCandidateWorstNormalStd: Double?
     var bestFinalPoseCandidateWorstReprojection: Double?
     var bestFinalPoseCandidateObservationsByMarker: [Int: Int]?
+    var bestFinalPoseCandidateReason: String?
+    var bestFinalPoseCandidateMarkerIds: [Int]?
+    var bestFinalPoseCandidateHasExportablePoses: Bool?
     var bestFinalPoseCandidateAcceptedCount: Int?
     var bestFinalPoseCandidateLastRejectReason: String?
     var lastEventName: String?
@@ -167,12 +172,17 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
         allExpectedMarkersAt100Percent: nil,
         expectedMarkerProgressById: nil,
         usedBestFinalPoseCandidate: nil,
+        bestFinalPoseCandidateSaved: nil,
         bestFinalPoseCandidateScore: nil,
         bestFinalPoseCandidateTimestampSeconds: nil,
+        bestFinalPoseCandidateLastUpdatedAtSeconds: nil,
         bestFinalPoseCandidateAgeSeconds: nil,
         bestFinalPoseCandidateWorstNormalStd: nil,
         bestFinalPoseCandidateWorstReprojection: nil,
         bestFinalPoseCandidateObservationsByMarker: nil,
+        bestFinalPoseCandidateReason: nil,
+        bestFinalPoseCandidateMarkerIds: nil,
+        bestFinalPoseCandidateHasExportablePoses: nil,
         bestFinalPoseCandidateAcceptedCount: nil,
         bestFinalPoseCandidateLastRejectReason: nil,
         lastEventName: nil,

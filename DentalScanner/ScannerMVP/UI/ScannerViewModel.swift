@@ -117,9 +117,15 @@ struct BestFinalPoseCandidateSnapshot: Equatable {
     let score: Double
     let timestamp: Double
     let observationsByMarker: [Int: Int]
+    let exportablePoses: [PoseResult]
+    let markerIds: [Int]
     let worstNormalStdDegrees: Double?
     let worstReprojectionError: Double?
     let reason: String
+
+    var hasExportablePoses: Bool {
+        !exportablePoses.isEmpty
+    }
 }
 
 struct GuidedStaticStageSnapshot: Equatable, Identifiable {
@@ -334,6 +340,7 @@ final class ScannerViewModel: ObservableObject {
         static let normalFinalizationRequireDistanceValid: Bool = true
         static let normalFinalizationRequireFocusStable: Bool = true
         static let normalBestCandidateEvaluationIntervalSeconds: Double = 1.0
+        static let normalUseBestFinalPoseCandidateForExport: Bool = false
         static let maximumStaticPoseSamplesPerMarker: Int = 180
         static let maximumStaticPosePairSamplesPerPair: Int = 180
         static let maximumStaticPosePlaneSamples: Int = 180
@@ -705,6 +712,27 @@ final class ScannerViewModel: ObservableObject {
     }
     var debugBestFinalPoseCandidateObservationsM3: Int? {
         bestFinalPoseCandidate?.observationsByMarker[3]
+    }
+    var debugBestFinalPoseCandidateSaved: Bool {
+        bestFinalPoseCandidate != nil
+    }
+    var debugBestFinalPoseCandidateUpdateCount: Int {
+        bestFinalPoseCandidateAcceptedCount
+    }
+    var debugBestFinalPoseCandidateMarkerIds: String {
+        guard let markerIds = bestFinalPoseCandidate?.markerIds,
+              !markerIds.isEmpty
+        else {
+            return "N/A"
+        }
+
+        return markerIds.map { "M\($0)" }.joined(separator: ",")
+    }
+    var debugBestFinalPoseCandidateHasExportablePoses: Bool {
+        bestFinalPoseCandidate?.hasExportablePoses ?? false
+    }
+    var debugUseBestFinalPoseCandidateForExport: Bool {
+        ScanConfiguration.normalUseBestFinalPoseCandidateForExport
     }
     var debugUsedBestFinalPoseCandidate: Bool {
         usedBestFinalPoseCandidate
@@ -1251,6 +1279,7 @@ final class ScannerViewModel: ObservableObject {
         if scanState == .scanning || scanState == .stabilizing {
             recordDiagnosticEvent(name: "scan_aborted", message: scanReadinessBlockerSummary)
         }
+        resetBestFinalPoseCandidate()
         shouldRunCamera = false
         cameraService.stopRunning()
         motionFrameQualityService.stop()
@@ -2626,12 +2655,16 @@ final class ScannerViewModel: ObservableObject {
         normalFinalizationExpectedMarkerProgressById = [:]
         normalFinalizationCanStart = false
         normalFinalizationCanAutoExport = false
+        resetBestFinalPoseCandidate()
+        normalFinalizationLastAcceptedFrameTimestamp = nil
+    }
+
+    private func resetBestFinalPoseCandidate() {
         bestFinalPoseCandidate = nil
         bestFinalPoseCandidateAcceptedCount = 0
         bestFinalPoseCandidateLastRejectReason = nil
         usedBestFinalPoseCandidate = false
         lastBestFinalPoseCandidateEvaluationTimestamp = nil
-        normalFinalizationLastAcceptedFrameTimestamp = nil
     }
 
     @MainActor
@@ -2994,6 +3027,16 @@ final class ScannerViewModel: ObservableObject {
             return
         }
 
+        let exportGate = currentExportGateValidation()
+        let exportablePoses = exportGate.exportablePoses
+        let markerIds = exportablePoses.map(\.markerId).sorted()
+        guard exportGate.isPassing,
+              markerIds == expectedExportMarkerIds(for: .singleArucoV1)
+        else {
+            bestFinalPoseCandidateLastRejectReason = "export_gate_not_passing"
+            return
+        }
+
         let worstReprojection = normalFinalizationWorstReprojectionForExpectedMarkers()
         let averageQuality = normalFinalizationAverageQualityForExpectedMarkers()
         let score = bestFinalPoseCandidateScore(
@@ -3014,6 +3057,8 @@ final class ScannerViewModel: ObservableObject {
             score: score,
             timestamp: timestamp,
             observationsByMarker: observationsByMarker,
+            exportablePoses: exportablePoses,
+            markerIds: markerIds,
             worstNormalStdDegrees: worstNormalStdDegrees,
             worstReprojectionError: worstReprojection,
             reason: "score_improved"
@@ -7816,12 +7861,17 @@ final class ScannerViewModel: ObservableObject {
             allExpectedMarkersAt100Percent: normalFinalizationAllExpectedMarkersAt100Percent,
             expectedMarkerProgressById: normalFinalizationExpectedMarkerProgressById,
             usedBestFinalPoseCandidate: usedBestFinalPoseCandidate,
+            bestFinalPoseCandidateSaved: bestFinalPoseCandidate != nil,
             bestFinalPoseCandidateScore: bestFinalPoseCandidate?.score,
             bestFinalPoseCandidateTimestamp: bestFinalPoseCandidate?.timestamp,
+            bestFinalPoseCandidateLastUpdatedAt: bestFinalPoseCandidate?.timestamp,
             bestFinalPoseCandidateAgeSeconds: debugBestFinalPoseCandidateAgeSeconds,
             bestFinalPoseCandidateWorstNormalStd: bestFinalPoseCandidate?.worstNormalStdDegrees,
             bestFinalPoseCandidateWorstReprojection: bestFinalPoseCandidate?.worstReprojectionError,
             bestFinalPoseCandidateObservationsByMarker: bestFinalPoseCandidate?.observationsByMarker,
+            bestFinalPoseCandidateReason: bestFinalPoseCandidate?.reason,
+            bestFinalPoseCandidateMarkerIds: bestFinalPoseCandidate?.markerIds,
+            bestFinalPoseCandidateHasExportablePoses: bestFinalPoseCandidate?.hasExportablePoses,
             bestFinalPoseCandidateAcceptedCount: bestFinalPoseCandidateAcceptedCount,
             bestFinalPoseCandidateLastRejectReason: bestFinalPoseCandidateLastRejectReason,
             guidedStaticCaptureEnabled: guidedStaticCaptureEnabled,
@@ -8867,6 +8917,7 @@ final class ScannerViewModel: ObservableObject {
     private func handleCameraError(_ error: Error) {
         cameraState = .failed
         shouldRunCamera = false
+        resetBestFinalPoseCandidate()
         updateScreenAwakeState()
         errorMessage = makeErrorMessage(from: error)
     }
@@ -9025,6 +9076,7 @@ final class ScannerViewModel: ObservableObject {
                         self.scanQualityStatus = "Pronto para exportar"
                         self.scanReadinessBlockerSummary = "Pronto: STL gerado"
                     }
+                    self.resetBestFinalPoseCandidate()
                 case .failure(let error):
                     self.recordDiagnosticEvent(name: "export_blocked", message: error.localizedDescription)
                     self.stlExportURL = nil
@@ -9041,6 +9093,7 @@ final class ScannerViewModel: ObservableObject {
                         self.scanQualityStatus = "Erro ao gerar modelo"
                         self.scanReadinessBlockerSummary = "Erro STL: \(error.localizedDescription)"
                     }
+                    self.resetBestFinalPoseCandidate()
                 }
             }
         }
@@ -9163,9 +9216,13 @@ final class ScannerViewModel: ObservableObject {
                     ? nil
                     : normalFinalizationExpectedMarkerProgressById,
             usedBestFinalPoseCandidate: usedBestFinalPoseCandidate,
+            bestFinalPoseCandidateSaved: bestFinalPoseCandidate != nil,
             bestFinalPoseCandidateScore: finiteReportDouble(bestFinalPoseCandidate?.score),
             bestFinalPoseCandidateTimestampSeconds: finiteReportDouble(
                 currentScanDiagnosticsSnapshot.bestFinalPoseCandidateTimestampSeconds
+            ),
+            bestFinalPoseCandidateLastUpdatedAtSeconds: finiteReportDouble(
+                currentScanDiagnosticsSnapshot.bestFinalPoseCandidateLastUpdatedAtSeconds
             ),
             bestFinalPoseCandidateAgeSeconds: finiteReportDouble(debugBestFinalPoseCandidateAgeSeconds),
             bestFinalPoseCandidateWorstNormalStd:
@@ -9174,6 +9231,9 @@ final class ScannerViewModel: ObservableObject {
                 finiteReportDouble(bestFinalPoseCandidate?.worstReprojectionError),
             bestFinalPoseCandidateObservationsByMarker:
                 bestFinalPoseCandidateObservationsForReport(),
+            bestFinalPoseCandidateReason: bestFinalPoseCandidate?.reason,
+            bestFinalPoseCandidateMarkerIds: bestFinalPoseCandidate?.markerIds,
+            bestFinalPoseCandidateHasExportablePoses: bestFinalPoseCandidate?.hasExportablePoses,
             bestFinalPoseCandidateAcceptedCount: bestFinalPoseCandidateAcceptedCount,
             bestFinalPoseCandidateLastRejectReason: bestFinalPoseCandidateLastRejectReason,
             guidedStaticCaptureEnabled: guidedStaticCaptureEnabled,
