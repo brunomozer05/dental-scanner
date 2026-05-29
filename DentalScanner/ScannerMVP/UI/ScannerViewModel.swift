@@ -9360,7 +9360,7 @@ final class ScannerViewModel: ObservableObject {
             candidatePoses: bestFinalPoseCandidate?.exportablePoses
         )
 
-        ScanTechnicalReport(
+        return ScanTechnicalReport(
             createdAt: Self.reportDateFormatter.string(from: createdAt),
             markerProfile: markerProfile.rawValue,
             stlFileName: nil,
