@@ -118,7 +118,67 @@ observacoes muito desequilibradas entre markers
 
 O primeiro score nao precisa ser perfeito. Ele precisa ser registrado em diagnostics para calibracao posterior com CSVs, comparador STL e testes repetidos da mesma peca.
 
-## 7. Salvamento do candidato
+Antes de usar esse score para alterar export, ele deve ser calibrado com metricas de geometria relativa entre markers. Normal e reprojection isolados nao sao suficientes: um scan pode parecer melhor contra o molde real mesmo tendo score menor. A decisao de export precisa considerar consistencia geometrica do conjunto.
+
+## 7. Relative Marker Geometry Diagnostics
+
+Antes de usar o Best Final Pose Candidate no export, implementar uma etapa read-only chamada `Relative Marker Geometry Diagnostics`.
+
+Essa etapa deve medir a consistencia geometrica relativa entre os markers esperados do `singleArucoV1`:
+
+```txt
+M0
+M1
+M2
+M3
+```
+
+O objetivo e diagnosticar se o conjunto de poses preserva a geometria relativa da peca ao longo do refinamento, em vez de avaliar cada marker apenas por normal/reprojection individual.
+
+Medir distancias relativas entre todos os pares esperados:
+
+```txt
+M0-M1
+M0-M2
+M0-M3
+M1-M2
+M1-M3
+M2-M3
+```
+
+Metricas futuras sugeridas:
+
+```txt
+relativeMarkerDistanceM01
+relativeMarkerDistanceM02
+relativeMarkerDistanceM03
+relativeMarkerDistanceM12
+relativeMarkerDistanceM13
+relativeMarkerDistanceM23
+
+relativeMarkerDistanceStdMean
+relativeMarkerDistanceStdMax
+relativeMarkerGeometryScore
+
+candidateVsFinalTranslationDeltaMean
+candidateVsFinalRotationDeltaMean
+candidateVsFinalGeometryDelta
+```
+
+A primeira implementacao futura deve ser apenas diagnostics/read-only:
+
+```txt
+nao alterar export
+nao alterar score usado para escolher candidato ainda
+registrar metricas em _diagnostics.json
+registrar metricas em _report.json
+mostrar resumo no debug emergencial
+permitir que o comparador Python exponha os campos nos CSVs depois
+```
+
+Somente depois de comparar essas metricas contra scans repetidos e avaliacao visual/ground truth, o score do candidato deve ser recalibrado usando geometria relativa.
+
+## 8. Salvamento do candidato
 
 Durante o refinamento, a cada avaliacao throttled:
 
@@ -148,7 +208,7 @@ arquivos temporarios
 STL temporario
 ```
 
-## 8. Uso no export
+## 9. Uso no export
 
 No momento do export:
 
@@ -170,7 +230,9 @@ poses nao podem ser default/placeholders
 export gate ainda deve ser valido
 ```
 
-## 9. Diagnostics/report
+`usedBestFinalPoseCandidate` deve continuar `false` ate a etapa especifica de habilitar export por best candidate atras de flag.
+
+## 10. Diagnostics/report
 
 Adicionar ao `_diagnostics.json` e ao `_report.json`, quando a feature for implementada:
 
@@ -184,6 +246,19 @@ bestFinalPoseCandidateWorstReprojection
 bestFinalPoseCandidateObservationsByMarker
 bestFinalPoseCandidateAcceptedCount
 bestFinalPoseCandidateLastRejectReason
+
+relativeMarkerDistanceM01
+relativeMarkerDistanceM02
+relativeMarkerDistanceM03
+relativeMarkerDistanceM12
+relativeMarkerDistanceM13
+relativeMarkerDistanceM23
+relativeMarkerDistanceStdMean
+relativeMarkerDistanceStdMax
+relativeMarkerGeometryScore
+candidateVsFinalTranslationDeltaMean
+candidateVsFinalRotationDeltaMean
+candidateVsFinalGeometryDelta
 ```
 
 Esses campos devem permitir responder:
@@ -194,9 +269,10 @@ o melhor candidato aconteceu quanto tempo antes do export?
 qual era o score?
 qual marker limitou o score?
 normal/reprojection estavam melhores do que no estado final?
+a geometria relativa estava mais estavel no candidato ou no estado final?
 ```
 
-## 10. Debug emergencial
+## 11. Debug emergencial
 
 O debug completo continua desligado enquanto estiver instavel.
 
@@ -212,11 +288,15 @@ Best candidate obs M1
 Best candidate obs M2
 Best candidate obs M3
 Used best candidate
+Relative geometry score
+Relative distance std mean
+Relative distance std max
+Candidate vs final geometry delta
 ```
 
 Tudo deve vir de propriedades estreitas e read-only no `ScannerViewModel`, com `N/A` para valores ausentes, NaN ou infinity.
 
-## 11. UI
+## 12. UI
 
 Feedback simples desejado:
 
@@ -228,34 +308,37 @@ Melhor qualidade salva
 
 UI nao e prioridade da primeira implementacao se isso complicar o fluxo. A prioridade inicial e escolher melhor pose com seguranca e registrar diagnostics.
 
-## 12. Criterios de aceitacao
+## 13. Criterios de aceitacao
 
 1. Nao roda antes dos 4 markers em 100%.
 2. Nao avalia em todo frame sem throttle.
 3. Nao gera STL temporario.
 4. Nao faz I/O durante captura.
-5. Export usa best candidate quando valido.
-6. Fallback usa fluxo atual.
-7. Diagnostics indicam se usou best candidate.
-8. Debug emergencial continua abrindo.
-9. `singleArucoV1` continua padrao.
-10. Guided Static continua desligado.
+5. Relative Marker Geometry Diagnostics roda primeiro como read-only.
+6. Export so usa best candidate quando a etapa de export behind flag for implementada.
+7. Fallback usa fluxo atual.
+8. Diagnostics indicam se usou best candidate.
+9. Debug emergencial continua abrindo.
+10. `singleArucoV1` continua padrao.
+11. Guided Static continua desligado.
 
-## 13. Plano de implementacao futura
+## 14. Plano de implementacao futura
 
 Dividir em commits pequenos:
 
 ```txt
 Commit 1: criar tipos internos e score read-only sem alterar export
 Commit 2: salvar best candidate durante refinamento
-Commit 3: usar best candidate no export com fallback
-Commit 4: diagnostics/report/debug emergencial
-Commit 5: calibrar score com CSVs
+Commit 3: Add relative marker geometry diagnostics
+Commit 4: Expose relative marker geometry in comparator
+Commit 5: Calibrate best candidate score using geometry metrics
+Commit 6: Enable best candidate export behind flag
+Commit 7: diagnostics/report/debug emergencial finais
 ```
 
 Cada commit deve manter o app compilavel e testavel no iPhone.
 
-## 14. Riscos
+## 15. Riscos
 
 ```txt
 score mal calibrado pode escolher candidato pior
@@ -263,6 +346,7 @@ salvar candidato pesado pode afetar performance
 usar candidato antigo demais pode exportar pose desatualizada
 misturar observacoes de momentos diferentes pode piorar geometria
 diagnostics podem ficar confusos
+metricas de geometria relativa podem refletir erro fisico do marker, nao apenas erro de software
 ```
 
 Mitigacoes:
@@ -273,9 +357,10 @@ guardar snapshot leve
 manter fallback do fluxo atual
 registrar score e motivo no diagnostics
 validar com scans repetidos antes de confiar no score
+manter geometry diagnostics read-only antes de influenciar score/export
 ```
 
-## 15. Relacao com validacao futura
+## 16. Relacao com validacao futura
 
 Quando houver STL do scanner profissional do molde, esta feature deve ser validada contra ground truth real.
 
