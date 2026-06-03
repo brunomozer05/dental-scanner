@@ -145,6 +145,16 @@ struct RelativeMarkerGeometryDiagnostics: Equatable {
     static let empty = RelativeMarkerGeometryDiagnostics()
 }
 
+private struct RelativeMarkerDistanceSample: Equatable {
+    let timestamp: Double
+    let distanceM01: Double
+    let distanceM02: Double
+    let distanceM03: Double
+    let distanceM12: Double
+    let distanceM13: Double
+    let distanceM23: Double
+}
+
 struct GuidedStaticStageSnapshot: Equatable, Identifiable {
     let stageIndex: Int
     let stageName: String
@@ -358,6 +368,8 @@ final class ScannerViewModel: ObservableObject {
         static let normalFinalizationRequireFocusStable: Bool = true
         static let normalBestCandidateEvaluationIntervalSeconds: Double = 1.0
         static let normalUseBestFinalPoseCandidateForExport: Bool = false
+        static let relativeMarkerDistanceSampleIntervalSeconds: Double = 0.5
+        static let relativeMarkerDistanceSampleLimit: Int = 120
         static let maximumStaticPoseSamplesPerMarker: Int = 180
         static let maximumStaticPosePairSamplesPerPair: Int = 180
         static let maximumStaticPosePlaneSamples: Int = 180
@@ -757,6 +769,12 @@ final class ScannerViewModel: ObservableObject {
     var debugRelativeMarkerGeometryScore: Double? {
         relativeMarkerGeometryDiagnostics.geometryScore
     }
+    var debugRelativeMarkerDistanceStdMean: Double? {
+        relativeMarkerGeometryDiagnostics.distanceStdMean
+    }
+    var debugRelativeMarkerDistanceStdMax: Double? {
+        relativeMarkerGeometryDiagnostics.distanceStdMax
+    }
     var debugRelativeMarkerDistanceM01: Double? {
         relativeMarkerGeometryDiagnostics.distanceM01
     }
@@ -1032,8 +1050,10 @@ final class ScannerViewModel: ObservableObject {
     private var lastStaticPoseDiagnosticsUpdateTimestamp: Double?
     private var lastDiagnosticsSnapshotPublishTimestamp: Double?
     private var lastBestFinalPoseCandidateEvaluationTimestamp: Double?
+    private var lastRelativeMarkerDistanceSampleTimestamp: Double?
     private var lastBlockingReasonBeforeExport: String?
     private var normalFinalizationLastAcceptedFrameTimestamp: Double?
+    private var relativeMarkerDistanceSamples: [RelativeMarkerDistanceSample] = []
     private var staticPoseSamples: [StaticPoseSample] = []
     private var staticPosePairDistanceSamples: [StaticPosePairDistanceSample] = []
     private var staticPosePlaneSamples: [StaticPosePlaneSample] = []
@@ -2713,7 +2733,9 @@ final class ScannerViewModel: ObservableObject {
         bestFinalPoseCandidateLastRejectReason = nil
         usedBestFinalPoseCandidate = false
         relativeMarkerGeometryDiagnostics = .empty
+        relativeMarkerDistanceSamples = []
         lastBestFinalPoseCandidateEvaluationTimestamp = nil
+        lastRelativeMarkerDistanceSampleTimestamp = nil
     }
 
     @MainActor
@@ -3197,20 +3219,29 @@ final class ScannerViewModel: ObservableObject {
     ) {
         relativeMarkerGeometryDiagnostics = makeRelativeMarkerGeometryDiagnostics(
             finalPoses: exportablePoses,
-            candidatePoses: bestFinalPoseCandidate?.exportablePoses
+            candidatePoses: bestFinalPoseCandidate?.exportablePoses,
+            distanceStability: relativeMarkerDistanceStability()
         )
     }
 
     private func makeRelativeMarkerGeometryDiagnostics(
         finalPoses: [PoseResult],
-        candidatePoses: [PoseResult]?
+        candidatePoses: [PoseResult]?,
+        distanceStability: (mean: Double?, max: Double?)? = nil
     ) -> RelativeMarkerGeometryDiagnostics {
         let finalDistances = relativeMarkerPairDistances(from: finalPoses)
         let candidateDistances = relativeMarkerPairDistances(from: candidatePoses ?? [])
         let validDistanceCount = finalDistances.values.compactMap { $0 }.count
-        let geometryScore: Double? = validDistanceCount > 0
+        let stdMean = distanceStability?.mean
+        let stdMax = distanceStability?.max
+        let completenessScore: Double? = validDistanceCount > 0
             ? Double(validDistanceCount) / 6.0 * 100.0
             : nil
+        let geometryScore = relativeMarkerGeometryScore(
+            completenessScore: completenessScore,
+            distanceStdMean: stdMean,
+            distanceStdMax: stdMax
+        )
 
         return RelativeMarkerGeometryDiagnostics(
             distanceM01: finalDistances["01"] ?? nil,
@@ -3219,9 +3250,8 @@ final class ScannerViewModel: ObservableObject {
             distanceM12: finalDistances["12"] ?? nil,
             distanceM13: finalDistances["13"] ?? nil,
             distanceM23: finalDistances["23"] ?? nil,
-            // TODO: replace nil with rolling distance stability once per-candidate history exists.
-            distanceStdMean: nil,
-            distanceStdMax: nil,
+            distanceStdMean: stdMean,
+            distanceStdMax: stdMax,
             geometryScore: geometryScore,
             candidateVsFinalTranslationDeltaMean: candidateVsFinalTranslationDeltaMean(
                 candidatePoses: candidatePoses,
@@ -3236,6 +3266,136 @@ final class ScannerViewModel: ObservableObject {
                 finalDistances: finalDistances
             )
         )
+    }
+
+    private func updateRelativeMarkerGeometryDiagnosticsIfNeeded(timestamp: Double) {
+        guard shouldUseNormalScanFinalization,
+              markerProfile == .singleArucoV1,
+              normalFinalizationState == .stabilizing
+        else {
+            return
+        }
+
+        if let lastRelativeMarkerDistanceSampleTimestamp,
+           timestamp - lastRelativeMarkerDistanceSampleTimestamp <
+                ScanConfiguration.relativeMarkerDistanceSampleIntervalSeconds {
+            return
+        }
+
+        let exportGate = currentExportGateValidation()
+        let exportablePoses = exportGate.exportablePoses
+        let markerIds = exportablePoses.map(\.markerId).sorted()
+        guard exportGate.isPassing,
+              markerIds == expectedExportMarkerIds(for: .singleArucoV1)
+        else {
+            return
+        }
+
+        let distances = relativeMarkerPairDistances(from: exportablePoses)
+        guard let sample = relativeMarkerDistanceSample(timestamp: timestamp, distances: distances) else {
+            return
+        }
+
+        lastRelativeMarkerDistanceSampleTimestamp = timestamp
+        relativeMarkerDistanceSamples.append(sample)
+        if relativeMarkerDistanceSamples.count > ScanConfiguration.relativeMarkerDistanceSampleLimit {
+            relativeMarkerDistanceSamples.removeFirst(
+                relativeMarkerDistanceSamples.count - ScanConfiguration.relativeMarkerDistanceSampleLimit
+            )
+        }
+
+        relativeMarkerGeometryDiagnostics = makeRelativeMarkerGeometryDiagnostics(
+            finalPoses: exportablePoses,
+            candidatePoses: bestFinalPoseCandidate?.exportablePoses,
+            distanceStability: relativeMarkerDistanceStability()
+        )
+    }
+
+    private func relativeMarkerDistanceSample(
+        timestamp: Double,
+        distances: [String: Double?]
+    ) -> RelativeMarkerDistanceSample? {
+        guard let distanceM01 = distances["01"] ?? nil,
+              let distanceM02 = distances["02"] ?? nil,
+              let distanceM03 = distances["03"] ?? nil,
+              let distanceM12 = distances["12"] ?? nil,
+              let distanceM13 = distances["13"] ?? nil,
+              let distanceM23 = distances["23"] ?? nil,
+              [distanceM01, distanceM02, distanceM03, distanceM12, distanceM13, distanceM23]
+                .allSatisfy({ $0.isFinite })
+        else {
+            return nil
+        }
+
+        return RelativeMarkerDistanceSample(
+            timestamp: timestamp,
+            distanceM01: distanceM01,
+            distanceM02: distanceM02,
+            distanceM03: distanceM03,
+            distanceM12: distanceM12,
+            distanceM13: distanceM13,
+            distanceM23: distanceM23
+        )
+    }
+
+    private func relativeMarkerDistanceStability() -> (mean: Double?, max: Double?) {
+        guard relativeMarkerDistanceSamples.count >= 2 else {
+            return (nil, nil)
+        }
+
+        let standardDeviations = [
+            standardDeviation(relativeMarkerDistanceSamples.map(\.distanceM01)),
+            standardDeviation(relativeMarkerDistanceSamples.map(\.distanceM02)),
+            standardDeviation(relativeMarkerDistanceSamples.map(\.distanceM03)),
+            standardDeviation(relativeMarkerDistanceSamples.map(\.distanceM12)),
+            standardDeviation(relativeMarkerDistanceSamples.map(\.distanceM13)),
+            standardDeviation(relativeMarkerDistanceSamples.map(\.distanceM23))
+        ].compactMap { $0 }
+
+        guard standardDeviations.count == 6,
+              let maxStandardDeviation = standardDeviations.max()
+        else {
+            return (nil, nil)
+        }
+
+        return (
+            standardDeviations.reduce(0, +) / Double(standardDeviations.count),
+            maxStandardDeviation
+        )
+    }
+
+    private func standardDeviation(_ values: [Double]) -> Double? {
+        guard values.count >= 2,
+              values.allSatisfy({ $0.isFinite })
+        else {
+            return nil
+        }
+
+        let mean = values.reduce(0, +) / Double(values.count)
+        let variance = values.reduce(0) {
+            let delta = $1 - mean
+            return $0 + delta * delta
+        } / Double(values.count)
+        let standardDeviation = sqrt(variance)
+
+        return standardDeviation.isFinite ? standardDeviation : nil
+    }
+
+    private func relativeMarkerGeometryScore(
+        completenessScore: Double?,
+        distanceStdMean: Double?,
+        distanceStdMax: Double?
+    ) -> Double? {
+        guard let distanceStdMean,
+              let distanceStdMax,
+              distanceStdMean.isFinite,
+              distanceStdMax.isFinite
+        else {
+            return completenessScore
+        }
+
+        // TODO: calibrate these weights with real CSVs from repeated scans.
+        return max(0, min(100, 100 - (distanceStdMean * 8.0) - (distanceStdMax * 4.0)))
     }
 
     private func relativeMarkerPairDistances(
@@ -4720,6 +4880,7 @@ final class ScannerViewModel: ObservableObject {
         normalFinalizationMaturityGatePassed = maturityGatePassed
         normalFinalizationBlockedReason = blockedReason
         normalFinalizationCanStart = allExpectedMarkersAt100Percent && evaluation.hasExportableTagPoses
+        updateRelativeMarkerGeometryDiagnosticsIfNeeded(timestamp: timestamp)
         updateBestFinalPoseCandidateIfNeeded(
             timestamp: timestamp,
             evaluation: evaluation,
@@ -9357,7 +9518,8 @@ final class ScannerViewModel: ObservableObject {
     ) -> ScanTechnicalReport {
         let reportGeometryDiagnostics = makeRelativeMarkerGeometryDiagnostics(
             finalPoses: tagPoses,
-            candidatePoses: bestFinalPoseCandidate?.exportablePoses
+            candidatePoses: bestFinalPoseCandidate?.exportablePoses,
+            distanceStability: relativeMarkerDistanceStability()
         )
 
         return ScanTechnicalReport(

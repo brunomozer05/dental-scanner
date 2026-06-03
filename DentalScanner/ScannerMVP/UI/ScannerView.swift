@@ -175,6 +175,10 @@ struct ScannerView: View {
                                     viewModel.debugUsedBestFinalPoseCandidate,
                                 relativeMarkerGeometryScore:
                                     viewModel.debugRelativeMarkerGeometryScore,
+                                relativeMarkerDistanceStdMean:
+                                    viewModel.debugRelativeMarkerDistanceStdMean,
+                                relativeMarkerDistanceStdMax:
+                                    viewModel.debugRelativeMarkerDistanceStdMax,
                                 relativeMarkerDistanceM01:
                                     viewModel.debugRelativeMarkerDistanceM01,
                                 relativeMarkerDistanceM02:
@@ -1793,6 +1797,8 @@ private struct ScannerDebugEmergencyPanelView: View {
     let useBestCandidateForExport: Bool
     let usedBestCandidate: Bool
     let relativeMarkerGeometryScore: Double?
+    let relativeMarkerDistanceStdMean: Double?
+    let relativeMarkerDistanceStdMax: Double?
     let relativeMarkerDistanceM01: Double?
     let relativeMarkerDistanceM02: Double?
     let relativeMarkerDistanceM03: Double?
@@ -1926,6 +1932,14 @@ private struct ScannerDebugEmergencyPanelView: View {
                             .foregroundStyle(.white.opacity(0.82))
 
                         debugRow(title: "Score", value: safeNumber(relativeMarkerGeometryScore))
+                        debugRow(
+                            title: "Distance std mean",
+                            value: safeMillimeters(relativeMarkerDistanceStdMean)
+                        )
+                        debugRow(
+                            title: "Distance std max",
+                            value: safeMillimeters(relativeMarkerDistanceStdMax)
+                        )
                         debugRow(title: "Dist M01", value: safeMillimeters(relativeMarkerDistanceM01))
                         debugRow(title: "Dist M02", value: safeMillimeters(relativeMarkerDistanceM02))
                         debugRow(title: "Dist M03", value: safeMillimeters(relativeMarkerDistanceM03))
