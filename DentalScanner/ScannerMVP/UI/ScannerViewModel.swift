@@ -3364,23 +3364,6 @@ final class ScannerViewModel: ObservableObject {
         )
     }
 
-    private func standardDeviation(_ values: [Double]) -> Double? {
-        guard values.count >= 2,
-              values.allSatisfy({ $0.isFinite })
-        else {
-            return nil
-        }
-
-        let mean = values.reduce(0, +) / Double(values.count)
-        let variance = values.reduce(0) {
-            let delta = $1 - mean
-            return $0 + delta * delta
-        } / Double(values.count)
-        let standardDeviation = sqrt(variance)
-
-        return standardDeviation.isFinite ? standardDeviation : nil
-    }
-
     private func relativeMarkerGeometryScore(
         completenessScore: Double?,
         distanceStdMean: Double?,
