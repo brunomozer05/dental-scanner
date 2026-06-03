@@ -102,6 +102,9 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
     var bestFinalPoseCandidateHasExportablePoses: Bool?
     var bestFinalPoseCandidateAcceptedCount: Int?
     var bestFinalPoseCandidateLastRejectReason: String?
+    var bestFinalPoseCandidateGeometryAdjustedScore: Double?
+    var bestFinalPoseCandidateGeometryPenalty: Double?
+    var bestFinalPoseCandidateGeometryScoreSource: String?
     var relativeMarkerDistanceM01: Double?
     var relativeMarkerDistanceM02: Double?
     var relativeMarkerDistanceM03: Double?
@@ -197,6 +200,9 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
         bestFinalPoseCandidateHasExportablePoses: nil,
         bestFinalPoseCandidateAcceptedCount: nil,
         bestFinalPoseCandidateLastRejectReason: nil,
+        bestFinalPoseCandidateGeometryAdjustedScore: nil,
+        bestFinalPoseCandidateGeometryPenalty: nil,
+        bestFinalPoseCandidateGeometryScoreSource: nil,
         relativeMarkerDistanceM01: nil,
         relativeMarkerDistanceM02: nil,
         relativeMarkerDistanceM03: nil,

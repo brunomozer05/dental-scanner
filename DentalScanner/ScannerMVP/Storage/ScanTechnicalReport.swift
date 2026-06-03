@@ -65,6 +65,9 @@ struct ScanTechnicalReport: Codable {
     var bestFinalPoseCandidateHasExportablePoses: Bool?
     var bestFinalPoseCandidateAcceptedCount: Int?
     var bestFinalPoseCandidateLastRejectReason: String?
+    var bestFinalPoseCandidateGeometryAdjustedScore: Double?
+    var bestFinalPoseCandidateGeometryPenalty: Double?
+    var bestFinalPoseCandidateGeometryScoreSource: String?
     var relativeMarkerDistanceM01: Double?
     var relativeMarkerDistanceM02: Double?
     var relativeMarkerDistanceM03: Double?

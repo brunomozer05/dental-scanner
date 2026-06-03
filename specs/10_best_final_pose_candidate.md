@@ -178,6 +178,38 @@ permitir que o comparador Python exponha os campos nos CSVs depois
 
 Somente depois de comparar essas metricas contra scans repetidos e avaliacao visual/ground truth, o score do candidato deve ser recalibrado usando geometria relativa.
 
+## 7.1. Geometry-adjusted candidate score diagnostics
+
+Antes de usar o Best Final Pose Candidate no export, adicionar um score diagnostico read-only:
+
+```txt
+bestFinalPoseCandidateGeometryAdjustedScore
+bestFinalPoseCandidateGeometryPenalty
+bestFinalPoseCandidateGeometryScoreSource
+```
+
+Esse score deve combinar o score atual do candidato com penalidades leves de estabilidade geometrica relativa:
+
+```txt
+geometryStdPenalty = (relativeMarkerDistanceStdMean * 8) + (relativeMarkerDistanceStdMax * 4)
+candidateGeometryPenalty = candidateVsFinalGeometryDelta * 8
+candidateRotationPenalty = candidateVsFinalRotationDeltaMean * 0.5
+candidateTranslationPenalty = candidateVsFinalTranslationDeltaMean * 0.5
+```
+
+O score ajustado deve ser salvo apenas em diagnostics/report/debug emergencial. Ele nao deve:
+
+```txt
+alterar export
+alterar readiness
+alterar finalization gate
+alterar score usado para escolher candidato
+ativar normalUseBestFinalPoseCandidateForExport
+alterar usedBestFinalPoseCandidate
+```
+
+Os pesos sao provisorios e devem ser calibrados com CSVs reais antes de qualquer uso no export.
+
 ## 8. Salvamento do candidato
 
 Durante o refinamento, a cada avaliacao throttled:
@@ -246,6 +278,9 @@ bestFinalPoseCandidateWorstReprojection
 bestFinalPoseCandidateObservationsByMarker
 bestFinalPoseCandidateAcceptedCount
 bestFinalPoseCandidateLastRejectReason
+bestFinalPoseCandidateGeometryAdjustedScore
+bestFinalPoseCandidateGeometryPenalty
+bestFinalPoseCandidateGeometryScoreSource
 
 relativeMarkerDistanceM01
 relativeMarkerDistanceM02

@@ -147,6 +147,10 @@ struct ScannerView: View {
                                     viewModel.debugFinalObservationsAverage,
                                 bestCandidateScore:
                                     viewModel.debugBestFinalPoseCandidateScore,
+                                bestCandidateGeometryAdjustedScore:
+                                    viewModel.debugBestFinalPoseCandidateGeometryAdjustedScore,
+                                bestCandidateGeometryPenalty:
+                                    viewModel.debugBestFinalPoseCandidateGeometryPenalty,
                                 bestCandidateAgeSeconds:
                                     viewModel.debugBestFinalPoseCandidateAgeSeconds,
                                 bestCandidateWorstNormalStd:
@@ -1783,6 +1787,8 @@ private struct ScannerDebugEmergencyPanelView: View {
     let finalObservationsM3: Int?
     let finalObservationsAverage: Double?
     let bestCandidateScore: Double?
+    let bestCandidateGeometryAdjustedScore: Double?
+    let bestCandidateGeometryPenalty: Double?
     let bestCandidateAgeSeconds: Double?
     let bestCandidateWorstNormalStd: Double?
     let bestCandidateWorstReprojection: Double?
@@ -1905,6 +1911,14 @@ private struct ScannerDebugEmergencyPanelView: View {
                             .foregroundStyle(.white.opacity(0.82))
 
                         debugRow(title: "Score", value: safeNumber(bestCandidateScore))
+                        debugRow(
+                            title: "Adjusted score",
+                            value: safeNumber(bestCandidateGeometryAdjustedScore)
+                        )
+                        debugRow(
+                            title: "Geometry penalty",
+                            value: safeNumber(bestCandidateGeometryPenalty)
+                        )
                         debugRow(title: "Age", value: safeSeconds(bestCandidateAgeSeconds))
                         debugRow(title: "Normal", value: safeDegrees(bestCandidateWorstNormalStd))
                         debugRow(title: "Reprojection", value: safeNumber(bestCandidateWorstReprojection))

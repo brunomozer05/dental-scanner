@@ -710,6 +710,12 @@ final class ScannerViewModel: ObservableObject {
     var debugBestFinalPoseCandidateScore: Double? {
         bestFinalPoseCandidate?.score
     }
+    var debugBestFinalPoseCandidateGeometryAdjustedScore: Double? {
+        bestFinalPoseCandidateGeometryAdjustedScore()
+    }
+    var debugBestFinalPoseCandidateGeometryPenalty: Double? {
+        bestFinalPoseCandidateGeometryPenalty()
+    }
     var debugBestFinalPoseCandidateAgeSeconds: Double? {
         guard let timestamp = bestFinalPoseCandidate?.timestamp else {
             return nil
@@ -3379,6 +3385,78 @@ final class ScannerViewModel: ObservableObject {
 
         // TODO: calibrate these weights with real CSVs from repeated scans.
         return max(0, min(100, 100 - (distanceStdMean * 8.0) - (distanceStdMax * 4.0)))
+    }
+
+    private func bestFinalPoseCandidateGeometryAdjustedScore() -> Double? {
+        guard let baseScore = bestFinalPoseCandidate?.score,
+              baseScore.isFinite
+        else {
+            return nil
+        }
+
+        let penalty = bestFinalPoseCandidateGeometryPenalty() ?? 0
+        return max(0, min(100, baseScore - penalty))
+    }
+
+    private func bestFinalPoseCandidateGeometryPenalty() -> Double? {
+        guard bestFinalPoseCandidate?.score.isFinite == true else {
+            return nil
+        }
+
+        let penalties = bestFinalPoseCandidateGeometryPenaltyComponents()
+        guard !penalties.isEmpty else {
+            return 0
+        }
+
+        let penalty = penalties.reduce(0, +)
+        return penalty.isFinite ? penalty : nil
+    }
+
+    private func bestFinalPoseCandidateGeometryScoreSource() -> String? {
+        guard bestFinalPoseCandidate?.score.isFinite == true else {
+            return nil
+        }
+
+        let availablePenaltyCount = bestFinalPoseCandidateGeometryPenaltyComponents().count
+        if availablePenaltyCount == 0 {
+            return "base_only"
+        }
+
+        return availablePenaltyCount == 5 ? "geometry_adjusted_full" : "geometry_adjusted_partial"
+    }
+
+    private func bestFinalPoseCandidateGeometryPenaltyComponents() -> [Double] {
+        let values: [Double?] = [
+            bestCandidatePenaltyValue(relativeMarkerGeometryDiagnostics.distanceStdMean, weight: 8.0),
+            bestCandidatePenaltyValue(relativeMarkerGeometryDiagnostics.distanceStdMax, weight: 4.0),
+            bestCandidatePenaltyValue(
+                relativeMarkerGeometryDiagnostics.candidateVsFinalGeometryDelta,
+                weight: 8.0
+            ),
+            bestCandidatePenaltyValue(
+                relativeMarkerGeometryDiagnostics.candidateVsFinalRotationDeltaMean,
+                weight: 0.5
+            ),
+            bestCandidatePenaltyValue(
+                relativeMarkerGeometryDiagnostics.candidateVsFinalTranslationDeltaMean,
+                weight: 0.5
+            )
+        ]
+
+        return values.compactMap { $0 }
+    }
+
+    private func bestCandidatePenaltyValue(_ value: Double?, weight: Double) -> Double? {
+        guard let value,
+              value.isFinite,
+              weight.isFinite
+        else {
+            return nil
+        }
+
+        // TODO: calibrate these provisional weights with real CSVs before using the score.
+        let penalty = value * weight
+        return penalty.isFinite ? penalty : nil
     }
 
     private func relativeMarkerPairDistances(
@@ -8239,6 +8317,12 @@ final class ScannerViewModel: ObservableObject {
             bestFinalPoseCandidateHasExportablePoses: bestFinalPoseCandidate?.hasExportablePoses,
             bestFinalPoseCandidateAcceptedCount: bestFinalPoseCandidateAcceptedCount,
             bestFinalPoseCandidateLastRejectReason: bestFinalPoseCandidateLastRejectReason,
+            bestFinalPoseCandidateGeometryAdjustedScore:
+                bestFinalPoseCandidateGeometryAdjustedScore(),
+            bestFinalPoseCandidateGeometryPenalty:
+                bestFinalPoseCandidateGeometryPenalty(),
+            bestFinalPoseCandidateGeometryScoreSource:
+                bestFinalPoseCandidateGeometryScoreSource(),
             relativeMarkerDistanceM01: relativeMarkerGeometryDiagnostics.distanceM01,
             relativeMarkerDistanceM02: relativeMarkerGeometryDiagnostics.distanceM02,
             relativeMarkerDistanceM03: relativeMarkerGeometryDiagnostics.distanceM03,
@@ -9622,6 +9706,12 @@ final class ScannerViewModel: ObservableObject {
             bestFinalPoseCandidateHasExportablePoses: bestFinalPoseCandidate?.hasExportablePoses,
             bestFinalPoseCandidateAcceptedCount: bestFinalPoseCandidateAcceptedCount,
             bestFinalPoseCandidateLastRejectReason: bestFinalPoseCandidateLastRejectReason,
+            bestFinalPoseCandidateGeometryAdjustedScore:
+                finiteReportDouble(bestFinalPoseCandidateGeometryAdjustedScore()),
+            bestFinalPoseCandidateGeometryPenalty:
+                finiteReportDouble(bestFinalPoseCandidateGeometryPenalty()),
+            bestFinalPoseCandidateGeometryScoreSource:
+                bestFinalPoseCandidateGeometryScoreSource(),
             relativeMarkerDistanceM01:
                 finiteReportDouble(reportGeometryDiagnostics.distanceM01),
             relativeMarkerDistanceM02:

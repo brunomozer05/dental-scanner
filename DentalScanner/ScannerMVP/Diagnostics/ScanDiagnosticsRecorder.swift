@@ -340,6 +340,9 @@ final class ScanDiagnosticsRecorder {
         bestFinalPoseCandidateHasExportablePoses: Bool?,
         bestFinalPoseCandidateAcceptedCount: Int?,
         bestFinalPoseCandidateLastRejectReason: String?,
+        bestFinalPoseCandidateGeometryAdjustedScore: Double?,
+        bestFinalPoseCandidateGeometryPenalty: Double?,
+        bestFinalPoseCandidateGeometryScoreSource: String?,
         relativeMarkerDistanceM01: Double?,
         relativeMarkerDistanceM02: Double?,
         relativeMarkerDistanceM03: Double?,
@@ -474,6 +477,11 @@ final class ScanDiagnosticsRecorder {
             bestFinalPoseCandidateHasExportablePoses: bestFinalPoseCandidateHasExportablePoses,
             bestFinalPoseCandidateAcceptedCount: bestFinalPoseCandidateAcceptedCount,
             bestFinalPoseCandidateLastRejectReason: bestFinalPoseCandidateLastRejectReason,
+            bestFinalPoseCandidateGeometryAdjustedScore:
+                finite(bestFinalPoseCandidateGeometryAdjustedScore),
+            bestFinalPoseCandidateGeometryPenalty:
+                finite(bestFinalPoseCandidateGeometryPenalty),
+            bestFinalPoseCandidateGeometryScoreSource: bestFinalPoseCandidateGeometryScoreSource,
             relativeMarkerDistanceM01: finite(relativeMarkerDistanceM01),
             relativeMarkerDistanceM02: finite(relativeMarkerDistanceM02),
             relativeMarkerDistanceM03: finite(relativeMarkerDistanceM03),
