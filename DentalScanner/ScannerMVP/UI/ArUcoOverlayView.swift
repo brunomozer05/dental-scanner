@@ -381,11 +381,10 @@ private struct TagAROverlayView: View {
                     .position(item.element)
             }
 
-            TagProgressCard(
+            MarkerProgressRingView(
                 title: title,
                 modeTitle: modeTitle,
-                progress: progressRatio,
-                accentColor: accentColor
+                progress: progressRatio
             )
             .scaleEffect(clampedDisplayScale)
             .position(x: markerCenter.x, y: markerCenter.y - cardVerticalOffset)
@@ -454,42 +453,85 @@ private struct TagAROverlayView: View {
     }
 }
 
-private struct TagProgressCard: View {
+private struct MarkerProgressRingView: View {
     let title: String
     let modeTitle: String?
     let progress: Double
-    let accentColor: Color
 
     private var clampedProgress: Double {
-        min(max(progress, 0), 1)
+        guard progress.isFinite else {
+            return 0
+        }
+
+        return min(max(progress, 0), 1)
+    }
+
+    private var progressColor: Color {
+        switch clampedProgress {
+        case ..<0.30:
+            return Color(red: 0.95, green: 0.22, blue: 0.18)
+        case ..<0.80:
+            return Color(red: 1.0, green: 0.66, blue: 0.12)
+        case ..<1.0:
+            return Color(red: 0.38, green: 0.86, blue: 0.42)
+        default:
+            return Color(red: 0.10, green: 0.78, blue: 0.30)
+        }
+    }
+
+    private var percentText: String {
+        "\(Int(round(clampedProgress * 100)))%"
     }
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text(title)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.white.opacity(0.94))
-                .lineLimit(1)
+        VStack(spacing: 3) {
+            ZStack {
+                Circle()
+                    .fill(Color.black.opacity(0.72))
 
-            Text("\(Int(round(clampedProgress * 100)))%")
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(.white)
-                .monospacedDigit()
+                Circle()
+                    .stroke(Color.white.opacity(0.16), lineWidth: 5)
+
+                Circle()
+                    .trim(from: 0, to: clampedProgress)
+                    .stroke(
+                        progressColor,
+                        style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                    .shadow(color: progressColor.opacity(0.45), radius: 4, x: 0, y: 0)
+
+                VStack(spacing: 0) {
+                    Text(percentText)
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .monospacedDigit()
+                        .minimumScaleFactor(0.75)
+
+                    Text(title)
+                        .font(.system(size: 8, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.78))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+                .padding(.horizontal, 4)
+            }
+            .frame(width: 50, height: 50)
+            .overlay {
+                Circle()
+                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
+            }
 
             if let modeTitle {
                 Text(modeTitle)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.66))
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.82))
                     .lineLimit(1)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.black.opacity(0.58))
+                    .clipShape(Capsule())
             }
-        }
-        .padding(.horizontal, 8)
-        .frame(minWidth: 76, maxWidth: 132, minHeight: 28)
-        .background(Color.black.opacity(0.75))
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.10), lineWidth: 1)
         }
         .shadow(color: Color.black.opacity(0.30), radius: 8, x: 0, y: 4)
     }
