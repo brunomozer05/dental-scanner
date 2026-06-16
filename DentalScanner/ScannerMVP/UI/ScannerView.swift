@@ -177,6 +177,50 @@ struct ScannerView: View {
                                     viewModel.debugUseBestFinalPoseCandidateForExport,
                                 usedBestCandidate:
                                     viewModel.debugUsedBestFinalPoseCandidate,
+                                cameraProfileId:
+                                    viewModel.debugCameraProfileId,
+                                cameraProfileName:
+                                    viewModel.debugCameraProfileName,
+                                deviceModelIdentifier:
+                                    viewModel.debugDeviceModelIdentifier,
+                                deviceMarketingName:
+                                    viewModel.debugDeviceMarketingName,
+                                selectedCameraLocalizedName:
+                                    viewModel.debugSelectedCameraLocalizedName,
+                                selectedCameraDeviceType:
+                                    viewModel.debugSelectedCameraDeviceType,
+                                requestedZoomFactor:
+                                    viewModel.debugRequestedZoomFactor,
+                                appliedZoomFactor:
+                                    viewModel.debugAppliedZoomFactor,
+                                currentVideoZoomFactor:
+                                    viewModel.debugCurrentVideoZoomFactor,
+                                cameraFocusMode:
+                                    viewModel.debugCameraFocusMode,
+                                cameraExposureMode:
+                                    viewModel.debugCameraExposureMode,
+                                cameraIsAdjustingFocus:
+                                    viewModel.debugCameraIsAdjustingFocus,
+                                cameraIsAdjustingExposure:
+                                    viewModel.debugCameraIsAdjustingExposure,
+                                cameraIntrinsicsAvailable:
+                                    viewModel.debugCameraIntrinsicsAvailable,
+                                cameraIntrinsicFx:
+                                    viewModel.debugCameraIntrinsicFx,
+                                cameraIntrinsicFy:
+                                    viewModel.debugCameraIntrinsicFy,
+                                cameraIntrinsicCx:
+                                    viewModel.debugCameraIntrinsicCx,
+                                cameraIntrinsicCy:
+                                    viewModel.debugCameraIntrinsicCy,
+                                activeVideoDimensions:
+                                    viewModel.debugActiveVideoDimensions,
+                                activeFormatDescription:
+                                    viewModel.debugActiveFormatDescription,
+                                cameraProfileEvaluationScore:
+                                    viewModel.debugCameraProfileEvaluationScore,
+                                cameraProfileEvaluationWarnings:
+                                    viewModel.debugCameraProfileEvaluationWarnings,
                                 relativeMarkerGeometryScore:
                                     viewModel.debugRelativeMarkerGeometryScore,
                                 relativeMarkerDistanceStdMean:
@@ -200,7 +244,10 @@ struct ScannerView: View {
                                 candidateVsFinalRotationDeltaMean:
                                     viewModel.debugCandidateVsFinalRotationDeltaMean,
                                 candidateVsFinalGeometryDelta:
-                                    viewModel.debugCandidateVsFinalGeometryDelta
+                                    viewModel.debugCandidateVsFinalGeometryDelta,
+                                onSelectCameraProfile: { profileId in
+                                    viewModel.setCameraProfile(profileId: profileId)
+                                }
                             ) {
                                 print("[DEBUG_GEAR] emergency debug panel close tapped")
                                 scannerDebugPanelVisible = false
@@ -1802,6 +1849,28 @@ private struct ScannerDebugEmergencyPanelView: View {
     let bestCandidateHasExportablePoses: Bool
     let useBestCandidateForExport: Bool
     let usedBestCandidate: Bool
+    let cameraProfileId: String
+    let cameraProfileName: String
+    let deviceModelIdentifier: String
+    let deviceMarketingName: String
+    let selectedCameraLocalizedName: String?
+    let selectedCameraDeviceType: String?
+    let requestedZoomFactor: Double?
+    let appliedZoomFactor: Double?
+    let currentVideoZoomFactor: Double?
+    let cameraFocusMode: String?
+    let cameraExposureMode: String?
+    let cameraIsAdjustingFocus: Bool?
+    let cameraIsAdjustingExposure: Bool?
+    let cameraIntrinsicsAvailable: Bool
+    let cameraIntrinsicFx: Double?
+    let cameraIntrinsicFy: Double?
+    let cameraIntrinsicCx: Double?
+    let cameraIntrinsicCy: Double?
+    let activeVideoDimensions: String?
+    let activeFormatDescription: String?
+    let cameraProfileEvaluationScore: Double?
+    let cameraProfileEvaluationWarnings: String?
     let relativeMarkerGeometryScore: Double?
     let relativeMarkerDistanceStdMean: Double?
     let relativeMarkerDistanceStdMax: Double?
@@ -1814,6 +1883,7 @@ private struct ScannerDebugEmergencyPanelView: View {
     let candidateVsFinalTranslationDeltaMean: Double?
     let candidateVsFinalRotationDeltaMean: Double?
     let candidateVsFinalGeometryDelta: Double?
+    let onSelectCameraProfile: (String) -> Void
     let onClose: () -> Void
 
     var body: some View {
@@ -1941,6 +2011,51 @@ private struct ScannerDebugEmergencyPanelView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 6) {
+                        Text("Camera profile:")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white.opacity(0.82))
+
+                        debugRow(title: "Profile", value: safeText(cameraProfileName))
+                        debugRow(title: "Profile id", value: safeText(cameraProfileId))
+                        debugRow(title: "Device id", value: safeText(deviceModelIdentifier))
+                        debugRow(title: "Device name", value: safeText(deviceMarketingName))
+                        debugRow(title: "Camera", value: safeText(selectedCameraLocalizedName))
+                        debugRow(title: "Device type", value: safeText(selectedCameraDeviceType))
+                        debugRow(title: "Requested zoom", value: safeZoom(requestedZoomFactor))
+                        debugRow(title: "Applied zoom", value: safeZoom(appliedZoomFactor))
+                        debugRow(title: "Current zoom", value: safeZoom(currentVideoZoomFactor))
+                        debugRow(title: "Focus mode", value: safeText(cameraFocusMode))
+                        debugRow(title: "Exposure mode", value: safeText(cameraExposureMode))
+                        debugRow(title: "Adjusting focus", value: safeBool(cameraIsAdjustingFocus))
+                        debugRow(title: "Adjusting exposure", value: safeBool(cameraIsAdjustingExposure))
+                        debugRow(title: "Intrinsics", value: cameraIntrinsicsAvailable ? "yes" : "no")
+                        debugRow(title: "fx", value: safeNumber(cameraIntrinsicFx))
+                        debugRow(title: "fy", value: safeNumber(cameraIntrinsicFy))
+                        debugRow(title: "cx", value: safeNumber(cameraIntrinsicCx))
+                        debugRow(title: "cy", value: safeNumber(cameraIntrinsicCy))
+                        debugRow(title: "Video dimensions", value: safeText(activeVideoDimensions))
+                        debugRow(title: "Format", value: safeText(activeFormatDescription))
+                        debugRow(title: "Eval score", value: safeNumber(cameraProfileEvaluationScore))
+                        debugRow(title: "Warnings", value: safeText(cameraProfileEvaluationWarnings))
+
+                        VStack(alignment: .leading, spacing: 5) {
+                            profileButton(title: "Default", id: CameraProfile.Identifier.defaultProfile.rawValue)
+                            profileButton(title: "Wide 1.0x", id: CameraProfile.Identifier.wide1x.rawValue)
+                            profileButton(title: "Wide 1.5x", id: CameraProfile.Identifier.wide15x.rawValue)
+                            profileButton(title: "Wide 2.0x", id: CameraProfile.Identifier.wide2x.rawValue)
+                            profileButton(
+                                title: "Wide 1.5x Conservative",
+                                id: CameraProfile.Identifier.wide15xConservativeFocus.rawValue
+                            )
+                            profileButton(
+                                title: "Wide 2.0x Conservative",
+                                id: CameraProfile.Identifier.wide2xConservativeFocus.rawValue
+                            )
+                        }
+                        .padding(.top, 4)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
                         Text("Geometry:")
                             .font(.caption.weight(.bold))
                             .foregroundStyle(.white.opacity(0.82))
@@ -2001,6 +2116,28 @@ private struct ScannerDebugEmergencyPanelView: View {
         .font(.caption2.weight(.semibold))
     }
 
+    private func profileButton(title: String, id: String) -> some View {
+        Button {
+            onSelectCameraProfile(id)
+        } label: {
+            HStack {
+                Text(title)
+                    .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                if cameraProfileId == id {
+                    Text("selected")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.green.opacity(0.9))
+                }
+            }
+        }
+        .buttonStyle(.bordered)
+        .tint(cameraProfileId == id ? .green : .blue)
+        .font(.caption2.weight(.semibold))
+    }
+
     private func safeText(_ value: String?) -> String {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !trimmed.isEmpty else {
@@ -2025,6 +2162,14 @@ private struct ScannerDebugEmergencyPanelView: View {
 
         let clampedDigits = min(max(digits, 0), 4)
         return String(format: "%.\(clampedDigits)f", value)
+    }
+
+    private func safeZoom(_ value: Double?) -> String {
+        guard let value, value.isFinite else {
+            return "N/A"
+        }
+
+        return String(format: "%.2fx", value)
     }
 
     private func safeInt(_ value: Int?) -> String {

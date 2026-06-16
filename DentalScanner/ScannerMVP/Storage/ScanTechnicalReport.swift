@@ -5,6 +5,28 @@ struct ScanTechnicalReport: Codable {
     var markerProfile: String
     var stlFileName: String?
     var diagnosticsFileName: String?
+    var deviceModelIdentifier: String?
+    var deviceMarketingName: String?
+    var cameraProfileId: String?
+    var cameraProfileName: String?
+    var selectedCameraLocalizedName: String?
+    var selectedCameraDeviceType: String?
+    var requestedZoomFactor: Double?
+    var appliedZoomFactor: Double?
+    var currentVideoZoomFactor: Double?
+    var focusMode: String?
+    var exposureMode: String?
+    var isAdjustingFocus: Bool?
+    var isAdjustingExposure: Bool?
+    var cameraIntrinsicMatrixAvailable: Bool?
+    var cameraIntrinsicFx: Double?
+    var cameraIntrinsicFy: Double?
+    var cameraIntrinsicCx: Double?
+    var cameraIntrinsicCy: Double?
+    var activeVideoDimensions: String?
+    var activeFormatDescription: String?
+    var cameraProfileEvaluationScore: Double?
+    var cameraProfileEvaluationWarnings: [String]?
     var device: Device
     var cameraQuality: CameraQuality
     var markers: [Marker]
@@ -160,6 +182,8 @@ struct ScanTechnicalReport: Codable {
         var minimumPreferredSharpness: Double?
         var lensPositionChangeThreshold: Double?
         var focusSettleTimeSeconds: Double?
+        var cameraProfileId: String?
+        var cameraProfileName: String?
     }
 
     struct GuidedStaticStage: Codable {

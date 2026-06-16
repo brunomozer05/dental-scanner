@@ -27,6 +27,28 @@ struct ScanDiagnosticEvent: Codable, Equatable, Identifiable {
 struct ScanDiagnosticsSnapshot: Codable, Equatable {
     var createdAt: String?
     var markerProfile: String?
+    var deviceModelIdentifier: String?
+    var deviceMarketingName: String?
+    var cameraProfileId: String?
+    var cameraProfileName: String?
+    var selectedCameraLocalizedName: String?
+    var selectedCameraDeviceType: String?
+    var requestedZoomFactor: Double?
+    var appliedZoomFactor: Double?
+    var currentVideoZoomFactor: Double?
+    var focusMode: String?
+    var exposureMode: String?
+    var isAdjustingFocus: Bool?
+    var isAdjustingExposure: Bool?
+    var cameraIntrinsicMatrixAvailable: Bool?
+    var cameraIntrinsicFx: Double?
+    var cameraIntrinsicFy: Double?
+    var cameraIntrinsicCx: Double?
+    var cameraIntrinsicCy: Double?
+    var activeVideoDimensions: String?
+    var activeFormatDescription: String?
+    var cameraProfileEvaluationScore: Double?
+    var cameraProfileEvaluationWarnings: [String]?
     var scanDurationSeconds: Double?
     var timeToFirstMarkerSeconds: Double?
     var timeToAllMarkersSeenSeconds: Double?
@@ -125,6 +147,28 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
     static let empty = ScanDiagnosticsSnapshot(
         createdAt: nil,
         markerProfile: nil,
+        deviceModelIdentifier: nil,
+        deviceMarketingName: nil,
+        cameraProfileId: nil,
+        cameraProfileName: nil,
+        selectedCameraLocalizedName: nil,
+        selectedCameraDeviceType: nil,
+        requestedZoomFactor: nil,
+        appliedZoomFactor: nil,
+        currentVideoZoomFactor: nil,
+        focusMode: nil,
+        exposureMode: nil,
+        isAdjustingFocus: nil,
+        isAdjustingExposure: nil,
+        cameraIntrinsicMatrixAvailable: nil,
+        cameraIntrinsicFx: nil,
+        cameraIntrinsicFy: nil,
+        cameraIntrinsicCx: nil,
+        cameraIntrinsicCy: nil,
+        activeVideoDimensions: nil,
+        activeFormatDescription: nil,
+        cameraProfileEvaluationScore: nil,
+        cameraProfileEvaluationWarnings: nil,
         scanDurationSeconds: nil,
         timeToFirstMarkerSeconds: nil,
         timeToAllMarkersSeenSeconds: nil,

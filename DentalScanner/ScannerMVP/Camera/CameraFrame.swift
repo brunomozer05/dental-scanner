@@ -99,6 +99,8 @@ struct CameraDebugSnapshot: Equatable {
     let isAdjustingFocus: Bool?
     let isAdjustingExposure: Bool?
     let isAdjustingWhiteBalance: Bool?
+    let focusMode: String?
+    let exposureMode: String?
     let iso: Float?
     let exposureDurationSeconds: Double?
     let cameraStabilityScore: Double?
@@ -136,6 +138,8 @@ struct CameraDebugSnapshot: Equatable {
         isAdjustingFocus: nil,
         isAdjustingExposure: nil,
         isAdjustingWhiteBalance: nil,
+        focusMode: nil,
+        exposureMode: nil,
         iso: nil,
         exposureDurationSeconds: nil,
         cameraStabilityScore: nil,

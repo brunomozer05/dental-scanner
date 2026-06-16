@@ -808,6 +808,73 @@ final class ScannerViewModel: ObservableObject {
     var debugCandidateVsFinalGeometryDelta: Double? {
         relativeMarkerGeometryDiagnostics.candidateVsFinalGeometryDelta
     }
+    var debugCameraProfileId: String {
+        cameraProfile.id
+    }
+    var debugCameraProfileName: String {
+        cameraProfile.name
+    }
+    var debugDeviceModelIdentifier: String {
+        deviceModelInfo.identifier
+    }
+    var debugDeviceMarketingName: String {
+        deviceModelInfo.marketingName
+    }
+    var debugSelectedCameraLocalizedName: String? {
+        currentCameraDebugSnapshot.deviceName
+    }
+    var debugSelectedCameraDeviceType: String? {
+        currentCameraDebugSnapshot.deviceType
+    }
+    var debugRequestedZoomFactor: Double? {
+        requestedZoomFactorForCurrentProfile()
+    }
+    var debugAppliedZoomFactor: Double? {
+        currentCameraDebugSnapshot.videoZoomFactor
+    }
+    var debugCurrentVideoZoomFactor: Double? {
+        currentCameraDebugSnapshot.videoZoomFactor
+    }
+    var debugCameraFocusMode: String? {
+        currentCameraDebugSnapshot.focusMode
+    }
+    var debugCameraExposureMode: String? {
+        currentCameraDebugSnapshot.exposureMode
+    }
+    var debugCameraIsAdjustingFocus: Bool? {
+        currentCameraDebugSnapshot.isAdjustingFocus
+    }
+    var debugCameraIsAdjustingExposure: Bool? {
+        currentCameraDebugSnapshot.isAdjustingExposure
+    }
+    var debugCameraIntrinsicsAvailable: Bool {
+        currentCameraDebugSnapshot.hasIntrinsics
+    }
+    var debugCameraIntrinsicFx: Double? {
+        currentCameraDebugSnapshot.fx
+    }
+    var debugCameraIntrinsicFy: Double? {
+        currentCameraDebugSnapshot.fy
+    }
+    var debugCameraIntrinsicCx: Double? {
+        currentCameraDebugSnapshot.cx
+    }
+    var debugCameraIntrinsicCy: Double? {
+        currentCameraDebugSnapshot.cy
+    }
+    var debugActiveVideoDimensions: String? {
+        currentCameraDebugSnapshot.resolutionText
+    }
+    var debugActiveFormatDescription: String? {
+        currentCameraDebugSnapshot.activeFormatDescription
+    }
+    var debugCameraProfileEvaluationScore: Double? {
+        cameraProfileEvaluationScore()
+    }
+    var debugCameraProfileEvaluationWarnings: String? {
+        let warnings = cameraProfileEvaluationWarnings()
+        return warnings.isEmpty ? nil : warnings.joined(separator: "; ")
+    }
     @Published private(set) var scanCoverageReady: Bool = false
     @Published private(set) var scanGoodFramesReady: Bool = false
     @Published private(set) var scanDistanceReady: Bool = false
@@ -860,6 +927,7 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var scanARKitPenalizedFrameCount: Int = 0
     @Published private(set) var currentCameraFrameQuality: CameraFrameQuality = .neutral
     @Published private(set) var currentCameraDebugSnapshot: CameraDebugSnapshot = .unavailable
+    @Published private(set) var cameraProfile: CameraProfile = .defaultProfile
     @Published private(set) var lockFocusAndExposureForScan: Bool = false
     @Published private(set) var cameraZoomFactor: Double = 1.0
     @Published private(set) var manualFocusEnabled: Bool = false
@@ -1016,6 +1084,7 @@ final class ScannerViewModel: ObservableObject {
     private let scanStorageManager: ScanStorageManager
     private let diagnosticsRecorder: ScanDiagnosticsRecorder
     private let crashReportingService: CrashReportingService
+    private let deviceModelInfo = DeviceModelInfo.current
     private var shouldRunCamera = false
     private var totalFramesCounter: Int = 0
     private var recentFrameTimestamps: [Double] = []
@@ -1463,6 +1532,74 @@ final class ScannerViewModel: ObservableObject {
         arkitAssistedCaptureEnabled = false
         arKitCaptureAssistService.stop()
         currentARKitFrameQuality = .disabled
+    }
+
+    @MainActor
+    func setCameraProfile(_ identifier: CameraProfile.Identifier) {
+        setCameraProfile(profileId: identifier.rawValue)
+    }
+
+    @MainActor
+    func setCameraProfile(profileId: String) {
+        guard let profile = CameraProfile.profile(for: profileId),
+              profile != cameraProfile
+        else {
+            return
+        }
+
+        cameraProfile = profile
+        if let requestedZoomFactor = profile.requestedZoomFactor {
+            setCameraZoomFactor(requestedZoomFactor)
+        }
+
+        recordDiagnosticEvent(
+            name: "camera_profile_selected",
+            message: profile.name,
+            metadata: [
+                "cameraProfileId": profile.id,
+                "requestedZoomFactor": profile.requestedZoomFactor.map { String($0) } ?? "current",
+                "conservativeFocus": profile.usesConservativeFocusRecovery ? "true" : "false"
+            ]
+        )
+    }
+
+    private func requestedZoomFactorForCurrentProfile() -> Double? {
+        if let profileZoomFactor = cameraProfile.requestedZoomFactor {
+            return profileZoomFactor
+        }
+
+        return cameraZoomFactor.isFinite ? cameraZoomFactor : nil
+    }
+
+    private func cameraProfileEvaluationWarnings() -> [String] {
+        var warnings: [String] = []
+        let snapshot = currentCameraDebugSnapshot
+
+        if cameraProfile.prefersPhysicalWideCamera,
+           let deviceType = snapshot.deviceType,
+           deviceType != AVCaptureDevice.DeviceType.builtInWideAngleCamera.rawValue {
+            warnings.append("selected camera is not builtInWideAngleCamera")
+        }
+
+        if let requestedZoom = cameraProfile.requestedZoomFactor,
+           let appliedZoom = snapshot.videoZoomFactor,
+           requestedZoom.isFinite,
+           appliedZoom.isFinite,
+           abs(requestedZoom - appliedZoom) > 0.05 {
+            warnings.append("applied zoom differs from profile")
+        }
+
+        if snapshot.deviceName == nil {
+            warnings.append("camera unavailable")
+        }
+
+        return warnings
+    }
+
+    private func cameraProfileEvaluationScore() -> Double? {
+        let warnings = cameraProfileEvaluationWarnings()
+        let score = 100.0 - Double(warnings.count) * 25.0
+        return min(max(score, 0.0), 100.0)
     }
 
     @MainActor
@@ -4183,7 +4320,7 @@ final class ScannerViewModel: ObservableObject {
 
         isArucoVisibleForFocus = false
         let lostAge = arucoLostAge(at: timestamp)
-        guard lostAge >= CameraDiagnosticsConfiguration.arucoFocusRecoveryDelaySeconds else {
+        guard lostAge >= activeArucoFocusRecoveryDelaySeconds else {
             focusRecoveryState = .arucoLost
             return
         }
@@ -4300,7 +4437,7 @@ final class ScannerViewModel: ObservableObject {
             return
         }
 
-        let shouldRecover = lostAge >= CameraDiagnosticsConfiguration.arucoFocusRecoveryDelaySeconds ||
+        let shouldRecover = lostAge >= activeArucoFocusRecoveryDelaySeconds ||
             !cameraQuality.isFocusStable ||
             !cameraQuality.isSharpnessAcceptable
         guard shouldRecover else {
@@ -4371,7 +4508,7 @@ final class ScannerViewModel: ObservableObject {
             return true
         }
 
-        return elapsed >= CameraDiagnosticsConfiguration.minimumSecondsBetweenArucoFocusRequests
+        return elapsed >= activeMinimumSecondsBetweenArucoFocusRequests
     }
 
     private func isBlockingFocusError(_ error: String?) -> Bool {
@@ -4402,8 +4539,20 @@ final class ScannerViewModel: ObservableObject {
             return nil
         }
 
-        let remaining = CameraDiagnosticsConfiguration.minimumSecondsBetweenArucoFocusRequests - elapsed
+        let remaining = activeMinimumSecondsBetweenArucoFocusRequests - elapsed
         return remaining > 0 ? remaining : 0
+    }
+
+    private var activeMinimumSecondsBetweenArucoFocusRequests: Double {
+        cameraProfile.usesConservativeFocusRecovery
+            ? max(CameraDiagnosticsConfiguration.minimumSecondsBetweenArucoFocusRequests, 3.0)
+            : CameraDiagnosticsConfiguration.minimumSecondsBetweenArucoFocusRequests
+    }
+
+    private var activeArucoFocusRecoveryDelaySeconds: Double {
+        cameraProfile.usesConservativeFocusRecovery
+            ? max(CameraDiagnosticsConfiguration.arucoFocusRecoveryDelaySeconds, 1.25)
+            : CameraDiagnosticsConfiguration.arucoFocusRecoveryDelaySeconds
     }
 
     func arucoLostAge(at timestamp: Double?) -> Double {
@@ -8260,6 +8409,28 @@ final class ScannerViewModel: ObservableObject {
         diagnosticsRecorder.makeSnapshot(
             timestamp: sanitizedDiagnosticsTimestamp(timestamp ?? lastFrameTimestamp),
             markerProfile: markerProfile.rawValue,
+            deviceModelIdentifier: deviceModelInfo.identifier,
+            deviceMarketingName: deviceModelInfo.marketingName,
+            cameraProfileId: cameraProfile.id,
+            cameraProfileName: cameraProfile.name,
+            selectedCameraLocalizedName: currentCameraDebugSnapshot.deviceName,
+            selectedCameraDeviceType: currentCameraDebugSnapshot.deviceType,
+            requestedZoomFactor: requestedZoomFactorForCurrentProfile(),
+            appliedZoomFactor: currentCameraDebugSnapshot.videoZoomFactor,
+            currentVideoZoomFactor: currentCameraDebugSnapshot.videoZoomFactor,
+            focusMode: currentCameraDebugSnapshot.focusMode,
+            exposureMode: currentCameraDebugSnapshot.exposureMode,
+            isAdjustingFocus: currentCameraDebugSnapshot.isAdjustingFocus,
+            isAdjustingExposure: currentCameraDebugSnapshot.isAdjustingExposure,
+            cameraIntrinsicMatrixAvailable: currentCameraDebugSnapshot.hasIntrinsics,
+            cameraIntrinsicFx: currentCameraDebugSnapshot.fx,
+            cameraIntrinsicFy: currentCameraDebugSnapshot.fy,
+            cameraIntrinsicCx: currentCameraDebugSnapshot.cx,
+            cameraIntrinsicCy: currentCameraDebugSnapshot.cy,
+            activeVideoDimensions: currentCameraDebugSnapshot.resolutionText,
+            activeFormatDescription: currentCameraDebugSnapshot.activeFormatDescription,
+            cameraProfileEvaluationScore: cameraProfileEvaluationScore(),
+            cameraProfileEvaluationWarnings: cameraProfileEvaluationWarnings(),
             exportGateReason: exportGateBlockedReason,
             scanConfidence: scanFinalConfidenceSummary == "-" ? nil : scanFinalConfidenceSummary,
             mainIssue: scanFinalMainIssueSummary == "-" ? nil : scanFinalMainIssueSummary,
@@ -9594,6 +9765,30 @@ final class ScannerViewModel: ObservableObject {
             markerProfile: markerProfile.rawValue,
             stlFileName: nil,
             diagnosticsFileName: nil,
+            deviceModelIdentifier: deviceModelInfo.identifier,
+            deviceMarketingName: deviceModelInfo.marketingName,
+            cameraProfileId: cameraProfile.id,
+            cameraProfileName: cameraProfile.name,
+            selectedCameraLocalizedName: currentCameraDebugSnapshot.deviceName,
+            selectedCameraDeviceType: currentCameraDebugSnapshot.deviceType,
+            requestedZoomFactor: finiteReportDouble(requestedZoomFactorForCurrentProfile()),
+            appliedZoomFactor: finiteReportDouble(currentCameraDebugSnapshot.videoZoomFactor),
+            currentVideoZoomFactor: finiteReportDouble(currentCameraDebugSnapshot.videoZoomFactor),
+            focusMode: currentCameraDebugSnapshot.focusMode,
+            exposureMode: currentCameraDebugSnapshot.exposureMode,
+            isAdjustingFocus: currentCameraDebugSnapshot.isAdjustingFocus,
+            isAdjustingExposure: currentCameraDebugSnapshot.isAdjustingExposure,
+            cameraIntrinsicMatrixAvailable: currentCameraDebugSnapshot.hasIntrinsics,
+            cameraIntrinsicFx: finiteReportDouble(currentCameraDebugSnapshot.fx),
+            cameraIntrinsicFy: finiteReportDouble(currentCameraDebugSnapshot.fy),
+            cameraIntrinsicCx: finiteReportDouble(currentCameraDebugSnapshot.cx),
+            cameraIntrinsicCy: finiteReportDouble(currentCameraDebugSnapshot.cy),
+            activeVideoDimensions: currentCameraDebugSnapshot.resolutionText,
+            activeFormatDescription: currentCameraDebugSnapshot.activeFormatDescription,
+            cameraProfileEvaluationScore: finiteReportDouble(cameraProfileEvaluationScore()),
+            cameraProfileEvaluationWarnings: cameraProfileEvaluationWarnings().isEmpty
+                ? nil
+                : cameraProfileEvaluationWarnings(),
             device: ScanTechnicalReport.Device(
                 model: UIDevice.current.model,
                 iosVersion: UIDevice.current.systemVersion,
@@ -9807,7 +10002,9 @@ final class ScannerViewModel: ObservableObject {
             minimumAllowedSharpness: finiteReportDouble(minimumAllowedSharpness),
             minimumPreferredSharpness: finiteReportDouble(minimumPreferredSharpness),
             lensPositionChangeThreshold: finiteReportDouble(cameraLensPositionChangeThreshold),
-            focusSettleTimeSeconds: finiteReportDouble(cameraFocusSettleTimeSeconds)
+            focusSettleTimeSeconds: finiteReportDouble(cameraFocusSettleTimeSeconds),
+            cameraProfileId: cameraProfile.id,
+            cameraProfileName: cameraProfile.name
         )
     }
 

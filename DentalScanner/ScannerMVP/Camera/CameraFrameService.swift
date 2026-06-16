@@ -522,6 +522,22 @@ final class CameraFrameService: NSObject {
             return device
         }
 
+        let fallbackDiscoverySession = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [
+                .builtInTripleCamera,
+                .builtInDualWideCamera,
+                .builtInDualCamera,
+                .builtInUltraWideCamera,
+                .builtInTelephotoCamera
+            ],
+            mediaType: .video,
+            position: .back
+        )
+
+        if let device = fallbackDiscoverySession.devices.first {
+            return device
+        }
+
         throw ServiceError.cameraUnavailable
     }
 
@@ -1054,6 +1070,8 @@ final class CameraFrameService: NSObject {
                 isAdjustingFocus: nil,
                 isAdjustingExposure: nil,
                 isAdjustingWhiteBalance: nil,
+                focusMode: nil,
+                exposureMode: nil,
                 iso: nil,
                 exposureDurationSeconds: nil,
                 cameraStabilityScore: cameraQuality?.cameraStabilityScore,
@@ -1098,6 +1116,8 @@ final class CameraFrameService: NSObject {
             isAdjustingFocus: quality.isAdjustingFocus,
             isAdjustingExposure: quality.isAdjustingExposure,
             isAdjustingWhiteBalance: quality.isAdjustingWhiteBalance,
+            focusMode: focusModeText(device.focusMode),
+            exposureMode: exposureModeText(device.exposureMode),
             iso: quality.iso,
             exposureDurationSeconds: quality.exposureDurationSeconds,
             cameraStabilityScore: quality.cameraStabilityScore,
@@ -1327,6 +1347,34 @@ final class CameraFrameService: NSObject {
         }
 
         return "\(dimensions.width)x\(dimensions.height)"
+    }
+
+    private func focusModeText(_ mode: AVCaptureDevice.FocusMode) -> String {
+        switch mode {
+        case .locked:
+            return "locked"
+        case .autoFocus:
+            return "autoFocus"
+        case .continuousAutoFocus:
+            return "continuousAutoFocus"
+        @unknown default:
+            return "unknown"
+        }
+    }
+
+    private func exposureModeText(_ mode: AVCaptureDevice.ExposureMode) -> String {
+        switch mode {
+        case .locked:
+            return "locked"
+        case .autoExpose:
+            return "autoExpose"
+        case .continuousAutoExposure:
+            return "continuousAutoExposure"
+        case .custom:
+            return "custom"
+        @unknown default:
+            return "unknown"
+        }
     }
 
     private func fpsText(for device: AVCaptureDevice) -> String? {

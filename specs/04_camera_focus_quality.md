@@ -42,6 +42,47 @@ Se a câmera está desfocada, a distância calculada pode enganar.
 
 ## Melhorias planejadas
 
+### Perfis de camera experimentais
+
+Adicionar perfis manuais para comparar iPhones sem hardcode por modelo:
+
+```txt
+Default
+Wide 1.0x
+Wide 1.5x
+Wide 2.0x
+Wide 1.5x Conservative Focus
+Wide 2.0x Conservative Focus
+```
+
+Regras:
+
+* `Default` preserva o comportamento atual.
+* Perfis `Wide` usam a wide traseira fisica quando disponivel.
+* Zoom deve ser aplicado com clamp e registrado como requested/applied/current.
+* Perfis `Conservative Focus` reduzem recuperacao agressiva de foco, sem travar foco permanentemente.
+* A primeira etapa e apenas teste manual + diagnostics; selecao automatica fica para depois.
+
+Reports e diagnostics devem registrar:
+
+```txt
+deviceModelIdentifier
+deviceMarketingName
+cameraProfileId
+cameraProfileName
+selectedCameraLocalizedName
+selectedCameraDeviceType
+requestedZoomFactor
+appliedZoomFactor
+currentVideoZoomFactor
+focusMode
+exposureMode
+cameraIntrinsicMatrixAvailable
+fx/fy/cx/cy
+activeVideoDimensions
+activeFormatDescription
+```
+
 ### Wide física
 
 Forçar câmera traseira wide física:

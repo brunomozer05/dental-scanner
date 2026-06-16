@@ -66,6 +66,35 @@ Para cada teste:
 * rodar comparador;
 * anotar distância/foco/zoom/configs.
 
+Adicionar tambem testes por `cameraProfileId`:
+
+```txt
+Default
+Wide 1.0x
+Wide 1.5x
+Wide 2.0x
+Wide 1.5x Conservative Focus
+Wide 2.0x Conservative Focus
+```
+
+Proxima etapa futura:
+
+```txt
+Auto Camera Profile Evaluation
+```
+
+Esse modo deve testar perfis por uma janela curta e escolher o melhor usando:
+
+* markerDetectionRate;
+* averageSharpness;
+* averageReprojection;
+* poseQuality;
+* focusLostCount;
+* relativeMarkerDistanceStdMean;
+* relativeMarkerDistanceStdMax.
+
+Nao automatizar antes de comparar resultados por aparelho/perfil nos reports.
+
 ## Prioridade 5 — Comparar v1 vs v2
 
 Objetivo:

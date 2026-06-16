@@ -23,6 +23,23 @@ Escanear mais perto no iPhone 11 melhorou muito.
 
 Isso sugere que tamanho da tag na imagem é crítico.
 
+## 2.1. iPhones novos precisam de avaliacao por perfil de camera
+
+Antes de escolher configuracao automatica por aparelho, os scans devem registrar e comparar:
+
+```txt
+deviceModelIdentifier
+deviceMarketingName
+cameraProfileId
+cameraProfileName
+camera fisica selecionada
+zoom requested/applied/current
+focus/exposure mode
+intrinsics fx/fy/cx/cy
+```
+
+Perfis `Wide 1.0x`, `Wide 1.5x`, `Wide 2.0x` e variantes `Conservative Focus` sao experimentais. O perfil `Default` deve preservar o comportamento atual, especialmente no iPhone 11.
+
 ## 3. Distância de captura afeta muito
 
 Scans perto ficaram muito mais parecidos com a realidade.
