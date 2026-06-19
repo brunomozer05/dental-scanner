@@ -15,6 +15,13 @@ struct CameraProfile: Equatable, Identifiable {
     let requestedZoomFactor: Double?
     let prefersPhysicalWideCamera: Bool
     let usesConservativeFocusRecovery: Bool
+    let isExperimental: Bool
+    let debugNote: String?
+    let tooCloseFocusRiskDistanceMm: Double?
+    let preferredMinScanDistanceMm: Double?
+    let preferredIdealMinScanDistanceMm: Double?
+    let preferredIdealMaxScanDistanceMm: Double?
+    let preferredMaxScanDistanceMm: Double?
 
     var id: String {
         identifier.rawValue
@@ -26,42 +33,84 @@ struct CameraProfile: Equatable, Identifiable {
             name: "Default",
             requestedZoomFactor: nil,
             prefersPhysicalWideCamera: false,
-            usesConservativeFocusRecovery: false
+            usesConservativeFocusRecovery: false,
+            isExperimental: false,
+            debugNote: "Preserves current camera behavior.",
+            tooCloseFocusRiskDistanceMm: nil,
+            preferredMinScanDistanceMm: nil,
+            preferredIdealMinScanDistanceMm: nil,
+            preferredIdealMaxScanDistanceMm: nil,
+            preferredMaxScanDistanceMm: nil
         ),
         CameraProfile(
             identifier: .wide1x,
             name: "Wide 1.0x",
             requestedZoomFactor: 1.0,
             prefersPhysicalWideCamera: true,
-            usesConservativeFocusRecovery: false
+            usesConservativeFocusRecovery: false,
+            isExperimental: false,
+            debugNote: "Physical wide camera, no digital zoom.",
+            tooCloseFocusRiskDistanceMm: nil,
+            preferredMinScanDistanceMm: nil,
+            preferredIdealMinScanDistanceMm: nil,
+            preferredIdealMaxScanDistanceMm: nil,
+            preferredMaxScanDistanceMm: nil
         ),
         CameraProfile(
             identifier: .wide15x,
             name: "Wide 1.5x",
             requestedZoomFactor: 1.5,
             prefersPhysicalWideCamera: true,
-            usesConservativeFocusRecovery: false
+            usesConservativeFocusRecovery: false,
+            isExperimental: false,
+            debugNote: "Recommended initial profile for iPhone 16 family.",
+            tooCloseFocusRiskDistanceMm: 125,
+            preferredMinScanDistanceMm: 130,
+            preferredIdealMinScanDistanceMm: 150,
+            preferredIdealMaxScanDistanceMm: 180,
+            preferredMaxScanDistanceMm: 220
         ),
         CameraProfile(
             identifier: .wide2x,
             name: "Wide 2.0x",
             requestedZoomFactor: 2.0,
             prefersPhysicalWideCamera: true,
-            usesConservativeFocusRecovery: false
+            usesConservativeFocusRecovery: false,
+            isExperimental: true,
+            debugNote: "Experimental; not recommended for iPhone 16 initial tests.",
+            tooCloseFocusRiskDistanceMm: nil,
+            preferredMinScanDistanceMm: nil,
+            preferredIdealMinScanDistanceMm: nil,
+            preferredIdealMaxScanDistanceMm: nil,
+            preferredMaxScanDistanceMm: nil
         ),
         CameraProfile(
             identifier: .wide15xConservativeFocus,
             name: "Wide 1.5x Conservative Focus",
             requestedZoomFactor: 1.5,
             prefersPhysicalWideCamera: true,
-            usesConservativeFocusRecovery: true
+            usesConservativeFocusRecovery: true,
+            isExperimental: false,
+            debugNote: "iPhone 16 wide 1.5x with slower focus recovery.",
+            tooCloseFocusRiskDistanceMm: 125,
+            preferredMinScanDistanceMm: 130,
+            preferredIdealMinScanDistanceMm: 150,
+            preferredIdealMaxScanDistanceMm: 180,
+            preferredMaxScanDistanceMm: 220
         ),
         CameraProfile(
             identifier: .wide2xConservativeFocus,
             name: "Wide 2.0x Conservative Focus",
             requestedZoomFactor: 2.0,
             prefersPhysicalWideCamera: true,
-            usesConservativeFocusRecovery: true
+            usesConservativeFocusRecovery: true,
+            isExperimental: true,
+            debugNote: "Experimental; not recommended for iPhone 16 initial tests.",
+            tooCloseFocusRiskDistanceMm: nil,
+            preferredMinScanDistanceMm: nil,
+            preferredIdealMinScanDistanceMm: nil,
+            preferredIdealMaxScanDistanceMm: nil,
+            preferredMaxScanDistanceMm: nil
         )
     ]
 

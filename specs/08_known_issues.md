@@ -40,6 +40,14 @@ intrinsics fx/fy/cx/cy
 
 Perfis `Wide 1.0x`, `Wide 1.5x`, `Wide 2.0x` e variantes `Conservative Focus` sao experimentais. O perfil `Default` deve preservar o comportamento atual, especialmente no iPhone 11.
 
+Resultados iniciais no iPhone 16 indicam:
+
+* `Wide 1.5x` deve ser o perfil recomendado para modelos `iPhone17,*`;
+* a câmera deve continuar sendo a wide física traseira, sem macro/ultra-wide/virtual como primeira opção;
+* `Wide 2.0x` acusou distância/foco ruins e fica experimental/não recomendado por enquanto;
+* distâncias abaixo de aproximadamente 120-125 mm aumentam o risco de perda de foco;
+* a faixa inicial recomendada para iPhone 16 com `Wide 1.5x` é 150-180 mm.
+
 ## 3. Distância de captura afeta muito
 
 Scans perto ficaram muito mais parecidos com a realidade.

@@ -6,6 +6,14 @@ struct DeviceModelInfo: Equatable {
     let identifier: String
     let marketingName: String
 
+    var recommendedCameraProfileIdentifier: CameraProfile.Identifier {
+        identifier.hasPrefix("iPhone17,") ? .wide15x : .defaultProfile
+    }
+
+    var recommendedCameraProfile: CameraProfile {
+        CameraProfile.profile(for: recommendedCameraProfileIdentifier)
+    }
+
     static var current: DeviceModelInfo {
         let identifier = currentModelIdentifier()
         return DeviceModelInfo(

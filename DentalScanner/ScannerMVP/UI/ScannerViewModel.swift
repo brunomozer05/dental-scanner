@@ -814,6 +814,15 @@ final class ScannerViewModel: ObservableObject {
     var debugCameraProfileName: String {
         cameraProfile.name
     }
+    var debugCameraRecommendedProfileId: String {
+        deviceModelInfo.recommendedCameraProfile.id
+    }
+    var debugCameraRecommendedProfileName: String {
+        deviceModelInfo.recommendedCameraProfile.name
+    }
+    var debugCameraProfileNote: String? {
+        cameraProfile.debugNote
+    }
     var debugDeviceModelIdentifier: String {
         deviceModelInfo.identifier
     }
@@ -874,6 +883,27 @@ final class ScannerViewModel: ObservableObject {
     var debugCameraProfileEvaluationWarnings: String? {
         let warnings = cameraProfileEvaluationWarnings()
         return warnings.isEmpty ? nil : warnings.joined(separator: "; ")
+    }
+    var debugCameraProfileTooCloseFocusRiskDistanceMm: Double? {
+        cameraProfile.tooCloseFocusRiskDistanceMm
+    }
+    var debugCameraProfilePreferredMinScanDistanceMm: Double? {
+        cameraProfile.preferredMinScanDistanceMm
+    }
+    var debugCameraProfilePreferredIdealMinScanDistanceMm: Double? {
+        cameraProfile.preferredIdealMinScanDistanceMm
+    }
+    var debugCameraProfilePreferredIdealMaxScanDistanceMm: Double? {
+        cameraProfile.preferredIdealMaxScanDistanceMm
+    }
+    var debugCameraProfilePreferredMaxScanDistanceMm: Double? {
+        cameraProfile.preferredMaxScanDistanceMm
+    }
+    var debugDistanceGuideState: String {
+        distanceGuideStateTitle
+    }
+    var debugDistanceGuideMessage: String {
+        distanceGuideStateTitle
     }
     @Published private(set) var scanCoverageReady: Bool = false
     @Published private(set) var scanGoodFramesReady: Bool = false
@@ -1574,6 +1604,15 @@ final class ScannerViewModel: ObservableObject {
     private func cameraProfileEvaluationWarnings() -> [String] {
         var warnings: [String] = []
         let snapshot = currentCameraDebugSnapshot
+        let recommendedProfile = deviceModelInfo.recommendedCameraProfile
+
+        if cameraProfile.identifier != recommendedProfile.identifier {
+            warnings.append("recommended profile: \(recommendedProfile.name)")
+        }
+
+        if cameraProfile.isExperimental {
+            warnings.append(cameraProfile.debugNote ?? "profile is experimental")
+        }
 
         if cameraProfile.prefersPhysicalWideCamera,
            let deviceType = snapshot.deviceType,
@@ -4274,6 +4313,11 @@ final class ScannerViewModel: ObservableObject {
             return
         }
 
+        if let profileDistanceGuideState = profileDistanceGuideState(distanceMm: distanceMm) {
+            distanceGuideStateTitle = profileDistanceGuideState
+            return
+        }
+
         if distanceMm < scanReadinessConfiguration.idealMinimumDistanceMm {
             distanceGuideStateTitle = "Afaste"
         } else if distanceMm > scanReadinessConfiguration.idealMaximumDistanceMm {
@@ -4281,6 +4325,35 @@ final class ScannerViewModel: ObservableObject {
         } else {
             distanceGuideStateTitle = "Distancia ideal"
         }
+    }
+
+    private func profileDistanceGuideState(distanceMm: Double) -> String? {
+        guard distanceMm.isFinite,
+              (
+                  cameraProfile.tooCloseFocusRiskDistanceMm != nil ||
+                  cameraProfile.preferredIdealMinScanDistanceMm != nil ||
+                  cameraProfile.preferredIdealMaxScanDistanceMm != nil
+              )
+        else {
+            return nil
+        }
+
+        if let tooCloseFocusRiskDistanceMm = cameraProfile.tooCloseFocusRiskDistanceMm,
+           distanceMm < tooCloseFocusRiskDistanceMm {
+            return "Muito perto - afaste para focar"
+        }
+
+        if let preferredIdealMinScanDistanceMm = cameraProfile.preferredIdealMinScanDistanceMm,
+           distanceMm < preferredIdealMinScanDistanceMm {
+            return "Afaste um pouco"
+        }
+
+        if let preferredIdealMaxScanDistanceMm = cameraProfile.preferredIdealMaxScanDistanceMm,
+           distanceMm <= preferredIdealMaxScanDistanceMm {
+            return "Distancia ideal"
+        }
+
+        return "Aproxime um pouco"
     }
 
     @MainActor
@@ -8413,6 +8486,15 @@ final class ScannerViewModel: ObservableObject {
             deviceMarketingName: deviceModelInfo.marketingName,
             cameraProfileId: cameraProfile.id,
             cameraProfileName: cameraProfile.name,
+            cameraRecommendedProfileId: deviceModelInfo.recommendedCameraProfile.id,
+            cameraRecommendedProfileName: deviceModelInfo.recommendedCameraProfile.name,
+            cameraProfileTooCloseFocusRiskDistanceMm: cameraProfile.tooCloseFocusRiskDistanceMm,
+            cameraProfilePreferredMinScanDistanceMm: cameraProfile.preferredMinScanDistanceMm,
+            cameraProfilePreferredIdealMinScanDistanceMm:
+                cameraProfile.preferredIdealMinScanDistanceMm,
+            cameraProfilePreferredIdealMaxScanDistanceMm:
+                cameraProfile.preferredIdealMaxScanDistanceMm,
+            cameraProfilePreferredMaxScanDistanceMm: cameraProfile.preferredMaxScanDistanceMm,
             selectedCameraLocalizedName: currentCameraDebugSnapshot.deviceName,
             selectedCameraDeviceType: currentCameraDebugSnapshot.deviceType,
             requestedZoomFactor: requestedZoomFactorForCurrentProfile(),
@@ -8439,6 +8521,7 @@ final class ScannerViewModel: ObservableObject {
             arucoLostCount: arucoLostCount,
             centerFocusRecoveryCount: centerFocusRecoveryCount,
             distanceGuideState: distanceGuideStateTitle,
+            distanceGuideMessage: distanceGuideStateTitle,
             lastDistanceMm: lastDistanceGuideDistanceMm ?? poseDistanceMm,
             userFeedbackState: scanUserFeedbackState,
             userFeedbackMessage: scanUserFeedbackMessage,
@@ -9769,6 +9852,18 @@ final class ScannerViewModel: ObservableObject {
             deviceMarketingName: deviceModelInfo.marketingName,
             cameraProfileId: cameraProfile.id,
             cameraProfileName: cameraProfile.name,
+            cameraRecommendedProfileId: deviceModelInfo.recommendedCameraProfile.id,
+            cameraRecommendedProfileName: deviceModelInfo.recommendedCameraProfile.name,
+            cameraProfileTooCloseFocusRiskDistanceMm:
+                finiteReportDouble(cameraProfile.tooCloseFocusRiskDistanceMm),
+            cameraProfilePreferredMinScanDistanceMm:
+                finiteReportDouble(cameraProfile.preferredMinScanDistanceMm),
+            cameraProfilePreferredIdealMinScanDistanceMm:
+                finiteReportDouble(cameraProfile.preferredIdealMinScanDistanceMm),
+            cameraProfilePreferredIdealMaxScanDistanceMm:
+                finiteReportDouble(cameraProfile.preferredIdealMaxScanDistanceMm),
+            cameraProfilePreferredMaxScanDistanceMm:
+                finiteReportDouble(cameraProfile.preferredMaxScanDistanceMm),
             selectedCameraLocalizedName: currentCameraDebugSnapshot.deviceName,
             selectedCameraDeviceType: currentCameraDebugSnapshot.deviceType,
             requestedZoomFactor: finiteReportDouble(requestedZoomFactorForCurrentProfile()),
@@ -9838,6 +9933,7 @@ final class ScannerViewModel: ObservableObject {
             arucoLostCount: arucoLostCount,
             centerFocusRecoveryCount: centerFocusRecoveryCount,
             distanceGuideState: distanceGuideStateTitle,
+            distanceGuideMessage: distanceGuideStateTitle,
             lastDistanceMm: finiteReportDouble(lastDistanceGuideDistanceMm ?? poseDistanceMm),
             tagAreaPixelsMean: finiteReportDouble(averageTagAreaPixelsForReport()),
             userFeedbackState: scanUserFeedbackState,

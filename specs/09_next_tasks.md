@@ -77,6 +77,13 @@ Wide 1.5x Conservative Focus
 Wide 2.0x Conservative Focus
 ```
 
+Nos testes iniciais do iPhone 16:
+
+* priorizar `Wide 1.5x` como recomendado para `iPhone17,*`;
+* testar distância ideal inicial de 150-180 mm;
+* evitar ficar abaixo de 120-125 mm, pois aumenta risco de perda de foco;
+* manter `Wide 2.0x` e `Wide 2.0x Conservative Focus` como experimentais/não recomendados até nova evidência.
+
 Proxima etapa futura:
 
 ```txt

@@ -31,6 +31,13 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
     var deviceMarketingName: String?
     var cameraProfileId: String?
     var cameraProfileName: String?
+    var cameraRecommendedProfileId: String?
+    var cameraRecommendedProfileName: String?
+    var cameraProfileTooCloseFocusRiskDistanceMm: Double?
+    var cameraProfilePreferredMinScanDistanceMm: Double?
+    var cameraProfilePreferredIdealMinScanDistanceMm: Double?
+    var cameraProfilePreferredIdealMaxScanDistanceMm: Double?
+    var cameraProfilePreferredMaxScanDistanceMm: Double?
     var selectedCameraLocalizedName: String?
     var selectedCameraDeviceType: String?
     var requestedZoomFactor: Double?
@@ -73,6 +80,7 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
     var arucoLostCount: Int
     var centerFocusRecoveryCount: Int
     var distanceGuideState: String?
+    var distanceGuideMessage: String?
     var lastDistanceMm: Double?
     var distanceSamplesTotal: Int
     var distanceSamplesValid: Int
@@ -151,6 +159,13 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
         deviceMarketingName: nil,
         cameraProfileId: nil,
         cameraProfileName: nil,
+        cameraRecommendedProfileId: nil,
+        cameraRecommendedProfileName: nil,
+        cameraProfileTooCloseFocusRiskDistanceMm: nil,
+        cameraProfilePreferredMinScanDistanceMm: nil,
+        cameraProfilePreferredIdealMinScanDistanceMm: nil,
+        cameraProfilePreferredIdealMaxScanDistanceMm: nil,
+        cameraProfilePreferredMaxScanDistanceMm: nil,
         selectedCameraLocalizedName: nil,
         selectedCameraDeviceType: nil,
         requestedZoomFactor: nil,
@@ -193,6 +208,7 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
         arucoLostCount: 0,
         centerFocusRecoveryCount: 0,
         distanceGuideState: nil,
+        distanceGuideMessage: nil,
         lastDistanceMm: nil,
         distanceSamplesTotal: 0,
         distanceSamplesValid: 0,

@@ -9,6 +9,13 @@ struct ScanTechnicalReport: Codable {
     var deviceMarketingName: String?
     var cameraProfileId: String?
     var cameraProfileName: String?
+    var cameraRecommendedProfileId: String?
+    var cameraRecommendedProfileName: String?
+    var cameraProfileTooCloseFocusRiskDistanceMm: Double?
+    var cameraProfilePreferredMinScanDistanceMm: Double?
+    var cameraProfilePreferredIdealMinScanDistanceMm: Double?
+    var cameraProfilePreferredIdealMaxScanDistanceMm: Double?
+    var cameraProfilePreferredMaxScanDistanceMm: Double?
     var selectedCameraLocalizedName: String?
     var selectedCameraDeviceType: String?
     var requestedZoomFactor: Double?
@@ -44,6 +51,7 @@ struct ScanTechnicalReport: Codable {
     var arucoLostCount: Int?
     var centerFocusRecoveryCount: Int?
     var distanceGuideState: String?
+    var distanceGuideMessage: String?
     var lastDistanceMm: Double?
     var tagAreaPixelsMean: Double?
     var userFeedbackState: String?

@@ -181,6 +181,12 @@ struct ScannerView: View {
                                     viewModel.debugCameraProfileId,
                                 cameraProfileName:
                                     viewModel.debugCameraProfileName,
+                                cameraRecommendedProfileId:
+                                    viewModel.debugCameraRecommendedProfileId,
+                                cameraRecommendedProfileName:
+                                    viewModel.debugCameraRecommendedProfileName,
+                                cameraProfileNote:
+                                    viewModel.debugCameraProfileNote,
                                 deviceModelIdentifier:
                                     viewModel.debugDeviceModelIdentifier,
                                 deviceMarketingName:
@@ -221,6 +227,20 @@ struct ScannerView: View {
                                     viewModel.debugCameraProfileEvaluationScore,
                                 cameraProfileEvaluationWarnings:
                                     viewModel.debugCameraProfileEvaluationWarnings,
+                                cameraProfileTooCloseFocusRiskDistanceMm:
+                                    viewModel.debugCameraProfileTooCloseFocusRiskDistanceMm,
+                                cameraProfilePreferredMinScanDistanceMm:
+                                    viewModel.debugCameraProfilePreferredMinScanDistanceMm,
+                                cameraProfilePreferredIdealMinScanDistanceMm:
+                                    viewModel.debugCameraProfilePreferredIdealMinScanDistanceMm,
+                                cameraProfilePreferredIdealMaxScanDistanceMm:
+                                    viewModel.debugCameraProfilePreferredIdealMaxScanDistanceMm,
+                                cameraProfilePreferredMaxScanDistanceMm:
+                                    viewModel.debugCameraProfilePreferredMaxScanDistanceMm,
+                                distanceGuideState:
+                                    viewModel.debugDistanceGuideState,
+                                distanceGuideMessage:
+                                    viewModel.debugDistanceGuideMessage,
                                 relativeMarkerGeometryScore:
                                     viewModel.debugRelativeMarkerGeometryScore,
                                 relativeMarkerDistanceStdMean:
@@ -1851,6 +1871,9 @@ private struct ScannerDebugEmergencyPanelView: View {
     let usedBestCandidate: Bool
     let cameraProfileId: String
     let cameraProfileName: String
+    let cameraRecommendedProfileId: String
+    let cameraRecommendedProfileName: String
+    let cameraProfileNote: String?
     let deviceModelIdentifier: String
     let deviceMarketingName: String
     let selectedCameraLocalizedName: String?
@@ -1871,6 +1894,13 @@ private struct ScannerDebugEmergencyPanelView: View {
     let activeFormatDescription: String?
     let cameraProfileEvaluationScore: Double?
     let cameraProfileEvaluationWarnings: String?
+    let cameraProfileTooCloseFocusRiskDistanceMm: Double?
+    let cameraProfilePreferredMinScanDistanceMm: Double?
+    let cameraProfilePreferredIdealMinScanDistanceMm: Double?
+    let cameraProfilePreferredIdealMaxScanDistanceMm: Double?
+    let cameraProfilePreferredMaxScanDistanceMm: Double?
+    let distanceGuideState: String
+    let distanceGuideMessage: String
     let relativeMarkerGeometryScore: Double?
     let relativeMarkerDistanceStdMean: Double?
     let relativeMarkerDistanceStdMax: Double?
@@ -2017,6 +2047,9 @@ private struct ScannerDebugEmergencyPanelView: View {
 
                         debugRow(title: "Profile", value: safeText(cameraProfileName))
                         debugRow(title: "Profile id", value: safeText(cameraProfileId))
+                        debugRow(title: "Recommended", value: safeText(cameraRecommendedProfileName))
+                        debugRow(title: "Recommended id", value: safeText(cameraRecommendedProfileId))
+                        debugRow(title: "Profile note", value: safeText(cameraProfileNote))
                         debugRow(title: "Device id", value: safeText(deviceModelIdentifier))
                         debugRow(title: "Device name", value: safeText(deviceMarketingName))
                         debugRow(title: "Camera", value: safeText(selectedCameraLocalizedName))
@@ -2037,18 +2070,43 @@ private struct ScannerDebugEmergencyPanelView: View {
                         debugRow(title: "Format", value: safeText(activeFormatDescription))
                         debugRow(title: "Eval score", value: safeNumber(cameraProfileEvaluationScore))
                         debugRow(title: "Warnings", value: safeText(cameraProfileEvaluationWarnings))
+                        debugRow(
+                            title: "Too close risk",
+                            value: safeMillimeters(cameraProfileTooCloseFocusRiskDistanceMm)
+                        )
+                        debugRow(
+                            title: "Profile min",
+                            value: safeMillimeters(cameraProfilePreferredMinScanDistanceMm)
+                        )
+                        debugRow(
+                            title: "Profile ideal min",
+                            value: safeMillimeters(cameraProfilePreferredIdealMinScanDistanceMm)
+                        )
+                        debugRow(
+                            title: "Profile ideal max",
+                            value: safeMillimeters(cameraProfilePreferredIdealMaxScanDistanceMm)
+                        )
+                        debugRow(
+                            title: "Profile max",
+                            value: safeMillimeters(cameraProfilePreferredMaxScanDistanceMm)
+                        )
+                        debugRow(title: "Distance state", value: safeText(distanceGuideState))
+                        debugRow(title: "Distance message", value: safeText(distanceGuideMessage))
 
                         VStack(alignment: .leading, spacing: 5) {
                             profileButton(title: "Default", id: CameraProfile.Identifier.defaultProfile.rawValue)
                             profileButton(title: "Wide 1.0x", id: CameraProfile.Identifier.wide1x.rawValue)
                             profileButton(title: "Wide 1.5x", id: CameraProfile.Identifier.wide15x.rawValue)
-                            profileButton(title: "Wide 2.0x", id: CameraProfile.Identifier.wide2x.rawValue)
+                            profileButton(
+                                title: "Wide 2.0x (experimental)",
+                                id: CameraProfile.Identifier.wide2x.rawValue
+                            )
                             profileButton(
                                 title: "Wide 1.5x Conservative",
                                 id: CameraProfile.Identifier.wide15xConservativeFocus.rawValue
                             )
                             profileButton(
-                                title: "Wide 2.0x Conservative",
+                                title: "Wide 2.0x Conservative (experimental)",
                                 id: CameraProfile.Identifier.wide2xConservativeFocus.rawValue
                             )
                         }

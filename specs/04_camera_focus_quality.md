@@ -63,13 +63,38 @@ Regras:
 * Perfis `Conservative Focus` reduzem recuperacao agressiva de foco, sem travar foco permanentemente.
 * A primeira etapa e apenas teste manual + diagnostics; selecao automatica fica para depois.
 
+Observacao dos testes iniciais em iPhone 16:
+
+* modelos `iPhone17,*` devem mostrar `Wide 1.5x` como perfil recomendado para teste;
+* o perfil deve usar a camera traseira wide fisica, sem macro/ultra-wide/virtual como primeira opcao;
+* abaixo de aproximadamente 120-125 mm ha maior risco de perda de foco;
+* para `Wide 1.5x`, a faixa inicial recomendada e 150-180 mm;
+* `Wide 2.0x` e `Wide 2.0x Conservative Focus` continuam disponiveis, mas devem ser tratados como experimentais/nao recomendados para iPhone 16 ate nova evidencia.
+
+Thresholds iniciais para `Wide 1.5x` em iPhone 16:
+
+```txt
+tooCloseFocusRiskDistanceMm = 125
+preferredMinScanDistanceMm = 130
+preferredIdealMinScanDistanceMm = 150
+preferredIdealMaxScanDistanceMm = 180
+preferredMaxScanDistanceMm = 220
+```
+
 Reports e diagnostics devem registrar:
 
 ```txt
 deviceModelIdentifier
 deviceMarketingName
+cameraRecommendedProfileId
+cameraRecommendedProfileName
 cameraProfileId
 cameraProfileName
+cameraProfileTooCloseFocusRiskDistanceMm
+cameraProfilePreferredMinScanDistanceMm
+cameraProfilePreferredIdealMinScanDistanceMm
+cameraProfilePreferredIdealMaxScanDistanceMm
+cameraProfilePreferredMaxScanDistanceMm
 selectedCameraLocalizedName
 selectedCameraDeviceType
 requestedZoomFactor
@@ -81,6 +106,8 @@ cameraIntrinsicMatrixAvailable
 fx/fy/cx/cy
 activeVideoDimensions
 activeFormatDescription
+distanceGuideState
+distanceGuideMessage
 ```
 
 ### Wide física
