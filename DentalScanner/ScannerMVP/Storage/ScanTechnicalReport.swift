@@ -104,6 +104,26 @@ struct ScanTechnicalReport: Codable {
     var cameraAvailableFormatCount: Int?
     var cameraAvailableMaxResolutionWidth: Int?
     var cameraAvailableMaxResolutionHeight: Int?
+    var cameraFramePixelBufferWidth: Int?
+    var cameraFramePixelBufferHeight: Int?
+    var cameraFrameProcessingWidth: Int?
+    var cameraFrameProcessingHeight: Int?
+    var cameraFrameDownscaleApplied: Bool?
+    var cameraFrameDownscaleFactorX: Double?
+    var cameraFrameDownscaleFactorY: Double?
+    var cameraFramesReceivedCount: Int?
+    var cameraFramesProcessedCount: Int?
+    var cameraFramesDroppedCount: Int?
+    var cameraLastFrameProcessingMs: Double?
+    var cameraAverageFrameProcessingMs: Double?
+    var arucoDetectedMarkerCountLastFrame: Int?
+    var arucoDetectedExpectedMarkerCountLastFrame: Int?
+    var arucoLastDetectionTimestamp: Double?
+    var arucoFramesWithAnyMarkerCount: Int?
+    var arucoFramesWithExpectedMarkerCount: Int?
+    var poseAcceptedLastFrame: Bool?
+    var poseRejectedLastFrame: Bool?
+    var poseLastRejectReason: String?
     var referenceCameraMatrixDiagnosticsEnabled: Bool?
     var referenceCameraMatrixSource: String?
     var referenceCameraMatrixFx: Double?

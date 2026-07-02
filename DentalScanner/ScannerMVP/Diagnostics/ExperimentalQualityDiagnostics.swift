@@ -77,6 +77,26 @@ struct ExperimentalQualityDiagnostics: Codable, Equatable {
     var cameraAvailableFormatCount: Int?
     var cameraAvailableMaxResolutionWidth: Int?
     var cameraAvailableMaxResolutionHeight: Int?
+    var cameraFramePixelBufferWidth: Int?
+    var cameraFramePixelBufferHeight: Int?
+    var cameraFrameProcessingWidth: Int?
+    var cameraFrameProcessingHeight: Int?
+    var cameraFrameDownscaleApplied: Bool?
+    var cameraFrameDownscaleFactorX: Double?
+    var cameraFrameDownscaleFactorY: Double?
+    var cameraFramesReceivedCount: Int?
+    var cameraFramesProcessedCount: Int?
+    var cameraFramesDroppedCount: Int?
+    var cameraLastFrameProcessingMs: Double?
+    var cameraAverageFrameProcessingMs: Double?
+    var arucoDetectedMarkerCountLastFrame: Int?
+    var arucoDetectedExpectedMarkerCountLastFrame: Int?
+    var arucoLastDetectionTimestamp: Double?
+    var arucoFramesWithAnyMarkerCount: Int?
+    var arucoFramesWithExpectedMarkerCount: Int?
+    var poseAcceptedLastFrame: Bool?
+    var poseRejectedLastFrame: Bool?
+    var poseLastRejectReason: String?
 
     var referenceCameraMatrixDiagnosticsEnabled: Bool
     var referenceCameraMatrixSource: String?
@@ -140,6 +160,26 @@ struct ExperimentalQualityDiagnostics: Codable, Equatable {
         cameraAvailableFormatCount: nil,
         cameraAvailableMaxResolutionWidth: nil,
         cameraAvailableMaxResolutionHeight: nil,
+        cameraFramePixelBufferWidth: nil,
+        cameraFramePixelBufferHeight: nil,
+        cameraFrameProcessingWidth: nil,
+        cameraFrameProcessingHeight: nil,
+        cameraFrameDownscaleApplied: nil,
+        cameraFrameDownscaleFactorX: nil,
+        cameraFrameDownscaleFactorY: nil,
+        cameraFramesReceivedCount: nil,
+        cameraFramesProcessedCount: nil,
+        cameraFramesDroppedCount: nil,
+        cameraLastFrameProcessingMs: nil,
+        cameraAverageFrameProcessingMs: nil,
+        arucoDetectedMarkerCountLastFrame: nil,
+        arucoDetectedExpectedMarkerCountLastFrame: nil,
+        arucoLastDetectionTimestamp: nil,
+        arucoFramesWithAnyMarkerCount: nil,
+        arucoFramesWithExpectedMarkerCount: nil,
+        poseAcceptedLastFrame: nil,
+        poseRejectedLastFrame: nil,
+        poseLastRejectReason: nil,
         referenceCameraMatrixDiagnosticsEnabled: false,
         referenceCameraMatrixSource: nil,
         referenceCameraMatrixFx: nil,

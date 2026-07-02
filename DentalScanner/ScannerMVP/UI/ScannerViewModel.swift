@@ -1233,6 +1233,25 @@ final class ScannerViewModel: ObservableObject {
     private var shouldRunCamera = false
     private var totalFramesCounter: Int = 0
     private var recentFrameTimestamps: [Double] = []
+    private var cameraFramePixelBufferWidth: Int?
+    private var cameraFramePixelBufferHeight: Int?
+    private var cameraFrameProcessingWidth: Int?
+    private var cameraFrameProcessingHeight: Int?
+    private var cameraFrameDownscaleApplied = false
+    private var cameraFrameDownscaleFactorX: Double = 1.0
+    private var cameraFrameDownscaleFactorY: Double = 1.0
+    private var cameraFramesProcessedCount = 0
+    private var cameraFrameProcessingTimeTotalMs: Double = 0
+    private var cameraFrameProcessingTimeSampleCount = 0
+    private var cameraLastFrameProcessingMs: Double?
+    private var arucoDetectedMarkerCountLastFrame = 0
+    private var arucoDetectedExpectedMarkerCountLastFrame = 0
+    private var arucoLastDetectionTimestamp: Double?
+    private var arucoFramesWithAnyMarkerCount = 0
+    private var arucoFramesWithExpectedMarkerCount = 0
+    private var poseAcceptedLastFrame: Bool?
+    private var poseRejectedLastFrame: Bool?
+    private var poseLastRejectReason: String?
     private var lastValidOverlayMarkers: [MarkerOverlayResult] = []
     private var lastValidOverlayTimestamp: Double?
     private var visualTrackedMarkersByMarkerId: [Int: VisualTrackedMarker] = [:]
@@ -2727,6 +2746,14 @@ final class ScannerViewModel: ObservableObject {
             self.scanLastFrameProcessingTimeMs = frameProcessingTimeMs.isFinite
                 ? frameProcessingTimeMs
                 : nil
+            self.recordFrameProcessingDiagnostics(
+                frame: frame,
+                metrics: metrics,
+                arucoMetrics: arucoMetrics,
+                poseMetrics: poseMetrics,
+                expectedMarkerIds: self.expectedExportMarkerIds(for: activeMarkerProfile),
+                processingTimeMs: frameProcessingTimeMs
+            )
             self.cameraLockErrorMessage = frame.cameraDebugSnapshot.lockError
             self.frameResolution = metrics.frameResolution
             self.isIntrinsicMatrixAvailable = metrics.isIntrinsicMatrixAvailable
@@ -2765,6 +2792,7 @@ final class ScannerViewModel: ObservableObject {
                 pose: distanceGuidePose,
                 cameraQuality: frame.cameraQuality
             )
+            self.currentExperimentalQualityDiagnostics = self.makeExperimentalQualityDiagnosticsSnapshot()
             self.poseErrorMessage = poseMetrics.errorMessage
             self.dualMarkerDebugStates = dualMarkerDebugStates
             self.updateFocusRecovery(
@@ -2956,6 +2984,7 @@ final class ScannerViewModel: ObservableObject {
         scanStaticPosePairSampleCount = 0
         scanStaticPosePlaneSampleCount = 0
         scanLastFrameProcessingTimeMs = nil
+        resetFrameProcessingDiagnostics()
         lastExportDiagnosticsUpdateTimestamp = nil
         lastFinalObservationDiagnosticsUpdateTimestamp = nil
         lastStaticPoseDiagnosticsUpdateTimestamp = nil
@@ -3062,6 +3091,127 @@ final class ScannerViewModel: ObservableObject {
         normalFinalizationCanAutoExport = false
         resetBestFinalPoseCandidate()
         normalFinalizationLastAcceptedFrameTimestamp = nil
+    }
+
+    private func resetFrameProcessingDiagnostics() {
+        cameraFramePixelBufferWidth = nil
+        cameraFramePixelBufferHeight = nil
+        cameraFrameProcessingWidth = nil
+        cameraFrameProcessingHeight = nil
+        cameraFrameDownscaleApplied = false
+        cameraFrameDownscaleFactorX = 1.0
+        cameraFrameDownscaleFactorY = 1.0
+        cameraFramesProcessedCount = 0
+        cameraFrameProcessingTimeTotalMs = 0
+        cameraFrameProcessingTimeSampleCount = 0
+        cameraLastFrameProcessingMs = nil
+        arucoDetectedMarkerCountLastFrame = 0
+        arucoDetectedExpectedMarkerCountLastFrame = 0
+        arucoLastDetectionTimestamp = nil
+        arucoFramesWithAnyMarkerCount = 0
+        arucoFramesWithExpectedMarkerCount = 0
+        poseAcceptedLastFrame = nil
+        poseRejectedLastFrame = nil
+        poseLastRejectReason = nil
+    }
+
+    @MainActor
+    private func recordFrameProcessingDiagnostics(
+        frame: CameraFrame,
+        metrics: FrameMetrics,
+        arucoMetrics: ArucoMetrics,
+        poseMetrics: PoseMetrics,
+        expectedMarkerIds: [Int],
+        processingTimeMs: Double
+    ) {
+        let processingWidth = arucoMetrics.frameResolution?.width ?? frame.width
+        let processingHeight = arucoMetrics.frameResolution?.height ?? frame.height
+        let scaleX = processingWidth > 0 ? Double(frame.width) / Double(processingWidth) : 1.0
+        let scaleY = processingHeight > 0 ? Double(frame.height) / Double(processingHeight) : 1.0
+        let expectedMarkerIdSet = Set(expectedMarkerIds)
+        let expectedDetectedCount = arucoMetrics.detectedMarkerIds.filter {
+            expectedMarkerIdSet.contains($0)
+        }.count
+
+        cameraFramePixelBufferWidth = frame.width
+        cameraFramePixelBufferHeight = frame.height
+        cameraFrameProcessingWidth = processingWidth
+        cameraFrameProcessingHeight = processingHeight
+        cameraFrameDownscaleApplied =
+            processingWidth != frame.width || processingHeight != frame.height
+        cameraFrameDownscaleFactorX = scaleX.isFinite ? scaleX : 1.0
+        cameraFrameDownscaleFactorY = scaleY.isFinite ? scaleY : 1.0
+
+        cameraFramesProcessedCount += 1
+        if processingTimeMs.isFinite {
+            cameraFrameProcessingTimeTotalMs += processingTimeMs
+            cameraFrameProcessingTimeSampleCount += 1
+            cameraLastFrameProcessingMs = processingTimeMs
+        } else {
+            cameraLastFrameProcessingMs = nil
+        }
+
+        arucoDetectedMarkerCountLastFrame = arucoMetrics.detectedMarkerCount
+        arucoDetectedExpectedMarkerCountLastFrame = expectedDetectedCount
+        if arucoMetrics.detectedMarkerCount > 0 {
+            arucoFramesWithAnyMarkerCount += 1
+            arucoLastDetectionTimestamp = metrics.lastFrameTimestamp
+        }
+        if expectedDetectedCount > 0 {
+            arucoFramesWithExpectedMarkerCount += 1
+        }
+
+        let poseAccepted = !poseMetrics.rawPoseResults.isEmpty
+        poseAcceptedLastFrame = poseAccepted
+        poseRejectedLastFrame = !poseAccepted
+        poseLastRejectReason = poseAccepted
+            ? nil
+            : poseRejectReason(
+                arucoMetrics: arucoMetrics,
+                poseMetrics: poseMetrics,
+                expectedMarkerIds: expectedMarkerIds,
+                highResolutionProfileSelected:
+                    cameraProfile.identifier == .wide15xHighResolutionExperimental
+            )
+    }
+
+    private func poseRejectReason(
+        arucoMetrics: ArucoMetrics,
+        poseMetrics: PoseMetrics,
+        expectedMarkerIds: [Int],
+        highResolutionProfileSelected: Bool
+    ) -> String? {
+        if !arucoMetrics.hasFrameReachedDetector {
+            return "frame_not_reached_aruco_detector"
+        }
+
+        if let errorMessage = arucoMetrics.errorMessage,
+           !errorMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return errorMessage
+        }
+
+        if arucoMetrics.detectedMarkerCount == 0 {
+            return highResolutionProfileSelected
+                ? "High resolution active but no ArUco detections"
+                : "no_aruco_detection"
+        }
+
+        let expectedMarkerIdSet = Set(expectedMarkerIds)
+        let hasExpectedMarker = arucoMetrics.detectedMarkerIds.contains {
+            expectedMarkerIdSet.contains($0)
+        }
+        if !expectedMarkerIdSet.isEmpty, !hasExpectedMarker {
+            return highResolutionProfileSelected
+                ? "High resolution active but no expected ArUco detections"
+                : "no_expected_marker_detection"
+        }
+
+        if let errorMessage = poseMetrics.errorMessage,
+           !errorMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return errorMessage
+        }
+
+        return "pose_not_accepted"
     }
 
     private func resetBestFinalPoseCandidate() {
@@ -4868,6 +5018,9 @@ final class ScannerViewModel: ObservableObject {
         let angularUsefulSampleCount = globalDiagnostics.reduce(0) {
             $0 + $1.acceptedObservationCount
         }
+        let averageProcessingTimeMs = cameraFrameProcessingTimeSampleCount > 0
+            ? cameraFrameProcessingTimeTotalMs / Double(cameraFrameProcessingTimeSampleCount)
+            : nil
 
         return ExperimentalQualityDiagnostics(
             experimentalQualityModeEnabled:
@@ -4927,6 +5080,28 @@ final class ScannerViewModel: ObservableObject {
                 currentCameraDebugSnapshot.availableMaxResolutionWidth,
             cameraAvailableMaxResolutionHeight:
                 currentCameraDebugSnapshot.availableMaxResolutionHeight,
+            cameraFramePixelBufferWidth: cameraFramePixelBufferWidth,
+            cameraFramePixelBufferHeight: cameraFramePixelBufferHeight,
+            cameraFrameProcessingWidth: cameraFrameProcessingWidth,
+            cameraFrameProcessingHeight: cameraFrameProcessingHeight,
+            cameraFrameDownscaleApplied: cameraFrameDownscaleApplied,
+            cameraFrameDownscaleFactorX: finiteOptional(cameraFrameDownscaleFactorX),
+            cameraFrameDownscaleFactorY: finiteOptional(cameraFrameDownscaleFactorY),
+            cameraFramesReceivedCount: totalFramesReceived,
+            cameraFramesProcessedCount: cameraFramesProcessedCount,
+            cameraFramesDroppedCount:
+                max(totalFramesReceived - cameraFramesProcessedCount, 0),
+            cameraLastFrameProcessingMs: finiteOptional(cameraLastFrameProcessingMs),
+            cameraAverageFrameProcessingMs: finiteOptional(averageProcessingTimeMs),
+            arucoDetectedMarkerCountLastFrame: arucoDetectedMarkerCountLastFrame,
+            arucoDetectedExpectedMarkerCountLastFrame:
+                arucoDetectedExpectedMarkerCountLastFrame,
+            arucoLastDetectionTimestamp: finiteOptional(arucoLastDetectionTimestamp),
+            arucoFramesWithAnyMarkerCount: arucoFramesWithAnyMarkerCount,
+            arucoFramesWithExpectedMarkerCount: arucoFramesWithExpectedMarkerCount,
+            poseAcceptedLastFrame: poseAcceptedLastFrame,
+            poseRejectedLastFrame: poseRejectedLastFrame,
+            poseLastRejectReason: poseLastRejectReason,
             referenceCameraMatrixDiagnosticsEnabled:
                 ExperimentalQualityModeConfiguration.enableReferenceCameraMatrixDiagnostics,
             referenceCameraMatrixSource: referenceDiagnostics.source,
@@ -10822,6 +10997,46 @@ final class ScannerViewModel: ObservableObject {
                 experimentalQualityDiagnostics.cameraAvailableMaxResolutionWidth,
             cameraAvailableMaxResolutionHeight:
                 experimentalQualityDiagnostics.cameraAvailableMaxResolutionHeight,
+            cameraFramePixelBufferWidth:
+                experimentalQualityDiagnostics.cameraFramePixelBufferWidth,
+            cameraFramePixelBufferHeight:
+                experimentalQualityDiagnostics.cameraFramePixelBufferHeight,
+            cameraFrameProcessingWidth:
+                experimentalQualityDiagnostics.cameraFrameProcessingWidth,
+            cameraFrameProcessingHeight:
+                experimentalQualityDiagnostics.cameraFrameProcessingHeight,
+            cameraFrameDownscaleApplied:
+                experimentalQualityDiagnostics.cameraFrameDownscaleApplied,
+            cameraFrameDownscaleFactorX:
+                finiteReportDouble(experimentalQualityDiagnostics.cameraFrameDownscaleFactorX),
+            cameraFrameDownscaleFactorY:
+                finiteReportDouble(experimentalQualityDiagnostics.cameraFrameDownscaleFactorY),
+            cameraFramesReceivedCount:
+                experimentalQualityDiagnostics.cameraFramesReceivedCount,
+            cameraFramesProcessedCount:
+                experimentalQualityDiagnostics.cameraFramesProcessedCount,
+            cameraFramesDroppedCount:
+                experimentalQualityDiagnostics.cameraFramesDroppedCount,
+            cameraLastFrameProcessingMs:
+                finiteReportDouble(experimentalQualityDiagnostics.cameraLastFrameProcessingMs),
+            cameraAverageFrameProcessingMs:
+                finiteReportDouble(experimentalQualityDiagnostics.cameraAverageFrameProcessingMs),
+            arucoDetectedMarkerCountLastFrame:
+                experimentalQualityDiagnostics.arucoDetectedMarkerCountLastFrame,
+            arucoDetectedExpectedMarkerCountLastFrame:
+                experimentalQualityDiagnostics.arucoDetectedExpectedMarkerCountLastFrame,
+            arucoLastDetectionTimestamp:
+                finiteReportDouble(experimentalQualityDiagnostics.arucoLastDetectionTimestamp),
+            arucoFramesWithAnyMarkerCount:
+                experimentalQualityDiagnostics.arucoFramesWithAnyMarkerCount,
+            arucoFramesWithExpectedMarkerCount:
+                experimentalQualityDiagnostics.arucoFramesWithExpectedMarkerCount,
+            poseAcceptedLastFrame:
+                experimentalQualityDiagnostics.poseAcceptedLastFrame,
+            poseRejectedLastFrame:
+                experimentalQualityDiagnostics.poseRejectedLastFrame,
+            poseLastRejectReason:
+                experimentalQualityDiagnostics.poseLastRejectReason,
             referenceCameraMatrixDiagnosticsEnabled:
                 experimentalQualityDiagnostics.referenceCameraMatrixDiagnosticsEnabled,
             referenceCameraMatrixSource:

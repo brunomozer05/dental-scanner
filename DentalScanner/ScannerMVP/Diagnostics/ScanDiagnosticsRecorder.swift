@@ -626,6 +626,46 @@ final class ScanDiagnosticsRecorder {
                 experimentalQualityDiagnostics?.cameraAvailableMaxResolutionWidth,
             cameraAvailableMaxResolutionHeight:
                 experimentalQualityDiagnostics?.cameraAvailableMaxResolutionHeight,
+            cameraFramePixelBufferWidth:
+                experimentalQualityDiagnostics?.cameraFramePixelBufferWidth,
+            cameraFramePixelBufferHeight:
+                experimentalQualityDiagnostics?.cameraFramePixelBufferHeight,
+            cameraFrameProcessingWidth:
+                experimentalQualityDiagnostics?.cameraFrameProcessingWidth,
+            cameraFrameProcessingHeight:
+                experimentalQualityDiagnostics?.cameraFrameProcessingHeight,
+            cameraFrameDownscaleApplied:
+                experimentalQualityDiagnostics?.cameraFrameDownscaleApplied,
+            cameraFrameDownscaleFactorX:
+                finite(experimentalQualityDiagnostics?.cameraFrameDownscaleFactorX),
+            cameraFrameDownscaleFactorY:
+                finite(experimentalQualityDiagnostics?.cameraFrameDownscaleFactorY),
+            cameraFramesReceivedCount:
+                experimentalQualityDiagnostics?.cameraFramesReceivedCount,
+            cameraFramesProcessedCount:
+                experimentalQualityDiagnostics?.cameraFramesProcessedCount,
+            cameraFramesDroppedCount:
+                experimentalQualityDiagnostics?.cameraFramesDroppedCount,
+            cameraLastFrameProcessingMs:
+                finite(experimentalQualityDiagnostics?.cameraLastFrameProcessingMs),
+            cameraAverageFrameProcessingMs:
+                finite(experimentalQualityDiagnostics?.cameraAverageFrameProcessingMs),
+            arucoDetectedMarkerCountLastFrame:
+                experimentalQualityDiagnostics?.arucoDetectedMarkerCountLastFrame,
+            arucoDetectedExpectedMarkerCountLastFrame:
+                experimentalQualityDiagnostics?.arucoDetectedExpectedMarkerCountLastFrame,
+            arucoLastDetectionTimestamp:
+                finite(experimentalQualityDiagnostics?.arucoLastDetectionTimestamp),
+            arucoFramesWithAnyMarkerCount:
+                experimentalQualityDiagnostics?.arucoFramesWithAnyMarkerCount,
+            arucoFramesWithExpectedMarkerCount:
+                experimentalQualityDiagnostics?.arucoFramesWithExpectedMarkerCount,
+            poseAcceptedLastFrame:
+                experimentalQualityDiagnostics?.poseAcceptedLastFrame,
+            poseRejectedLastFrame:
+                experimentalQualityDiagnostics?.poseRejectedLastFrame,
+            poseLastRejectReason:
+                experimentalQualityDiagnostics?.poseLastRejectReason,
             referenceCameraMatrixDiagnosticsEnabled:
                 experimentalQualityDiagnostics?.referenceCameraMatrixDiagnosticsEnabled,
             referenceCameraMatrixSource:

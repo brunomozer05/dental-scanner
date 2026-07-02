@@ -194,3 +194,12 @@ Também é necessário:
 * foco estável;
 * câmera calibrada;
 * protocolo de captura.
+## High resolution profile can reach preview but not progress
+
+The `Wide 1.5x High Resolution Experimental` profile can activate a 3840x2160
+camera stream while scan progress remains at 0%. The likely failure modes are
+now tracked separately: no frames received, frames not processed, no ArUco
+detection, no expected marker IDs, pose rejection, or slow frame processing.
+
+The current fix is diagnostics-first/read-only. It does not change export,
+readiness, finalization, solvePnP or STL generation.

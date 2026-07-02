@@ -43,6 +43,29 @@ The primary path should keep using AVFoundation intrinsics when available.
 
 Existing profiles:
 
+## 4K processing diagnostics
+
+The high resolution profile may activate a 3840x2160 stream while scan progress
+stays at 0%. The first implementation must distinguish these cases before
+changing the detection path:
+
+```txt
+frames not received
+frames received but not processed
+ArUco sees no markers
+ArUco sees markers but not expected IDs
+pose is rejected after detection
+processing is too slow for useful accumulation
+```
+
+Diagnostics now include pixel buffer size, processing size, downscale flags,
+frame counters, ArUco counters and last pose accept/reject state.
+
+No downscale is currently active. If future work captures in 4K and processes
+at 1920x1080, it must either scale detected corners back to 4K coordinates and
+use 4K intrinsics, or scale intrinsics down to the processing resolution and
+keep corners in processing coordinates.
+
 ```txt
 Default
 Wide 1.0x

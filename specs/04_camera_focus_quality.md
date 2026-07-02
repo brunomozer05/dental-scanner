@@ -310,3 +310,30 @@ O debug deve mostrar:
 ## Regra de segurança
 
 Não deixar frame fora de foco contaminar rotação/inclinação final.
+
+## High Resolution frame diagnostics
+
+O perfil `Wide 1.5x High Resolution Experimental` pode ativar a camera em
+3840x2160, mas o progresso do scan pode ficar em 0% se o pipeline nao estiver
+recebendo frames, processando frames, detectando ArUco esperado, aceitando pose
+ou mantendo tempo de processamento aceitavel.
+
+Foram adicionados diagnostics read-only para separar essas causas:
+
+```txt
+cameraFramePixelBufferWidth/Height
+cameraFrameProcessingWidth/Height
+cameraFrameDownscaleApplied
+cameraFramesReceived/Processed/Dropped
+cameraLastFrameProcessingMs
+cameraAverageFrameProcessingMs
+arucoDetectedMarkerCountLastFrame
+arucoDetectedExpectedMarkerCountLastFrame
+poseAcceptedLastFrame
+poseRejectedLastFrame
+poseLastRejectReason
+```
+
+Nesta etapa nao ha downscale experimental. Se ele for adicionado no futuro, a
+spec deve documentar explicitamente se os corners voltam para coordenadas do
+frame original ou se os intrinsics sao escalados para a resolucao processada.

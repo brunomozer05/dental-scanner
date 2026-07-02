@@ -2399,6 +2399,82 @@ private struct ScannerDebugEmergencyPanelView: View {
                             )
                         )
                         debugRow(
+                            title: "Frame received",
+                            value: highResolutionMaxDimensionsText(
+                                experimentalQualityDiagnostics.cameraFramePixelBufferWidth,
+                                experimentalQualityDiagnostics.cameraFramePixelBufferHeight
+                            )
+                        )
+                        debugRow(
+                            title: "Processing size",
+                            value: highResolutionMaxDimensionsText(
+                                experimentalQualityDiagnostics.cameraFrameProcessingWidth,
+                                experimentalQualityDiagnostics.cameraFrameProcessingHeight
+                            )
+                        )
+                        debugRow(
+                            title: "Downscale",
+                            value: safeBool(experimentalQualityDiagnostics.cameraFrameDownscaleApplied)
+                        )
+                        debugRow(
+                            title: "Downscale factors",
+                            value: "\(safeNumber(experimentalQualityDiagnostics.cameraFrameDownscaleFactorX)) / \(safeNumber(experimentalQualityDiagnostics.cameraFrameDownscaleFactorY))"
+                        )
+                        debugRow(
+                            title: "Frames received",
+                            value: safeInt(experimentalQualityDiagnostics.cameraFramesReceivedCount)
+                        )
+                        debugRow(
+                            title: "Frames processed",
+                            value: safeInt(experimentalQualityDiagnostics.cameraFramesProcessedCount)
+                        )
+                        debugRow(
+                            title: "Frames dropped",
+                            value: safeInt(experimentalQualityDiagnostics.cameraFramesDroppedCount)
+                        )
+                        debugRow(
+                            title: "Last processing",
+                            value: safeMilliseconds(
+                                experimentalQualityDiagnostics.cameraLastFrameProcessingMs
+                            )
+                        )
+                        debugRow(
+                            title: "Avg processing",
+                            value: safeMilliseconds(
+                                experimentalQualityDiagnostics.cameraAverageFrameProcessingMs
+                            )
+                        )
+                        debugRow(
+                            title: "ArUco last",
+                            value: safeInt(experimentalQualityDiagnostics.arucoDetectedMarkerCountLastFrame)
+                        )
+                        debugRow(
+                            title: "Expected last",
+                            value: safeInt(
+                                experimentalQualityDiagnostics.arucoDetectedExpectedMarkerCountLastFrame
+                            )
+                        )
+                        debugRow(
+                            title: "Frames any ArUco",
+                            value: safeInt(experimentalQualityDiagnostics.arucoFramesWithAnyMarkerCount)
+                        )
+                        debugRow(
+                            title: "Frames expected",
+                            value: safeInt(experimentalQualityDiagnostics.arucoFramesWithExpectedMarkerCount)
+                        )
+                        debugRow(
+                            title: "Pose accepted",
+                            value: safeBool(experimentalQualityDiagnostics.poseAcceptedLastFrame)
+                        )
+                        debugRow(
+                            title: "Pose rejected",
+                            value: safeBool(experimentalQualityDiagnostics.poseRejectedLastFrame)
+                        )
+                        debugRow(
+                            title: "Pose reject reason",
+                            value: safeText(experimentalQualityDiagnostics.poseLastRejectReason)
+                        )
+                        debugRow(
                             title: "Reference matrix",
                             value: safeBool(
                                 experimentalQualityDiagnostics.referenceCameraMatrixDiagnosticsEnabled
@@ -2603,6 +2679,15 @@ private struct ScannerDebugEmergencyPanelView: View {
         }
 
         return "\(text)s"
+    }
+
+    private func safeMilliseconds(_ value: Double?) -> String {
+        let text = safeNumber(value)
+        guard text != "N/A" else {
+            return text
+        }
+
+        return "\(text) ms"
     }
 
     private func safeDegrees(_ value: Double?) -> String {

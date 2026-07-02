@@ -190,3 +190,27 @@ Commit sugerido:
 ```txt
 Add best final pose candidate tracking
 ```
+## Task - Validate high resolution frame processing
+
+Run side-by-side scans with `Wide 1.5x` and
+`Wide 1.5x High Resolution Experimental`.
+
+Use the new diagnostics to compare:
+
+```txt
+cameraFramePixelBufferWidth/Height
+cameraFrameProcessingWidth/Height
+cameraFramesReceived/Processed/Dropped
+cameraLastFrameProcessingMs
+cameraAverageFrameProcessingMs
+arucoDetectedMarkerCountLastFrame
+arucoDetectedExpectedMarkerCountLastFrame
+arucoFramesWithAnyMarkerCount
+arucoFramesWithExpectedMarkerCount
+poseAcceptedLastFrame
+poseRejectedLastFrame
+poseLastRejectReason
+```
+
+Only consider downscale or intrinsics/corner scaling if the diagnostics prove
+that 4K frames arrive but detection or pose acceptance fails.
