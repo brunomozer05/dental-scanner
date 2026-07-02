@@ -209,6 +209,7 @@ final class ScannerViewModel: ObservableObject {
         static let enableExperimentalQualityMode = true
         static let enableExperimentalObservationGate = true
         static let enableExperimentalHighResolutionCameraProfile = false
+        static let enableManualHighResolutionCameraFormatSelection = true
         static let enableReferenceCameraMatrixDiagnostics = true
         static let enableExperimentalAngleDiversityDiagnostics = true
         static let enableExperimentalROICenterFocus = false
@@ -1694,6 +1695,7 @@ final class ScannerViewModel: ObservableObject {
         }
 
         cameraProfile = profile
+        applyCameraProfileFormatSelection(profile)
         if let requestedZoomFactor = profile.requestedZoomFactor {
             setCameraZoomFactor(requestedZoomFactor)
         }
@@ -1707,6 +1709,26 @@ final class ScannerViewModel: ObservableObject {
                 "conservativeFocus": profile.usesConservativeFocusRecovery ? "true" : "false"
             ]
         )
+    }
+
+    private func applyCameraProfileFormatSelection(_ profile: CameraProfile) {
+        let shouldUseHighResolution =
+            profile.identifier == .wide15xHighResolutionExperimental &&
+            ExperimentalQualityModeConfiguration.enableManualHighResolutionCameraFormatSelection
+
+        Task { [weak self] in
+            guard let self else { return }
+
+            let snapshot = await self.cameraService.setHighResolutionFormatSelectionEnabled(
+                shouldUseHighResolution
+            )
+
+            await MainActor.run {
+                self.currentCameraDebugSnapshot = snapshot
+                self.syncCameraControlState(from: snapshot)
+                self.cameraLockErrorMessage = snapshot.lockError
+            }
+        }
     }
 
     private func requestedZoomFactorForCurrentProfile() -> Double? {
@@ -4837,13 +4859,9 @@ final class ScannerViewModel: ObservableObject {
         let roiFocusDiagnostics = makeROIFocusDiagnostics(profile: profile)
         let highResolutionSelected =
             cameraProfile.identifier == .wide15xHighResolutionExperimental
-        let highResolutionFallbackReason: String?
-        if highResolutionSelected &&
-            !ExperimentalQualityModeConfiguration.enableExperimentalHighResolutionCameraProfile {
-            highResolutionFallbackReason = "High resolution format selection disabled"
-        } else {
-            highResolutionFallbackReason = nil
-        }
+        let highResolutionFallbackReason = highResolutionSelected
+            ? currentCameraDebugSnapshot.highResolutionFallbackReason
+            : nil
         let angularSampleCount = globalDiagnostics.reduce(0) {
             $0 + $1.rawObservationCount
         }
@@ -4892,12 +4910,23 @@ final class ScannerViewModel: ObservableObject {
             experimentalUsefulAllMarkersReady: !expectedMarkerDiagnostics.isEmpty &&
                 usefulReadyCount == expectedMarkerDiagnostics.count,
             experimentalOverallUsefulProgress: finiteOptional(overallProgress),
-            cameraHighResolutionProfileAvailable: true,
+            cameraHighResolutionProfileAvailable:
+                currentCameraDebugSnapshot.highResolutionFormatAvailable,
             cameraHighResolutionProfileSelected: highResolutionSelected,
             cameraRequestedHighResolutionDimensions:
-                ExperimentalQualityModeConfiguration.highResolutionDimensions,
-            cameraAppliedHighResolutionDimensions: currentCameraDebugSnapshot.resolutionText,
+                highResolutionSelected
+                    ? currentCameraDebugSnapshot.highResolutionRequestedDimensions ??
+                        ExperimentalQualityModeConfiguration.highResolutionDimensions
+                    : nil,
+            cameraAppliedHighResolutionDimensions:
+                currentCameraDebugSnapshot.highResolutionAppliedDimensions ??
+                    currentCameraDebugSnapshot.resolutionText,
             cameraHighResolutionFallbackReason: highResolutionFallbackReason,
+            cameraAvailableFormatCount: currentCameraDebugSnapshot.availableFormatCount,
+            cameraAvailableMaxResolutionWidth:
+                currentCameraDebugSnapshot.availableMaxResolutionWidth,
+            cameraAvailableMaxResolutionHeight:
+                currentCameraDebugSnapshot.availableMaxResolutionHeight,
             referenceCameraMatrixDiagnosticsEnabled:
                 ExperimentalQualityModeConfiguration.enableReferenceCameraMatrixDiagnostics,
             referenceCameraMatrixSource: referenceDiagnostics.source,
@@ -10787,6 +10816,12 @@ final class ScannerViewModel: ObservableObject {
                 experimentalQualityDiagnostics.cameraAppliedHighResolutionDimensions,
             cameraHighResolutionFallbackReason:
                 experimentalQualityDiagnostics.cameraHighResolutionFallbackReason,
+            cameraAvailableFormatCount:
+                experimentalQualityDiagnostics.cameraAvailableFormatCount,
+            cameraAvailableMaxResolutionWidth:
+                experimentalQualityDiagnostics.cameraAvailableMaxResolutionWidth,
+            cameraAvailableMaxResolutionHeight:
+                experimentalQualityDiagnostics.cameraAvailableMaxResolutionHeight,
             referenceCameraMatrixDiagnosticsEnabled:
                 experimentalQualityDiagnostics.referenceCameraMatrixDiagnosticsEnabled,
             referenceCameraMatrixSource:

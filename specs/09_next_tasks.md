@@ -121,7 +121,7 @@ Ainda pendente:
 
 O modo experimental registra 65 frames uteis por marker como meta inicial e 300 frames/observacoes como alvo de otimizacao, mas ainda nao altera export, readiness ou finalizacao.
 
-High Resolution Camera Profile esta preparado para diagnostico manual e permanece desligado por padrao.
+High Resolution Camera Profile esta preparado para teste manual e permanece desligado por padrao. Quando `Wide 1.5x High Resolution Experimental` for selecionado manualmente, o app deve tentar 3840x2160 e registrar fallback se o formato nao estiver disponivel.
 
 Reference Camera Matrix Diagnostics e read-only e nao substitui os intrinsics reais da camera.
 

@@ -41,6 +41,13 @@ final class CameraFrameService: NSObject {
         let isEnabled: Bool
     }
 
+    private struct CameraFormatDiagnostics {
+        var highResolutionFormatAvailable: Bool = false
+        var availableFormatCount: Int?
+        var availableMaxResolutionWidth: Int?
+        var availableMaxResolutionHeight: Int?
+    }
+
     private let configuration: Configuration
     private let sessionQueue = DispatchQueue(label: "ScannerMVP.CameraFrameService.SessionQueue", qos: .userInitiated)
     private let outputQueue = DispatchQueue(label: "ScannerMVP.CameraFrameService.OutputQueue", qos: .userInitiated)
@@ -65,6 +72,12 @@ final class CameraFrameService: NSObject {
     private var desiredVideoZoomFactor: CGFloat = 1.0
     private var manualFocusEnabled = false
     private var manualLensPosition: Float = 0.5
+    private let preferredHighResolutionDimensions = CMVideoDimensions(width: 3840, height: 2160)
+    private let preferredHighResolutionFrameRate: Int32 = 30
+    private var highResolutionFormatSelectionEnabled = false
+    private var baselineFormatBeforeHighResolution: AVCaptureDevice.Format?
+    private var highResolutionFallbackReason: String?
+    private var cameraFormatDiagnostics = CameraFormatDiagnostics()
 
     var onFrame: ((CameraFrame) -> Void)?
     var onError: ((Error) -> Void)?
@@ -247,6 +260,35 @@ final class CameraFrameService: NSObject {
 
                 if let device = self.activeDevice {
                     self.applyVideoZoomFactor(requestedZoom, to: device)
+                }
+
+                continuation.resume(returning: self.makeCameraDebugSnapshot())
+            }
+        }
+    }
+
+    func setHighResolutionFormatSelectionEnabled(_ isEnabled: Bool) async -> CameraDebugSnapshot {
+        await withCheckedContinuation { continuation in
+            sessionQueue.async { [weak self] in
+                guard let self else {
+                    continuation.resume(returning: .unavailable)
+                    return
+                }
+
+                self.highResolutionFormatSelectionEnabled = isEnabled
+
+                guard let device = self.activeDevice else {
+                    self.highResolutionFallbackReason = isEnabled
+                        ? "Camera unavailable; high resolution will retry when camera starts"
+                        : nil
+                    continuation.resume(returning: self.makeCameraDebugSnapshot())
+                    return
+                }
+
+                if isEnabled {
+                    self.applyHighResolutionFormatSelection(to: device)
+                } else {
+                    self.restoreDefaultFormatSelection(to: device)
                 }
 
                 continuation.resume(returning: self.makeCameraDebugSnapshot())
@@ -474,7 +516,9 @@ final class CameraFrameService: NSObject {
 
         session.addInput(input)
         activeDevice = device
+        updateCameraFormatDiagnostics(for: device)
 
+        applyHighResolutionFormatSelectionIfNeeded(to: device, isSessionConfigurationActive: true)
         try applyDeviceControls(configuration.deviceControls, to: device)
         try applyPreferredFrameRate(configuration.preferredFrameRate, to: device)
         applyVideoZoomFactor(currentDesiredVideoZoomFactor(), to: device)
@@ -560,6 +604,145 @@ final class CameraFrameService: NSObject {
         } catch {
             throw ServiceError.deviceConfigurationFailed(error)
         }
+    }
+
+    private func applyHighResolutionFormatSelectionIfNeeded(
+        to device: AVCaptureDevice,
+        isSessionConfigurationActive: Bool = false
+    ) {
+        guard highResolutionFormatSelectionEnabled else {
+            return
+        }
+
+        applyHighResolutionFormatSelection(
+            to: device,
+            isSessionConfigurationActive: isSessionConfigurationActive
+        )
+    }
+
+    private func applyHighResolutionFormatSelection(
+        to device: AVCaptureDevice,
+        isSessionConfigurationActive: Bool = false
+    ) {
+        guard let format = bestHighResolutionFormat(for: device) else {
+            highResolutionFallbackReason = "3840x2160 format unavailable on selected camera"
+            return
+        }
+
+        if baselineFormatBeforeHighResolution == nil {
+            baselineFormatBeforeHighResolution = device.activeFormat
+        }
+
+        var presetFallbackReason: String?
+        if !isSessionConfigurationActive {
+            session.beginConfiguration()
+        }
+        if session.canSetSessionPreset(.inputPriority) {
+            session.sessionPreset = .inputPriority
+        } else if session.canSetSessionPreset(.hd4K3840x2160) {
+            session.sessionPreset = .hd4K3840x2160
+        } else {
+            presetFallbackReason = "Session does not support inputPriority or 4K preset"
+        }
+        if !isSessionConfigurationActive {
+            session.commitConfiguration()
+        }
+
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+
+            device.activeFormat = format
+            let frameRateFallbackReason: String?
+            if formatSupportsFrameRate(preferredHighResolutionFrameRate, format: format) {
+                let frameDuration = CMTime(value: 1, timescale: preferredHighResolutionFrameRate)
+                device.activeVideoMinFrameDuration = frameDuration
+                device.activeVideoMaxFrameDuration = frameDuration
+                frameRateFallbackReason = nil
+            } else {
+                frameRateFallbackReason = "3840x2160 selected; preferred 30 fps unavailable"
+            }
+
+            let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            if dimensions.width == preferredHighResolutionDimensions.width,
+               dimensions.height == preferredHighResolutionDimensions.height {
+                highResolutionFallbackReason = presetFallbackReason ?? frameRateFallbackReason
+            } else {
+                highResolutionFallbackReason = "Selected format did not apply requested dimensions"
+            }
+        } catch {
+            highResolutionFallbackReason =
+                "High resolution format selection failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func restoreDefaultFormatSelection(to device: AVCaptureDevice) {
+        if session.canSetSessionPreset(configuration.sessionPreset) {
+            session.beginConfiguration()
+            session.sessionPreset = configuration.sessionPreset
+            session.commitConfiguration()
+        }
+
+        if let baselineFormatBeforeHighResolution {
+            do {
+                try device.lockForConfiguration()
+                defer { device.unlockForConfiguration() }
+
+                device.activeFormat = baselineFormatBeforeHighResolution
+            } catch {
+                setCameraControlError("Restaurar formato de camera falhou: \(error.localizedDescription)")
+            }
+        }
+
+        baselineFormatBeforeHighResolution = nil
+        highResolutionFallbackReason = nil
+        do {
+            try applyPreferredFrameRate(configuration.preferredFrameRate, to: device)
+        } catch {
+            setCameraControlError("FPS da camera falhou: \(error.localizedDescription)")
+        }
+    }
+
+    private func bestHighResolutionFormat(for device: AVCaptureDevice) -> AVCaptureDevice.Format? {
+        let exactMatches = device.formats.filter { format in
+            let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            return dimensions.width == preferredHighResolutionDimensions.width &&
+                dimensions.height == preferredHighResolutionDimensions.height
+        }
+
+        let frameRateMatches = exactMatches.filter {
+            formatSupportsFrameRate(preferredHighResolutionFrameRate, format: $0)
+        }
+
+        return (frameRateMatches.isEmpty ? exactMatches : frameRateMatches)
+            .sorted { lhs, rhs in
+                maxFrameRate(for: lhs) < maxFrameRate(for: rhs)
+            }
+            .first
+    }
+
+    private func updateCameraFormatDiagnostics(for device: AVCaptureDevice) {
+        let maximumDimensions = availableMaximumFormatDimensions(for: device)
+        cameraFormatDiagnostics = CameraFormatDiagnostics(
+            highResolutionFormatAvailable: bestHighResolutionFormat(for: device) != nil,
+            availableFormatCount: device.formats.count,
+            availableMaxResolutionWidth: maximumDimensions.map { Int($0.width) },
+            availableMaxResolutionHeight: maximumDimensions.map { Int($0.height) }
+        )
+    }
+
+    private func formatSupportsFrameRate(
+        _ frameRate: Int32,
+        format: AVCaptureDevice.Format
+    ) -> Bool {
+        let targetFrameRate = Double(frameRate)
+        return format.videoSupportedFrameRateRanges.contains { range in
+            range.minFrameRate <= targetFrameRate && targetFrameRate <= range.maxFrameRate
+        }
+    }
+
+    private func maxFrameRate(for format: AVCaptureDevice.Format) -> Double {
+        format.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
     }
 
     private func applyPreferredFrameRate(_ frameRate: Int32, to device: AVCaptureDevice) throws {
@@ -1081,6 +1264,16 @@ final class CameraFrameService: NSObject {
                 videoZoomFactor: nil,
                 minimumAvailableVideoZoomFactor: nil,
                 maximumAvailableVideoZoomFactor: nil,
+                highResolutionFormatSelectionEnabled: highResolutionFormatSelectionEnabled,
+                highResolutionFormatAvailable: false,
+                highResolutionRequestedDimensions: highResolutionFormatSelectionEnabled
+                    ? resolutionText(for: preferredHighResolutionDimensions)
+                    : nil,
+                highResolutionAppliedDimensions: nil,
+                highResolutionFallbackReason: highResolutionFallbackReason,
+                availableFormatCount: nil,
+                availableMaxResolutionWidth: nil,
+                availableMaxResolutionHeight: nil,
                 manualFocusEnabled: state.manualFocusEnabled,
                 manualLensPosition: state.manualLensPosition,
                 isManualFocusSupported: nil,
@@ -1092,6 +1285,7 @@ final class CameraFrameService: NSObject {
         let configuration = currentCameraQualityConfiguration()
         let formatDimensions = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
         let dimensions = sampleBufferDimensions ?? formatDimensions
+        let formatDiagnostics = cameraFormatDiagnostics
 
         return CameraDebugSnapshot(
             deviceName: device.localizedName,
@@ -1127,6 +1321,16 @@ final class CameraFrameService: NSObject {
             videoZoomFactor: Double(device.videoZoomFactor),
             minimumAvailableVideoZoomFactor: Double(device.minAvailableVideoZoomFactor),
             maximumAvailableVideoZoomFactor: Double(device.maxAvailableVideoZoomFactor),
+            highResolutionFormatSelectionEnabled: highResolutionFormatSelectionEnabled,
+            highResolutionFormatAvailable: formatDiagnostics.highResolutionFormatAvailable,
+            highResolutionRequestedDimensions: highResolutionFormatSelectionEnabled
+                ? resolutionText(for: preferredHighResolutionDimensions)
+                : nil,
+            highResolutionAppliedDimensions: resolutionText(for: dimensions),
+            highResolutionFallbackReason: highResolutionFallbackReason,
+            availableFormatCount: formatDiagnostics.availableFormatCount,
+            availableMaxResolutionWidth: formatDiagnostics.availableMaxResolutionWidth,
+            availableMaxResolutionHeight: formatDiagnostics.availableMaxResolutionHeight,
             manualFocusEnabled: state.manualFocusEnabled,
             manualLensPosition: state.manualLensPosition,
             isManualFocusSupported: device.isLockingFocusWithCustomLensPositionSupported,
@@ -1347,6 +1551,15 @@ final class CameraFrameService: NSObject {
         }
 
         return "\(dimensions.width)x\(dimensions.height)"
+    }
+
+    private func availableMaximumFormatDimensions(for device: AVCaptureDevice) -> CMVideoDimensions? {
+        device.formats
+            .map { CMVideoFormatDescriptionGetDimensions($0.formatDescription) }
+            .filter { $0.width > 0 && $0.height > 0 }
+            .max { lhs, rhs in
+                Int(lhs.width) * Int(lhs.height) < Int(rhs.width) * Int(rhs.height)
+            }
     }
 
     private func focusModeText(_ mode: AVCaptureDevice.FocusMode) -> String {

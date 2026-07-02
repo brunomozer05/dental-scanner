@@ -120,7 +120,7 @@ struct CameraProfile: Equatable, Identifiable {
             prefersPhysicalWideCamera: true,
             usesConservativeFocusRecovery: false,
             isExperimental: true,
-            debugNote: "Experimental diagnostics profile; high resolution format selection is off by default.",
+            debugNote: "Experimental manual profile; tries 3840x2160 when selected.",
             tooCloseFocusRiskDistanceMm: 125,
             preferredMinScanDistanceMm: 130,
             preferredIdealMinScanDistanceMm: 150,

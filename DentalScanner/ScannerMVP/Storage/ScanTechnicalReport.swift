@@ -101,6 +101,9 @@ struct ScanTechnicalReport: Codable {
     var cameraRequestedHighResolutionDimensions: String?
     var cameraAppliedHighResolutionDimensions: String?
     var cameraHighResolutionFallbackReason: String?
+    var cameraAvailableFormatCount: Int?
+    var cameraAvailableMaxResolutionWidth: Int?
+    var cameraAvailableMaxResolutionHeight: Int?
     var referenceCameraMatrixDiagnosticsEnabled: Bool?
     var referenceCameraMatrixSource: String?
     var referenceCameraMatrixFx: Double?

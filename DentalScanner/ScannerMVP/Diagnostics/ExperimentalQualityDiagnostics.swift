@@ -74,6 +74,9 @@ struct ExperimentalQualityDiagnostics: Codable, Equatable {
     var cameraRequestedHighResolutionDimensions: String?
     var cameraAppliedHighResolutionDimensions: String?
     var cameraHighResolutionFallbackReason: String?
+    var cameraAvailableFormatCount: Int?
+    var cameraAvailableMaxResolutionWidth: Int?
+    var cameraAvailableMaxResolutionHeight: Int?
 
     var referenceCameraMatrixDiagnosticsEnabled: Bool
     var referenceCameraMatrixSource: String?
@@ -134,6 +137,9 @@ struct ExperimentalQualityDiagnostics: Codable, Equatable {
         cameraRequestedHighResolutionDimensions: nil,
         cameraAppliedHighResolutionDimensions: nil,
         cameraHighResolutionFallbackReason: nil,
+        cameraAvailableFormatCount: nil,
+        cameraAvailableMaxResolutionWidth: nil,
+        cameraAvailableMaxResolutionHeight: nil,
         referenceCameraMatrixDiagnosticsEnabled: false,
         referenceCameraMatrixSource: nil,
         referenceCameraMatrixFx: nil,

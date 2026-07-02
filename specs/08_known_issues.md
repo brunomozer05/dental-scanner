@@ -48,6 +48,8 @@ Resultados iniciais no iPhone 16 indicam:
 * distâncias abaixo de aproximadamente 120-125 mm aumentam o risco de perda de foco;
 * a faixa inicial recomendada para iPhone 16 com `Wide 1.5x` é 150-180 mm.
 
+O perfil `Wide 1.5x High Resolution Experimental` tenta aplicar 3840x2160 apenas quando selecionado manualmente. Ele nao e recomendado automaticamente; se o formato 4K nao estiver disponivel, o app deve voltar ao formato atual e registrar o fallback.
+
 ## 2.2. ROI/frame mask e observacoes uteis ainda nao controlam export
 
 Foi adicionada mascara/ROI por classe de device para detectar markers perto demais da borda da imagem.

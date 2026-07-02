@@ -2370,10 +2370,27 @@ private struct ScannerDebugEmergencyPanelView: View {
                             )
                         )
                         debugRow(
+                            title: "High res requested",
+                            value: safeText(
+                                experimentalQualityDiagnostics.cameraRequestedHighResolutionDimensions
+                            )
+                        )
+                        debugRow(
                             title: "High res applied",
                             value: safeText(
                                 experimentalQualityDiagnostics.cameraAppliedHighResolutionDimensions
                             )
+                        )
+                        debugRow(
+                            title: "High res max",
+                            value: highResolutionMaxDimensionsText(
+                                experimentalQualityDiagnostics.cameraAvailableMaxResolutionWidth,
+                                experimentalQualityDiagnostics.cameraAvailableMaxResolutionHeight
+                            )
+                        )
+                        debugRow(
+                            title: "Format count",
+                            value: safeInt(experimentalQualityDiagnostics.cameraAvailableFormatCount)
                         )
                         debugRow(
                             title: "High res fallback",
@@ -2562,6 +2579,21 @@ private struct ScannerDebugEmergencyPanelView: View {
         }
 
         return "\(value)"
+    }
+
+    private func highResolutionMaxDimensionsText(
+        _ width: Int?,
+        _ height: Int?
+    ) -> String {
+        guard let width,
+              let height,
+              width > 0,
+              height > 0
+        else {
+            return "N/A"
+        }
+
+        return "\(width)x\(height)"
     }
 
     private func safeSeconds(_ value: Double?) -> String {

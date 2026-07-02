@@ -620,6 +620,12 @@ final class ScanDiagnosticsRecorder {
                 experimentalQualityDiagnostics?.cameraAppliedHighResolutionDimensions,
             cameraHighResolutionFallbackReason:
                 experimentalQualityDiagnostics?.cameraHighResolutionFallbackReason,
+            cameraAvailableFormatCount:
+                experimentalQualityDiagnostics?.cameraAvailableFormatCount,
+            cameraAvailableMaxResolutionWidth:
+                experimentalQualityDiagnostics?.cameraAvailableMaxResolutionWidth,
+            cameraAvailableMaxResolutionHeight:
+                experimentalQualityDiagnostics?.cameraAvailableMaxResolutionHeight,
             referenceCameraMatrixDiagnosticsEnabled:
                 experimentalQualityDiagnostics?.referenceCameraMatrixDiagnosticsEnabled,
             referenceCameraMatrixSource:

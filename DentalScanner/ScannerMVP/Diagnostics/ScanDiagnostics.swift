@@ -130,6 +130,9 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
     var cameraRequestedHighResolutionDimensions: String?
     var cameraAppliedHighResolutionDimensions: String?
     var cameraHighResolutionFallbackReason: String?
+    var cameraAvailableFormatCount: Int?
+    var cameraAvailableMaxResolutionWidth: Int?
+    var cameraAvailableMaxResolutionHeight: Int?
     var referenceCameraMatrixDiagnosticsEnabled: Bool?
     var referenceCameraMatrixSource: String?
     var referenceCameraMatrixFx: Double?
@@ -337,6 +340,9 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
         cameraRequestedHighResolutionDimensions: nil,
         cameraAppliedHighResolutionDimensions: nil,
         cameraHighResolutionFallbackReason: nil,
+        cameraAvailableFormatCount: nil,
+        cameraAvailableMaxResolutionWidth: nil,
+        cameraAvailableMaxResolutionHeight: nil,
         referenceCameraMatrixDiagnosticsEnabled: nil,
         referenceCameraMatrixSource: nil,
         referenceCameraMatrixFx: nil,

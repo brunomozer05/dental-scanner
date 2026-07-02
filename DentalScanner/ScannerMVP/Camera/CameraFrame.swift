@@ -110,6 +110,14 @@ struct CameraDebugSnapshot: Equatable {
     let videoZoomFactor: Double?
     let minimumAvailableVideoZoomFactor: Double?
     let maximumAvailableVideoZoomFactor: Double?
+    let highResolutionFormatSelectionEnabled: Bool
+    let highResolutionFormatAvailable: Bool
+    let highResolutionRequestedDimensions: String?
+    let highResolutionAppliedDimensions: String?
+    let highResolutionFallbackReason: String?
+    let availableFormatCount: Int?
+    let availableMaxResolutionWidth: Int?
+    let availableMaxResolutionHeight: Int?
     let manualFocusEnabled: Bool
     let manualLensPosition: Float?
     let isManualFocusSupported: Bool?
@@ -149,6 +157,14 @@ struct CameraDebugSnapshot: Equatable {
         videoZoomFactor: nil,
         minimumAvailableVideoZoomFactor: nil,
         maximumAvailableVideoZoomFactor: nil,
+        highResolutionFormatSelectionEnabled: false,
+        highResolutionFormatAvailable: false,
+        highResolutionRequestedDimensions: nil,
+        highResolutionAppliedDimensions: nil,
+        highResolutionFallbackReason: nil,
+        availableFormatCount: nil,
+        availableMaxResolutionWidth: nil,
+        availableMaxResolutionHeight: nil,
         manualFocusEnabled: false,
         manualLensPosition: nil,
         isManualFocusSupported: nil,

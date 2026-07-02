@@ -136,7 +136,8 @@ Regras atuais:
 * ROI/frame mask, distancia, risco de foco e pose finita classificam observacoes aceitas/rejeitadas;
 * o progresso util experimental roda em paralelo ao progresso visual/readiness atual;
 * `minValidFramesPerMarker = 65` e `targetOptimizationFrames = 300` sao registrados por device quality profile;
-* High Resolution Camera Profile fica disponivel para diagnostico manual, mas nao e selecionado automaticamente;
+* High Resolution Camera Profile fica disponivel para teste manual, tenta aplicar 3840x2160 quando selecionado, mas nao e selecionado automaticamente;
+* se 3840x2160 nao estiver disponivel, a camera faz fallback seguro e registra o motivo;
 * Reference Camera Matrix Diagnostics e read-only e nao altera solvePnP/export.
 
 O modo existe para comparar aparelhos/perfis antes de qualquer mudanca em export, readiness ou finalizacao.
