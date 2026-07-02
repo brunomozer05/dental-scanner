@@ -53,7 +53,7 @@ struct ScannerView: View {
 
                     ScanDistanceGuideView(
                         distanceMm: viewModel.poseDistanceMm,
-                        configuration: .default,
+                        configuration: viewModel.distanceGuideConfiguration,
                         isSourceReliable: viewModel.distanceGuideSourceReliable,
                         statusText: viewModel.distanceGuideStateTitle
                     )
@@ -241,6 +241,20 @@ struct ScannerView: View {
                                     viewModel.debugDistanceGuideState,
                                 distanceGuideMessage:
                                     viewModel.debugDistanceGuideMessage,
+                                currentDistanceGuideMm:
+                                    viewModel.debugCurrentDistanceGuideMm,
+                                distanceGuideBarMinMm:
+                                    viewModel.debugDistanceGuideBarMinMm,
+                                distanceGuideBarMaxMm:
+                                    viewModel.debugDistanceGuideBarMaxMm,
+                                distanceGuideTooCloseFocusRiskDistanceMm:
+                                    viewModel.debugDistanceGuideTooCloseFocusRiskDistanceMm,
+                                distanceGuideIdealBandMinMm:
+                                    viewModel.debugDistanceGuideIdealBandMinMm,
+                                distanceGuideIdealBandMaxMm:
+                                    viewModel.debugDistanceGuideIdealBandMaxMm,
+                                distanceGuideMaxDistanceMm:
+                                    viewModel.debugDistanceGuideMaxDistanceMm,
                                 deviceQualityClass:
                                     viewModel.debugDeviceQualityClass,
                                 deviceQualityProfileName:
@@ -1943,6 +1957,13 @@ private struct ScannerDebugEmergencyPanelView: View {
     let cameraProfilePreferredMaxScanDistanceMm: Double?
     let distanceGuideState: String
     let distanceGuideMessage: String
+    let currentDistanceGuideMm: Double?
+    let distanceGuideBarMinMm: Double
+    let distanceGuideBarMaxMm: Double
+    let distanceGuideTooCloseFocusRiskDistanceMm: Double?
+    let distanceGuideIdealBandMinMm: Double
+    let distanceGuideIdealBandMaxMm: Double
+    let distanceGuideMaxDistanceMm: Double
     let deviceQualityClass: String
     let deviceQualityProfileName: String
     let deviceQualityIsKnown: Bool
@@ -2152,6 +2173,34 @@ private struct ScannerDebugEmergencyPanelView: View {
                         debugRow(
                             title: "Profile max",
                             value: safeMillimeters(cameraProfilePreferredMaxScanDistanceMm)
+                        )
+                        debugRow(
+                            title: "Current distance",
+                            value: safeMillimeters(currentDistanceGuideMm)
+                        )
+                        debugRow(
+                            title: "Guide bar min",
+                            value: safeMillimeters(distanceGuideBarMinMm)
+                        )
+                        debugRow(
+                            title: "Guide bar max",
+                            value: safeMillimeters(distanceGuideBarMaxMm)
+                        )
+                        debugRow(
+                            title: "Guide focus risk",
+                            value: safeMillimeters(distanceGuideTooCloseFocusRiskDistanceMm)
+                        )
+                        debugRow(
+                            title: "Guide ideal min",
+                            value: safeMillimeters(distanceGuideIdealBandMinMm)
+                        )
+                        debugRow(
+                            title: "Guide ideal max",
+                            value: safeMillimeters(distanceGuideIdealBandMaxMm)
+                        )
+                        debugRow(
+                            title: "Guide max",
+                            value: safeMillimeters(distanceGuideMaxDistanceMm)
                         )
                         debugRow(title: "Distance state", value: safeText(distanceGuideState))
                         debugRow(title: "Distance message", value: safeText(distanceGuideMessage))

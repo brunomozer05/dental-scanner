@@ -919,6 +919,27 @@ final class ScannerViewModel: ObservableObject {
     var debugDistanceGuideMessage: String {
         distanceGuideStateTitle
     }
+    var debugCurrentDistanceGuideMm: Double? {
+        lastDistanceGuideDistanceMm ?? poseDistanceMm
+    }
+    var debugDistanceGuideBarMinMm: Double {
+        distanceGuideConfiguration.barMinimumDistanceMm
+    }
+    var debugDistanceGuideBarMaxMm: Double {
+        distanceGuideConfiguration.barMaximumDistanceMm
+    }
+    var debugDistanceGuideTooCloseFocusRiskDistanceMm: Double? {
+        distanceGuideConfiguration.tooCloseFocusRiskDistanceMm
+    }
+    var debugDistanceGuideIdealBandMinMm: Double {
+        distanceGuideConfiguration.idealMinimumDistanceMm
+    }
+    var debugDistanceGuideIdealBandMaxMm: Double {
+        distanceGuideConfiguration.idealMaximumDistanceMm
+    }
+    var debugDistanceGuideMaxDistanceMm: Double {
+        distanceGuideConfiguration.maximumDistanceMm
+    }
     var debugDeviceQualityClass: String {
         deviceQualityProfile.qualityClass.rawValue
     }
@@ -957,6 +978,13 @@ final class ScannerViewModel: ObservableObject {
     }
     var debugDeviceQualityFrameMaskHorizontalBorderPercent: Double? {
         deviceQualityProfile.frameMaskHorizontalBorderPercent
+    }
+
+    var distanceGuideConfiguration: ScanDistanceGuideConfiguration {
+        ScanDistanceGuideConfiguration.profileAware(
+            cameraProfile: cameraProfile,
+            deviceQualityProfile: deviceQualityProfile
+        )
     }
     var debugDeviceQualityRecommendedCameraProfileName: String? {
         deviceQualityProfile.recommendedCameraProfileName
@@ -4433,32 +4461,30 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private func profileDistanceGuideState(distanceMm: Double) -> String? {
-        guard distanceMm.isFinite,
-              (
-                  cameraProfile.tooCloseFocusRiskDistanceMm != nil ||
-                  cameraProfile.preferredIdealMinScanDistanceMm != nil ||
-                  cameraProfile.preferredIdealMaxScanDistanceMm != nil
-              )
-        else {
+        guard distanceMm.isFinite else {
             return nil
         }
 
-        if let tooCloseFocusRiskDistanceMm = cameraProfile.tooCloseFocusRiskDistanceMm,
+        let configuration = distanceGuideConfiguration
+
+        if let tooCloseFocusRiskDistanceMm = configuration.tooCloseFocusRiskDistanceMm,
            distanceMm < tooCloseFocusRiskDistanceMm {
             return "Muito perto - afaste para focar"
         }
 
-        if let preferredIdealMinScanDistanceMm = cameraProfile.preferredIdealMinScanDistanceMm,
-           distanceMm < preferredIdealMinScanDistanceMm {
+        if distanceMm < configuration.idealMinimumDistanceMm {
             return "Afaste um pouco"
         }
 
-        if let preferredIdealMaxScanDistanceMm = cameraProfile.preferredIdealMaxScanDistanceMm,
-           distanceMm <= preferredIdealMaxScanDistanceMm {
+        if distanceMm <= configuration.idealMaximumDistanceMm {
             return "Distancia ideal"
         }
 
-        return "Aproxime um pouco"
+        if distanceMm <= configuration.maximumDistanceMm {
+            return "Aproxime um pouco"
+        }
+
+        return "Muito distante"
     }
 
     private func makeFrameMaskDiagnostics(
@@ -9197,6 +9223,7 @@ final class ScannerViewModel: ObservableObject {
         let qualityProfile = deviceQualityProfile
         let frameMaskDiagnostics = currentFrameMaskDiagnostics
         let experimentalQualityDiagnostics = currentExperimentalQualityDiagnostics
+        let activeDistanceGuideConfiguration = distanceGuideConfiguration
 
         return diagnosticsRecorder.makeSnapshot(
             timestamp: sanitizedDiagnosticsTimestamp(timestamp ?? lastFrameTimestamp),
@@ -9255,6 +9282,10 @@ final class ScannerViewModel: ObservableObject {
             distanceGuideState: distanceGuideStateTitle,
             distanceGuideMessage: distanceGuideStateTitle,
             lastDistanceMm: lastDistanceGuideDistanceMm ?? poseDistanceMm,
+            distanceGuideBarMinMm: activeDistanceGuideConfiguration.barMinimumDistanceMm,
+            distanceGuideBarMaxMm: activeDistanceGuideConfiguration.barMaximumDistanceMm,
+            distanceGuideIdealBandMinMm: activeDistanceGuideConfiguration.idealMinimumDistanceMm,
+            distanceGuideIdealBandMaxMm: activeDistanceGuideConfiguration.idealMaximumDistanceMm,
             frameMaskDiagnostics: frameMaskDiagnostics,
             experimentalQualityDiagnostics: experimentalQualityDiagnostics,
             userFeedbackState: scanUserFeedbackState,
@@ -10582,6 +10613,7 @@ final class ScannerViewModel: ObservableObject {
         let qualityProfile = deviceQualityProfile
         let frameMaskDiagnostics = currentFrameMaskDiagnostics
         let experimentalQualityDiagnostics = currentExperimentalQualityDiagnostics
+        let activeDistanceGuideConfiguration = distanceGuideConfiguration
 
         return ScanTechnicalReport(
             createdAt: Self.reportDateFormatter.string(from: createdAt),
@@ -10692,6 +10724,14 @@ final class ScannerViewModel: ObservableObject {
             distanceGuideState: distanceGuideStateTitle,
             distanceGuideMessage: distanceGuideStateTitle,
             lastDistanceMm: finiteReportDouble(lastDistanceGuideDistanceMm ?? poseDistanceMm),
+            distanceGuideBarMinMm:
+                finiteReportDouble(activeDistanceGuideConfiguration.barMinimumDistanceMm),
+            distanceGuideBarMaxMm:
+                finiteReportDouble(activeDistanceGuideConfiguration.barMaximumDistanceMm),
+            distanceGuideIdealBandMinMm:
+                finiteReportDouble(activeDistanceGuideConfiguration.idealMinimumDistanceMm),
+            distanceGuideIdealBandMaxMm:
+                finiteReportDouble(activeDistanceGuideConfiguration.idealMaximumDistanceMm),
             frameMaskSafeRectMinX: finiteReportDouble(frameMaskDiagnostics.frameMaskSafeRectMinX),
             frameMaskSafeRectMinY: finiteReportDouble(frameMaskDiagnostics.frameMaskSafeRectMinY),
             frameMaskSafeRectMaxX: finiteReportDouble(frameMaskDiagnostics.frameMaskSafeRectMaxX),

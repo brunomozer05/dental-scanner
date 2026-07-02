@@ -2,17 +2,91 @@ import Foundation
 import SwiftUI
 
 struct ScanDistanceGuideConfiguration: Equatable {
+    let tooCloseFocusRiskDistanceMm: Double?
     let minimumDistanceMm: Double
     let idealMinimumDistanceMm: Double
     let idealMaximumDistanceMm: Double
     let maximumDistanceMm: Double
+    let barMinimumDistanceMm: Double
+    let barMaximumDistanceMm: Double
 
     static let `default` = ScanDistanceGuideConfiguration(
+        tooCloseFocusRiskDistanceMm: nil,
         minimumDistanceMm: 80,
         idealMinimumDistanceMm: 100,
         idealMaximumDistanceMm: 140,
-        maximumDistanceMm: 170
+        maximumDistanceMm: 170,
+        barMinimumDistanceMm: 80,
+        barMaximumDistanceMm: 170
     )
+
+    static func profileAware(
+        cameraProfile: CameraProfile,
+        deviceQualityProfile: DeviceQualityProfile
+    ) -> ScanDistanceGuideConfiguration {
+        let fallback = ScanDistanceGuideConfiguration.default
+        let tooCloseFocusRiskDistanceMm = finite(
+            cameraProfile.tooCloseFocusRiskDistanceMm ??
+                deviceQualityProfile.tooCloseFocusRiskDistanceMm
+        )
+        let minimumDistanceMm = finite(
+            cameraProfile.preferredMinScanDistanceMm ??
+                deviceQualityProfile.minDistanceMm
+        ) ?? fallback.minimumDistanceMm
+        let idealMinimumDistanceMm = finite(
+            cameraProfile.preferredIdealMinScanDistanceMm ??
+                deviceQualityProfile.idealMinDistanceMm
+        ) ?? fallback.idealMinimumDistanceMm
+        let idealMaximumDistanceMm = finite(
+            cameraProfile.preferredIdealMaxScanDistanceMm ??
+                deviceQualityProfile.idealMaxDistanceMm
+        ) ?? fallback.idealMaximumDistanceMm
+        let maximumDistanceMm = finite(
+            cameraProfile.preferredMaxScanDistanceMm ??
+                deviceQualityProfile.maxDistanceMm
+        ) ?? fallback.maximumDistanceMm
+
+        let sortedMinimum = min(minimumDistanceMm, maximumDistanceMm)
+        let sortedMaximum = max(minimumDistanceMm, maximumDistanceMm)
+        let sortedIdealMinimum = min(idealMinimumDistanceMm, idealMaximumDistanceMm)
+        let sortedIdealMaximum = max(idealMinimumDistanceMm, idealMaximumDistanceMm)
+        let scaleValues = [
+            tooCloseFocusRiskDistanceMm,
+            sortedMinimum,
+            sortedIdealMinimum,
+            sortedIdealMaximum,
+            sortedMaximum
+        ].compactMap { value -> Double? in
+            guard let value, value.isFinite else {
+                return nil
+            }
+
+            return value
+        }
+        let scaleMinimum = scaleValues.min() ?? fallback.barMinimumDistanceMm
+        let scaleMaximum = scaleValues.max() ?? fallback.barMaximumDistanceMm
+        let scaleMarginMm = 15.0
+        let barMinimumDistanceMm = max(0, scaleMinimum - scaleMarginMm)
+        let barMaximumDistanceMm = max(barMinimumDistanceMm + 1, scaleMaximum + scaleMarginMm)
+
+        return ScanDistanceGuideConfiguration(
+            tooCloseFocusRiskDistanceMm: tooCloseFocusRiskDistanceMm,
+            minimumDistanceMm: sortedMinimum,
+            idealMinimumDistanceMm: sortedIdealMinimum,
+            idealMaximumDistanceMm: sortedIdealMaximum,
+            maximumDistanceMm: sortedMaximum,
+            barMinimumDistanceMm: barMinimumDistanceMm,
+            barMaximumDistanceMm: barMaximumDistanceMm
+        )
+    }
+
+    private static func finite(_ value: Double?) -> Double? {
+        guard let value, value.isFinite else {
+            return nil
+        }
+
+        return value
+    }
 }
 
 struct ScanDistanceGuideView: View {
@@ -25,6 +99,7 @@ struct ScanDistanceGuideView: View {
     private let trackWidth: CGFloat = 14
     private let indicatorDiameter: CGFloat = 22
     private let closeColor = Color(red: 0.94, green: 0.20, blue: 0.18)
+    private let warningColor = Color(red: 0.95, green: 0.67, blue: 0.16)
     private let idealColor = Color(red: 0.18, green: 0.76, blue: 0.44)
     private let farColor = Color(red: 0.94, green: 0.20, blue: 0.18)
 
@@ -106,27 +181,30 @@ struct ScanDistanceGuideView: View {
     }
 
     private var trackGradient: LinearGradient {
-        let idealTop = min(
-            yLocation(for: configuration.idealMaximumDistanceMm),
-            yLocation(for: configuration.idealMinimumDistanceMm)
-        )
-        let idealBottom = max(
-            yLocation(for: configuration.idealMaximumDistanceMm),
-            yLocation(for: configuration.idealMinimumDistanceMm)
-        )
-
         return LinearGradient(
-            stops: [
-                Gradient.Stop(color: farColor.opacity(0.72), location: 0.0),
-                Gradient.Stop(color: farColor.opacity(0.58), location: idealTop),
-                Gradient.Stop(color: idealColor.opacity(0.88), location: idealTop),
-                Gradient.Stop(color: idealColor.opacity(0.88), location: idealBottom),
-                Gradient.Stop(color: closeColor.opacity(0.58), location: idealBottom),
-                Gradient.Stop(color: closeColor.opacity(0.72), location: 1.0)
-            ],
+            stops: trackStops,
             startPoint: .top,
             endPoint: .bottom
         )
+    }
+
+    private var trackStops: [Gradient.Stop] {
+        let tooCloseBoundary = configuration.tooCloseFocusRiskDistanceMm ??
+            configuration.minimumDistanceMm
+        let stops = [
+            Gradient.Stop(color: farColor.opacity(0.78), location: 0.0),
+            Gradient.Stop(color: farColor.opacity(0.78), location: yLocation(for: configuration.maximumDistanceMm)),
+            Gradient.Stop(color: warningColor.opacity(0.82), location: yLocation(for: configuration.maximumDistanceMm)),
+            Gradient.Stop(color: warningColor.opacity(0.82), location: yLocation(for: configuration.idealMaximumDistanceMm)),
+            Gradient.Stop(color: idealColor.opacity(0.90), location: yLocation(for: configuration.idealMaximumDistanceMm)),
+            Gradient.Stop(color: idealColor.opacity(0.90), location: yLocation(for: configuration.idealMinimumDistanceMm)),
+            Gradient.Stop(color: warningColor.opacity(0.82), location: yLocation(for: configuration.idealMinimumDistanceMm)),
+            Gradient.Stop(color: warningColor.opacity(0.82), location: yLocation(for: tooCloseBoundary)),
+            Gradient.Stop(color: closeColor.opacity(0.78), location: yLocation(for: tooCloseBoundary)),
+            Gradient.Stop(color: closeColor.opacity(0.78), location: 1.0)
+        ]
+
+        return stops.sorted { $0.location < $1.location }
     }
 
     private var formattedDistance: String {
@@ -146,12 +224,21 @@ struct ScanDistanceGuideView: View {
             return .unreliable
         }
 
+        if let tooCloseFocusRiskDistanceMm = configuration.tooCloseFocusRiskDistanceMm,
+           distanceMm < tooCloseFocusRiskDistanceMm {
+            return .tooCloseFocusRisk
+        }
+
         if distanceMm < configuration.idealMinimumDistanceMm {
             return .tooClose
         }
 
-        if distanceMm > configuration.idealMaximumDistanceMm {
+        if distanceMm > configuration.maximumDistanceMm {
             return .tooFar
+        }
+
+        if distanceMm > configuration.idealMaximumDistanceMm {
+            return .far
         }
 
         return .ideal
@@ -169,10 +256,14 @@ struct ScanDistanceGuideView: View {
 
     private var indicatorColor: Color {
         switch distanceState {
-        case .tooClose:
+        case .tooCloseFocusRisk:
             return closeColor
+        case .tooClose:
+            return warningColor
         case .ideal:
             return idealColor
+        case .far:
+            return warningColor
         case .tooFar:
             return farColor
         case .unavailable:
@@ -206,8 +297,8 @@ struct ScanDistanceGuideView: View {
             return 0.5
         }
 
-        let clampedDistance = min(max(displayDistanceMm, minimumDistance), maximumDistance)
-        return CGFloat((clampedDistance - minimumDistance) / distanceRange)
+        let clampedDistance = min(max(displayDistanceMm, barMinimumDistance), barMaximumDistance)
+        return CGFloat((clampedDistance - barMinimumDistance) / barDistanceRange)
     }
 
     private var effectiveDistanceMm: Double? {
@@ -229,39 +320,45 @@ struct ScanDistanceGuideView: View {
     }
 
     private func yLocation(for distanceMm: Double) -> CGFloat {
-        let clampedDistance = min(max(distanceMm, minimumDistance), maximumDistance)
-        let normalizedLocation = CGFloat((clampedDistance - minimumDistance) / distanceRange)
+        let clampedDistance = min(max(distanceMm, barMinimumDistance), barMaximumDistance)
+        let normalizedLocation = CGFloat((clampedDistance - barMinimumDistance) / barDistanceRange)
 
         return min(max(1 - normalizedLocation, 0), 1)
     }
 
-    private var minimumDistance: Double {
-        min(configuration.minimumDistanceMm, configuration.maximumDistanceMm)
+    private var barMinimumDistance: Double {
+        min(configuration.barMinimumDistanceMm, configuration.barMaximumDistanceMm)
     }
 
-    private var maximumDistance: Double {
-        max(configuration.minimumDistanceMm, configuration.maximumDistanceMm)
+    private var barMaximumDistance: Double {
+        max(configuration.barMinimumDistanceMm, configuration.barMaximumDistanceMm)
     }
 
-    private var distanceRange: Double {
-        max(maximumDistance - minimumDistance, 1)
+    private var barDistanceRange: Double {
+        max(barMaximumDistance - barMinimumDistance, 1)
     }
 
     private enum DistanceState {
+        case tooCloseFocusRisk
         case tooClose
         case ideal
+        case far
         case tooFar
         case unavailable
         case unreliable
 
         var title: String {
             switch self {
+            case .tooCloseFocusRisk:
+                return "Muito perto - afaste para focar"
             case .tooClose:
-                return "Muito perto"
+                return "Afaste um pouco"
             case .ideal:
-                return "Ideal"
+                return "Distancia ideal"
+            case .far:
+                return "Aproxime um pouco"
             case .tooFar:
-                return "Muito longe"
+                return "Muito distante"
             case .unavailable:
                 return "Sem pose"
             case .unreliable:

@@ -95,6 +95,10 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
     var distanceGuideState: String?
     var distanceGuideMessage: String?
     var lastDistanceMm: Double?
+    var distanceGuideBarMinMm: Double?
+    var distanceGuideBarMaxMm: Double?
+    var distanceGuideIdealBandMinMm: Double?
+    var distanceGuideIdealBandMaxMm: Double?
     var frameMaskSafeRectMinX: Double?
     var frameMaskSafeRectMinY: Double?
     var frameMaskSafeRectMaxX: Double?
@@ -298,6 +302,10 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
         distanceGuideState: nil,
         distanceGuideMessage: nil,
         lastDistanceMm: nil,
+        distanceGuideBarMinMm: nil,
+        distanceGuideBarMaxMm: nil,
+        distanceGuideIdealBandMinMm: nil,
+        distanceGuideIdealBandMaxMm: nil,
         frameMaskSafeRectMinX: nil,
         frameMaskSafeRectMinY: nil,
         frameMaskSafeRectMaxX: nil,

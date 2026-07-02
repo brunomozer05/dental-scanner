@@ -66,6 +66,10 @@ struct ScanTechnicalReport: Codable {
     var distanceGuideState: String?
     var distanceGuideMessage: String?
     var lastDistanceMm: Double?
+    var distanceGuideBarMinMm: Double?
+    var distanceGuideBarMaxMm: Double?
+    var distanceGuideIdealBandMinMm: Double?
+    var distanceGuideIdealBandMaxMm: Double?
     var frameMaskSafeRectMinX: Double?
     var frameMaskSafeRectMinY: Double?
     var frameMaskSafeRectMaxX: Double?

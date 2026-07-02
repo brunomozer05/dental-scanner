@@ -40,6 +40,20 @@ Ela só é confiável quando:
 
 Se a câmera está desfocada, a distância calculada pode enganar.
 
+A escala visual da barra deve seguir os thresholds ativos do `CameraProfile` e, se eles não existirem, do `DeviceQualityProfile`.
+
+Para iPhone 16 / `Wide 1.5x`, a barra deve mostrar a faixa ideal dentro da escala:
+
+```txt
+< 125 mm   -> Muito perto - afaste para focar
+125-150 mm -> Afaste um pouco
+150-180 mm -> Distancia ideal
+180-220 mm -> Aproxime um pouco
+> 220 mm   -> Muito distante
+```
+
+A UI antiga podia sugerir uma faixa curta demais, perto de 80-140 mm, e isso guiava o usuario contra a distancia mais segura do iPhone 16.
+
 ## Melhorias planejadas
 
 ### Perfis de camera experimentais

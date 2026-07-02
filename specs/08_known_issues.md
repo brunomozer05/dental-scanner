@@ -92,6 +92,13 @@ A barra de distância precisa ser ajustada para considerar:
 * distância;
 * confiabilidade da pose.
 
+Atualizacao:
+
+* a barra lateral agora deve usar thresholds dinamicos de `CameraProfile` / `DeviceQualityProfile`;
+* no iPhone 16 com `Wide 1.5x`, 150-180 mm deve aparecer como faixa ideal dentro da barra;
+* abaixo de 125 mm deve orientar o usuario a afastar para focar;
+* acima de 220 mm deve indicar distancia excessiva.
+
 ## 4. Export com 3 markers
 
 Erro recorrente:
