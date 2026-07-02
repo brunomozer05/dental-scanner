@@ -4,14 +4,23 @@
 
 Phase 1 and Phase 2 implemented as diagnostics/read-only.
 
+Experimental Quality Mode initial diagnostics implemented:
+
+- ROI/frame mask classifies raw observations as accepted/rejected in parallel
+- useful observation counters use 65 frames per marker as the initial target
+- target optimization frames are recorded as 300
+- high resolution camera profile is available for manual diagnostics only
+- reference camera matrix diagnostics are read-only
+- initial angle diversity fields are present, but not used for gating
+
 Still future:
 
-- Phase 3 - Useful Observation Selection Diagnostics
+- Phase 3 - Useful Observation Selection Behavior
 - Phase 4 - PnP Robustness Diagnostics
 - Phase 5 - Future Marker Geometry Upgrade
 - Phase 6 - Future Pose Graph / Bundle Adjustment Read-Only
 
-No export, readiness or finalization behavior should be changed by the Phase 1/2 implementation.
+No export, readiness or finalization behavior should be changed by the Phase 1/2 implementation or by the initial Experimental Quality Mode diagnostics.
 
 This spec documents the next quality upgrades for DentalScanner based on practical iPhone 16 tests and inspection of reference app configuration files.
 
@@ -78,7 +87,7 @@ Reference configuration patterns show:
 - minimum valid frames per marker
 - PnP/RANSAC thresholds
 - bundle-adjustment-style optimization settings
-- YOLO infrastructure exists, but the inspected config has YOLO disabled
+- optional model-based infrastructure can exist in mature systems, but it is not part of this implementation
 
 Therefore, DentalScanner should evolve toward a device-aware quality pipeline.
 
@@ -386,6 +395,20 @@ Keep formatting safe:
 
 # Phase 3 — Useful Observation Selection Diagnostics
 
+Implementation status: initial diagnostics only.
+
+The current implementation records experimental raw/accepted/rejected observation counters and useful progress in parallel. It does not replace current marker progress, readiness, finalization or export.
+
+Current flags:
+
+```swift
+enableExperimentalQualityMode = true
+enableExperimentalObservationGate = true
+enableExperimentalHighResolutionCameraProfile = false
+enableReferenceCameraMatrixDiagnostics = true
+enableExperimentalAngleDiversityDiagnostics = true
+```
+
 ## Goal
 
 Separate raw observations from useful observations.
@@ -408,11 +431,11 @@ A useful observation should be:
 For each marker, track:
 
 ```txt
-rawObservationCount
-validObservationCount
-usefulObservationCount
-optimizationObservationCount
-rejectedObservationCount
+experimentalRawObservationCount
+experimentalAcceptedObservationCount
+experimentalRejectedObservationCount
+experimentalUsefulProgress
+experimentalUsefulReady
 ```
 
 Add rejection reasons:
@@ -421,13 +444,12 @@ Add rejection reasons:
 tooClose
 tooFar
 focusRisk
-nearFrameEdge
-highReprojection
-highJitter
+frameMask
 invalidPose
-duplicateAngle
 notFinite
-missingIntrinsics
+unknownFrame
+unknownDistance
+unknownMarker
 ```
 
 ## Angle Diversity
@@ -489,6 +511,43 @@ markerOptimizationProgress = optimizationObservationCount / targetOptimizationFr
 Clamp to 0...1.
 
 Do not replace current visual progress yet.
+
+## High Resolution Camera Profile Diagnostics
+
+An experimental profile is available for manual testing:
+
+```txt
+Wide 1.5x High Resolution Experimental
+```
+
+Current behavior:
+
+- uses the same physical wide camera preference and 1.5x zoom metadata;
+- high resolution format selection is disabled by default;
+- diagnostics record requested/applied dimensions and fallback reason;
+- the profile is not selected automatically.
+
+## Reference Camera Matrix Diagnostics
+
+Reference camera matrix fields are diagnostics-only:
+
+```txt
+referenceCameraMatrixDiagnosticsEnabled
+referenceCameraMatrixSource
+referenceCameraMatrixFx
+referenceCameraMatrixFy
+referenceCameraMatrixCx
+referenceCameraMatrixCy
+activeCameraIntrinsicFx
+activeCameraIntrinsicFy
+activeCameraIntrinsicCx
+activeCameraIntrinsicCy
+referenceVsActiveFxRatio
+referenceVsActiveFyRatio
+referenceCameraMatrixResolutionMismatchWarning
+```
+
+These values must never replace the real AVFoundation intrinsics in the main solvePnP/export path.
 
 ## UI
 
@@ -714,32 +773,94 @@ frameMaskQualityMessage
 ## Useful Observations
 
 ```txt
-rawObservationCount
-validObservationCount
-usefulObservationCount
-optimizationObservationCount
-rejectedObservationCount
+experimentalQualityModeEnabled
+experimentalObservationGateEnabled
+experimentalMinValidFramesPerMarker
+experimentalTargetOptimizationFrames
 
-rejectedTooCloseCount
-rejectedTooFarCount
-rejectedFocusRiskCount
-rejectedNearFrameEdgeCount
-rejectedHighReprojectionCount
-rejectedHighJitterCount
-rejectedInvalidPoseCount
-rejectedDuplicateAngleCount
-rejectedNotFiniteCount
+experimentalRawObservationCount
+experimentalAcceptedObservationCount
+experimentalRejectedObservationCount
+experimentalRejectedByFrameMaskCount
+experimentalRejectedByTooCloseCount
+experimentalRejectedByTooFarCount
+experimentalRejectedByFocusRiskCount
+experimentalRejectedByInvalidPoseCount
+experimentalRejectedByNotFiniteCount
+experimentalRejectedByUnknownCount
+
+experimentalUsefulMarkersReadyCount
+experimentalUsefulAllMarkersReady
+experimentalOverallUsefulProgress
+
+markerExperimentalRawObservationCount
+markerExperimentalAcceptedObservationCount
+markerExperimentalRejectedObservationCount
+markerExperimentalRejectedByFrameMaskCount
+markerExperimentalRejectedByTooCloseCount
+markerExperimentalRejectedByTooFarCount
+markerExperimentalRejectedByFocusRiskCount
+markerExperimentalRejectedByInvalidPoseCount
+markerExperimentalRejectedByNotFiniteCount
+markerExperimentalRejectedByUnknownCount
+markerExperimentalUsefulProgress
+markerExperimentalUsefulReady
 ```
 
 ## Angle Diversity
 
 ```txt
-angularSamplesCount
-angularUsefulSamplesCount
-angularStdDeg
-angularMinSeparationDeg
-angleDiversityScore
-angleDiversityReady
+experimentalAngularSamplesCount
+experimentalAngularUsefulSamplesCount
+experimentalAngularStdDeg
+experimentalAngularMinSeparationDeg
+experimentalAngleDiversityScore
+experimentalAngleDiversityReady
+```
+
+## High Resolution Camera Profile
+
+```txt
+cameraHighResolutionProfileAvailable
+cameraHighResolutionProfileSelected
+cameraRequestedHighResolutionDimensions
+cameraAppliedHighResolutionDimensions
+cameraHighResolutionFallbackReason
+```
+
+## Reference Camera Matrix
+
+```txt
+referenceCameraMatrixDiagnosticsEnabled
+referenceCameraMatrixSource
+referenceCameraMatrixFx
+referenceCameraMatrixFy
+referenceCameraMatrixCx
+referenceCameraMatrixCy
+activeCameraIntrinsicFx
+activeCameraIntrinsicFy
+activeCameraIntrinsicCx
+activeCameraIntrinsicCy
+referenceVsActiveFxDelta
+referenceVsActiveFyDelta
+referenceVsActiveCxDelta
+referenceVsActiveCyDelta
+referenceVsActiveFxRatio
+referenceVsActiveFyRatio
+referenceCameraMatrixResolutionMismatchWarning
+```
+
+## ROI Focus Diagnostics
+
+```txt
+roiCenterNormalizedX
+roiCenterNormalizedY
+lastFocusPointNormalizedX
+lastFocusPointNormalizedY
+lastExposurePointNormalizedX
+lastExposurePointNormalizedY
+focusPointInsideROI
+focusPointDistanceToROICenter
 ```
 
 ## PnP Diagnostics
@@ -807,10 +928,26 @@ ROI message
 ## Useful Observations Section
 
 ```txt
-Raw/valid/useful observations
-Optimization observations
+Experimental Quality Mode
+Experimental Observation Gate
+Min valid frames/marker
+Target optimization frames
+Accepted observations
 Rejected observations
-Top reject reason
+Rejected by ROI
+Rejected by distance
+Rejected by focus risk
+Rejected invalid/not finite
+Useful markers ready
+Overall useful progress
+High resolution available/selected
+Reference matrix enabled/source
+Active/reference fx/fy
+Reference/active ratio
+ROI center
+Focus point
+Exposure point
+Focus distance to ROI center
 Angle std
 Angle diversity score
 ```
@@ -934,6 +1071,8 @@ Suggested commit:
 ```bash
 git commit -m "Add useful observation diagnostics"
 ```
+
+Status: initial parallel diagnostics implemented in `Add experimental quality mode diagnostics`; still not used for export, readiness or finalization.
 
 ## Commit 5 — Comparator Columns
 

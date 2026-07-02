@@ -8,6 +8,7 @@ struct CameraProfile: Equatable, Identifiable {
         case wide2x = "wide_2_0x"
         case wide15xConservativeFocus = "wide_1_5x_conservative_focus"
         case wide2xConservativeFocus = "wide_2_0x_conservative_focus"
+        case wide15xHighResolutionExperimental = "wide_1_5x_high_resolution_experimental"
     }
 
     let identifier: Identifier
@@ -111,6 +112,20 @@ struct CameraProfile: Equatable, Identifiable {
             preferredIdealMinScanDistanceMm: nil,
             preferredIdealMaxScanDistanceMm: nil,
             preferredMaxScanDistanceMm: nil
+        ),
+        CameraProfile(
+            identifier: .wide15xHighResolutionExperimental,
+            name: "Wide 1.5x High Resolution Experimental",
+            requestedZoomFactor: 1.5,
+            prefersPhysicalWideCamera: true,
+            usesConservativeFocusRecovery: false,
+            isExperimental: true,
+            debugNote: "Experimental diagnostics profile; high resolution format selection is off by default.",
+            tooCloseFocusRiskDistanceMm: 125,
+            preferredMinScanDistanceMm: 130,
+            preferredIdealMinScanDistanceMm: 150,
+            preferredIdealMaxScanDistanceMm: 180,
+            preferredMaxScanDistanceMm: 220
         )
     ]
 

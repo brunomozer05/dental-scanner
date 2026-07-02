@@ -107,15 +107,22 @@ Fases ja implementadas como diagnostics/read-only:
 ```txt
 DeviceQualityProfile por classe de device
 Frame Mask / ROI Quality Diagnostics
+Experimental Quality Mode com observacoes uteis em paralelo
 ```
 
 Ainda pendente:
 
-* separar observacoes uteis de observacoes brutas;
-* adicionar diagnostics de diversidade angular;
+* validar os contadores de observacoes uteis contra CSVs e scans reais;
+* adicionar diagnostics completos de diversidade angular;
 * adicionar PnP robustness diagnostics;
 * atualizar o comparador para expor os novos campos;
-* decidir, com dados, se ROI vira soft gate.
+* decidir, com dados, se ROI/observacao util vira soft gate.
+
+O modo experimental registra 65 frames uteis por marker como meta inicial e 300 frames/observacoes como alvo de otimizacao, mas ainda nao altera export, readiness ou finalizacao.
+
+High Resolution Camera Profile esta preparado para diagnostico manual e permanece desligado por padrao.
+
+Reference Camera Matrix Diagnostics e read-only e nao substitui os intrinsics reais da camera.
 
 ## Prioridade 5 — Comparar v1 vs v2
 

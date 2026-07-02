@@ -341,6 +341,7 @@ final class ScanDiagnosticsRecorder {
         distanceGuideMessage: String?,
         lastDistanceMm: Double?,
         frameMaskDiagnostics: FrameMaskDiagnostics?,
+        experimentalQualityDiagnostics: ExperimentalQualityDiagnostics?,
         userFeedbackState: String?,
         userFeedbackMessage: String?,
         captureProgressPercent: Double?,
@@ -400,6 +401,7 @@ final class ScanDiagnosticsRecorder {
         candidateVsFinalRotationDeltaMean: Double?,
         candidateVsFinalGeometryDelta: Double?,
         markerFrameMaskDiagnosticsByMarkerId: [Int: MarkerFrameMaskDiagnostics],
+        experimentalMarkerDiagnosticsByMarkerId: [Int: ExperimentalMarkerQualityDiagnostics],
         guidedStaticCaptureEnabled: Bool,
         guidedStages: [ScanDiagnosticsSnapshot.GuidedStageSummary]?
     ) -> ScanDiagnosticsSnapshot {
@@ -422,6 +424,7 @@ final class ScanDiagnosticsRecorder {
             .map { markerId in
                 let state = markerStates[markerId] ?? MarkerState()
                 let frameMaskDiagnostics = markerFrameMaskDiagnosticsByMarkerId[markerId]
+                let experimentalDiagnostics = experimentalMarkerDiagnosticsByMarkerId[markerId]
                 return ScanDiagnosticsSnapshot.MarkerSummary(
                     markerId: markerId,
                     firstSeenAtSeconds: finite(state.firstSeenAt),
@@ -449,7 +452,31 @@ final class ScanDiagnosticsRecorder {
                         finite(frameMaskDiagnostics?.markerDistanceToFrameMaskEdgePx),
                     markerDistanceToFrameMaskEdgeNormalized:
                         finite(frameMaskDiagnostics?.markerDistanceToFrameMaskEdgeNormalized),
-                    markerNearFrameEdgeWarning: frameMaskDiagnostics?.markerNearFrameEdgeWarning
+                    markerNearFrameEdgeWarning: frameMaskDiagnostics?.markerNearFrameEdgeWarning,
+                    markerExperimentalRawObservationCount:
+                        experimentalDiagnostics?.rawObservationCount,
+                    markerExperimentalAcceptedObservationCount:
+                        experimentalDiagnostics?.acceptedObservationCount,
+                    markerExperimentalRejectedObservationCount:
+                        experimentalDiagnostics?.rejectedObservationCount,
+                    markerExperimentalRejectedByFrameMaskCount:
+                        experimentalDiagnostics?.rejectedByFrameMaskCount,
+                    markerExperimentalRejectedByTooCloseCount:
+                        experimentalDiagnostics?.rejectedByTooCloseCount,
+                    markerExperimentalRejectedByTooFarCount:
+                        experimentalDiagnostics?.rejectedByTooFarCount,
+                    markerExperimentalRejectedByFocusRiskCount:
+                        experimentalDiagnostics?.rejectedByFocusRiskCount,
+                    markerExperimentalRejectedByInvalidPoseCount:
+                        experimentalDiagnostics?.rejectedByInvalidPoseCount,
+                    markerExperimentalRejectedByNotFiniteCount:
+                        experimentalDiagnostics?.rejectedByNotFiniteCount,
+                    markerExperimentalRejectedByUnknownCount:
+                        experimentalDiagnostics?.rejectedByUnknownCount,
+                    markerExperimentalUsefulProgress:
+                        finite(experimentalDiagnostics?.usefulProgress),
+                    markerExperimentalUsefulReady:
+                        experimentalDiagnostics?.usefulReady
                 )
             }
 
@@ -541,6 +568,95 @@ final class ScanDiagnosticsRecorder {
             anyMarkerNearFrameEdge: frameMaskDiagnostics?.anyMarkerNearFrameEdge,
             frameMaskQualityState: frameMaskDiagnostics?.frameMaskQualityState,
             frameMaskQualityMessage: frameMaskDiagnostics?.frameMaskQualityMessage,
+            experimentalQualityModeEnabled:
+                experimentalQualityDiagnostics?.experimentalQualityModeEnabled,
+            experimentalObservationGateEnabled:
+                experimentalQualityDiagnostics?.experimentalObservationGateEnabled,
+            experimentalMinValidFramesPerMarker:
+                experimentalQualityDiagnostics?.experimentalMinValidFramesPerMarker,
+            experimentalTargetOptimizationFrames:
+                experimentalQualityDiagnostics?.experimentalTargetOptimizationFrames,
+            experimentalRawObservationCount:
+                experimentalQualityDiagnostics?.experimentalRawObservationCount,
+            experimentalAcceptedObservationCount:
+                experimentalQualityDiagnostics?.experimentalAcceptedObservationCount,
+            experimentalRejectedObservationCount:
+                experimentalQualityDiagnostics?.experimentalRejectedObservationCount,
+            experimentalRejectedByFrameMaskCount:
+                experimentalQualityDiagnostics?.experimentalRejectedByFrameMaskCount,
+            experimentalRejectedByTooCloseCount:
+                experimentalQualityDiagnostics?.experimentalRejectedByTooCloseCount,
+            experimentalRejectedByTooFarCount:
+                experimentalQualityDiagnostics?.experimentalRejectedByTooFarCount,
+            experimentalRejectedByFocusRiskCount:
+                experimentalQualityDiagnostics?.experimentalRejectedByFocusRiskCount,
+            experimentalRejectedByInvalidPoseCount:
+                experimentalQualityDiagnostics?.experimentalRejectedByInvalidPoseCount,
+            experimentalRejectedByNotFiniteCount:
+                experimentalQualityDiagnostics?.experimentalRejectedByNotFiniteCount,
+            experimentalRejectedByUnknownCount:
+                experimentalQualityDiagnostics?.experimentalRejectedByUnknownCount,
+            experimentalUsefulMarkersReadyCount:
+                experimentalQualityDiagnostics?.experimentalUsefulMarkersReadyCount,
+            experimentalUsefulAllMarkersReady:
+                experimentalQualityDiagnostics?.experimentalUsefulAllMarkersReady,
+            experimentalOverallUsefulProgress:
+                finite(experimentalQualityDiagnostics?.experimentalOverallUsefulProgress),
+            cameraHighResolutionProfileAvailable:
+                experimentalQualityDiagnostics?.cameraHighResolutionProfileAvailable,
+            cameraHighResolutionProfileSelected:
+                experimentalQualityDiagnostics?.cameraHighResolutionProfileSelected,
+            cameraRequestedHighResolutionDimensions:
+                experimentalQualityDiagnostics?.cameraRequestedHighResolutionDimensions,
+            cameraAppliedHighResolutionDimensions:
+                experimentalQualityDiagnostics?.cameraAppliedHighResolutionDimensions,
+            cameraHighResolutionFallbackReason:
+                experimentalQualityDiagnostics?.cameraHighResolutionFallbackReason,
+            referenceCameraMatrixDiagnosticsEnabled:
+                experimentalQualityDiagnostics?.referenceCameraMatrixDiagnosticsEnabled,
+            referenceCameraMatrixSource:
+                experimentalQualityDiagnostics?.referenceCameraMatrixSource,
+            referenceCameraMatrixFx: finite(experimentalQualityDiagnostics?.referenceCameraMatrixFx),
+            referenceCameraMatrixFy: finite(experimentalQualityDiagnostics?.referenceCameraMatrixFy),
+            referenceCameraMatrixCx: finite(experimentalQualityDiagnostics?.referenceCameraMatrixCx),
+            referenceCameraMatrixCy: finite(experimentalQualityDiagnostics?.referenceCameraMatrixCy),
+            activeCameraIntrinsicFx: finite(experimentalQualityDiagnostics?.activeCameraIntrinsicFx),
+            activeCameraIntrinsicFy: finite(experimentalQualityDiagnostics?.activeCameraIntrinsicFy),
+            activeCameraIntrinsicCx: finite(experimentalQualityDiagnostics?.activeCameraIntrinsicCx),
+            activeCameraIntrinsicCy: finite(experimentalQualityDiagnostics?.activeCameraIntrinsicCy),
+            referenceVsActiveFxDelta: finite(experimentalQualityDiagnostics?.referenceVsActiveFxDelta),
+            referenceVsActiveFyDelta: finite(experimentalQualityDiagnostics?.referenceVsActiveFyDelta),
+            referenceVsActiveCxDelta: finite(experimentalQualityDiagnostics?.referenceVsActiveCxDelta),
+            referenceVsActiveCyDelta: finite(experimentalQualityDiagnostics?.referenceVsActiveCyDelta),
+            referenceVsActiveFxRatio: finite(experimentalQualityDiagnostics?.referenceVsActiveFxRatio),
+            referenceVsActiveFyRatio: finite(experimentalQualityDiagnostics?.referenceVsActiveFyRatio),
+            referenceCameraMatrixResolutionMismatchWarning:
+                experimentalQualityDiagnostics?.referenceCameraMatrixResolutionMismatchWarning,
+            roiCenterNormalizedX: finite(experimentalQualityDiagnostics?.roiCenterNormalizedX),
+            roiCenterNormalizedY: finite(experimentalQualityDiagnostics?.roiCenterNormalizedY),
+            lastFocusPointNormalizedX:
+                finite(experimentalQualityDiagnostics?.lastFocusPointNormalizedX),
+            lastFocusPointNormalizedY:
+                finite(experimentalQualityDiagnostics?.lastFocusPointNormalizedY),
+            lastExposurePointNormalizedX:
+                finite(experimentalQualityDiagnostics?.lastExposurePointNormalizedX),
+            lastExposurePointNormalizedY:
+                finite(experimentalQualityDiagnostics?.lastExposurePointNormalizedY),
+            focusPointInsideROI: experimentalQualityDiagnostics?.focusPointInsideROI,
+            focusPointDistanceToROICenter:
+                finite(experimentalQualityDiagnostics?.focusPointDistanceToROICenter),
+            experimentalAngularSamplesCount:
+                experimentalQualityDiagnostics?.experimentalAngularSamplesCount,
+            experimentalAngularUsefulSamplesCount:
+                experimentalQualityDiagnostics?.experimentalAngularUsefulSamplesCount,
+            experimentalAngularStdDeg:
+                finite(experimentalQualityDiagnostics?.experimentalAngularStdDeg),
+            experimentalAngularMinSeparationDeg:
+                finite(experimentalQualityDiagnostics?.experimentalAngularMinSeparationDeg),
+            experimentalAngleDiversityScore:
+                finite(experimentalQualityDiagnostics?.experimentalAngleDiversityScore),
+            experimentalAngleDiversityReady:
+                experimentalQualityDiagnostics?.experimentalAngleDiversityReady,
             distanceSamplesTotal: distanceSampleCount,
             distanceSamplesValid: distanceValidSampleCount,
             distanceValidPercent: finite(distanceValidPercent),

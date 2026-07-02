@@ -75,6 +75,59 @@ struct ScanTechnicalReport: Codable {
     var anyMarkerNearFrameEdge: Bool?
     var frameMaskQualityState: String?
     var frameMaskQualityMessage: String?
+    var experimentalQualityModeEnabled: Bool?
+    var experimentalObservationGateEnabled: Bool?
+    var experimentalMinValidFramesPerMarker: Int?
+    var experimentalTargetOptimizationFrames: Int?
+    var experimentalRawObservationCount: Int?
+    var experimentalAcceptedObservationCount: Int?
+    var experimentalRejectedObservationCount: Int?
+    var experimentalRejectedByFrameMaskCount: Int?
+    var experimentalRejectedByTooCloseCount: Int?
+    var experimentalRejectedByTooFarCount: Int?
+    var experimentalRejectedByFocusRiskCount: Int?
+    var experimentalRejectedByInvalidPoseCount: Int?
+    var experimentalRejectedByNotFiniteCount: Int?
+    var experimentalRejectedByUnknownCount: Int?
+    var experimentalUsefulMarkersReadyCount: Int?
+    var experimentalUsefulAllMarkersReady: Bool?
+    var experimentalOverallUsefulProgress: Double?
+    var cameraHighResolutionProfileAvailable: Bool?
+    var cameraHighResolutionProfileSelected: Bool?
+    var cameraRequestedHighResolutionDimensions: String?
+    var cameraAppliedHighResolutionDimensions: String?
+    var cameraHighResolutionFallbackReason: String?
+    var referenceCameraMatrixDiagnosticsEnabled: Bool?
+    var referenceCameraMatrixSource: String?
+    var referenceCameraMatrixFx: Double?
+    var referenceCameraMatrixFy: Double?
+    var referenceCameraMatrixCx: Double?
+    var referenceCameraMatrixCy: Double?
+    var activeCameraIntrinsicFx: Double?
+    var activeCameraIntrinsicFy: Double?
+    var activeCameraIntrinsicCx: Double?
+    var activeCameraIntrinsicCy: Double?
+    var referenceVsActiveFxDelta: Double?
+    var referenceVsActiveFyDelta: Double?
+    var referenceVsActiveCxDelta: Double?
+    var referenceVsActiveCyDelta: Double?
+    var referenceVsActiveFxRatio: Double?
+    var referenceVsActiveFyRatio: Double?
+    var referenceCameraMatrixResolutionMismatchWarning: String?
+    var roiCenterNormalizedX: Double?
+    var roiCenterNormalizedY: Double?
+    var lastFocusPointNormalizedX: Double?
+    var lastFocusPointNormalizedY: Double?
+    var lastExposurePointNormalizedX: Double?
+    var lastExposurePointNormalizedY: Double?
+    var focusPointInsideROI: Bool?
+    var focusPointDistanceToROICenter: Double?
+    var experimentalAngularSamplesCount: Int?
+    var experimentalAngularUsefulSamplesCount: Int?
+    var experimentalAngularStdDeg: Double?
+    var experimentalAngularMinSeparationDeg: Double?
+    var experimentalAngleDiversityScore: Double?
+    var experimentalAngleDiversityReady: Bool?
     var tagAreaPixelsMean: Double?
     var userFeedbackState: String?
     var userFeedbackMessage: String?
@@ -176,6 +229,18 @@ struct ScanTechnicalReport: Codable {
         var markerDistanceToFrameMaskEdgePx: Double?
         var markerDistanceToFrameMaskEdgeNormalized: Double?
         var markerNearFrameEdgeWarning: Bool?
+        var markerExperimentalRawObservationCount: Int?
+        var markerExperimentalAcceptedObservationCount: Int?
+        var markerExperimentalRejectedObservationCount: Int?
+        var markerExperimentalRejectedByFrameMaskCount: Int?
+        var markerExperimentalRejectedByTooCloseCount: Int?
+        var markerExperimentalRejectedByTooFarCount: Int?
+        var markerExperimentalRejectedByFocusRiskCount: Int?
+        var markerExperimentalRejectedByInvalidPoseCount: Int?
+        var markerExperimentalRejectedByNotFiniteCount: Int?
+        var markerExperimentalRejectedByUnknownCount: Int?
+        var markerExperimentalUsefulProgress: Double?
+        var markerExperimentalUsefulReady: Bool?
     }
 
     struct ScanQuality: Codable {

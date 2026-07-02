@@ -281,6 +281,8 @@ struct ScannerView: View {
                                     viewModel.debugFrameMaskQualityState,
                                 frameMaskQualityMessage:
                                     viewModel.debugFrameMaskQualityMessage,
+                                experimentalQualityDiagnostics:
+                                    viewModel.debugExperimentalQualityDiagnostics,
                                 relativeMarkerGeometryScore:
                                     viewModel.debugRelativeMarkerGeometryScore,
                                 relativeMarkerDistanceStdMean:
@@ -1961,6 +1963,7 @@ private struct ScannerDebugEmergencyPanelView: View {
     let anyMarkerNearFrameEdge: Bool
     let frameMaskQualityState: String
     let frameMaskQualityMessage: String
+    let experimentalQualityDiagnostics: ExperimentalQualityDiagnostics
     let relativeMarkerGeometryScore: Double?
     let relativeMarkerDistanceStdMean: Double?
     let relativeMarkerDistanceStdMax: Double?
@@ -2169,6 +2172,10 @@ private struct ScannerDebugEmergencyPanelView: View {
                                 title: "Wide 2.0x Conservative (experimental)",
                                 id: CameraProfile.Identifier.wide2xConservativeFocus.rawValue
                             )
+                            profileButton(
+                                title: "Wide 1.5x High Resolution (experimental)",
+                                id: CameraProfile.Identifier.wide15xHighResolutionExperimental.rawValue
+                            )
                         }
                         .padding(.top, 4)
                     }
@@ -2232,6 +2239,155 @@ private struct ScannerDebugEmergencyPanelView: View {
                         debugRow(title: "Near edge", value: anyMarkerNearFrameEdge ? "yes" : "no")
                         debugRow(title: "ROI state", value: safeText(frameMaskQualityState))
                         debugRow(title: "ROI message", value: safeText(frameMaskQualityMessage))
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Experimental quality:")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white.opacity(0.82))
+
+                        debugRow(
+                            title: "Mode",
+                            value: safeBool(experimentalQualityDiagnostics.experimentalQualityModeEnabled)
+                        )
+                        debugRow(
+                            title: "Observation gate",
+                            value: safeBool(experimentalQualityDiagnostics.experimentalObservationGateEnabled)
+                        )
+                        debugRow(
+                            title: "Min frames/marker",
+                            value: safeInt(experimentalQualityDiagnostics.experimentalMinValidFramesPerMarker)
+                        )
+                        debugRow(
+                            title: "Target optimization",
+                            value: safeInt(experimentalQualityDiagnostics.experimentalTargetOptimizationFrames)
+                        )
+                        debugRow(
+                            title: "Accepted",
+                            value: safeInt(experimentalQualityDiagnostics.experimentalAcceptedObservationCount)
+                        )
+                        debugRow(
+                            title: "Rejected",
+                            value: safeInt(experimentalQualityDiagnostics.experimentalRejectedObservationCount)
+                        )
+                        debugRow(
+                            title: "Rejected ROI",
+                            value: safeInt(experimentalQualityDiagnostics.experimentalRejectedByFrameMaskCount)
+                        )
+                        debugRow(
+                            title: "Rejected distance",
+                            value: safeInt(
+                                experimentalQualityDiagnostics.experimentalRejectedByTooCloseCount +
+                                    experimentalQualityDiagnostics.experimentalRejectedByTooFarCount
+                            )
+                        )
+                        debugRow(
+                            title: "Rejected focus risk",
+                            value: safeInt(experimentalQualityDiagnostics.experimentalRejectedByFocusRiskCount)
+                        )
+                        debugRow(
+                            title: "Rejected invalid",
+                            value: safeInt(
+                                experimentalQualityDiagnostics.experimentalRejectedByInvalidPoseCount +
+                                    experimentalQualityDiagnostics.experimentalRejectedByNotFiniteCount
+                            )
+                        )
+                        debugRow(
+                            title: "Rejected unknown",
+                            value: safeInt(experimentalQualityDiagnostics.experimentalRejectedByUnknownCount)
+                        )
+                        debugRow(
+                            title: "Useful ready",
+                            value: safeInt(experimentalQualityDiagnostics.experimentalUsefulMarkersReadyCount)
+                        )
+                        debugRow(
+                            title: "Useful all ready",
+                            value: safeBool(experimentalQualityDiagnostics.experimentalUsefulAllMarkersReady)
+                        )
+                        debugRow(
+                            title: "Useful progress",
+                            value: safePercent(experimentalQualityDiagnostics.experimentalOverallUsefulProgress)
+                        )
+                        debugRow(
+                            title: "High res available",
+                            value: safeBool(
+                                experimentalQualityDiagnostics.cameraHighResolutionProfileAvailable
+                            )
+                        )
+                        debugRow(
+                            title: "High res selected",
+                            value: safeBool(
+                                experimentalQualityDiagnostics.cameraHighResolutionProfileSelected
+                            )
+                        )
+                        debugRow(
+                            title: "High res applied",
+                            value: safeText(
+                                experimentalQualityDiagnostics.cameraAppliedHighResolutionDimensions
+                            )
+                        )
+                        debugRow(
+                            title: "High res fallback",
+                            value: safeText(
+                                experimentalQualityDiagnostics.cameraHighResolutionFallbackReason
+                            )
+                        )
+                        debugRow(
+                            title: "Reference matrix",
+                            value: safeBool(
+                                experimentalQualityDiagnostics.referenceCameraMatrixDiagnosticsEnabled
+                            )
+                        )
+                        debugRow(
+                            title: "Reference source",
+                            value: safeText(experimentalQualityDiagnostics.referenceCameraMatrixSource)
+                        )
+                        debugRow(
+                            title: "Active fx/fy",
+                            value: "\(safeNumber(experimentalQualityDiagnostics.activeCameraIntrinsicFx)) / \(safeNumber(experimentalQualityDiagnostics.activeCameraIntrinsicFy))"
+                        )
+                        debugRow(
+                            title: "Reference fx/fy",
+                            value: "\(safeNumber(experimentalQualityDiagnostics.referenceCameraMatrixFx)) / \(safeNumber(experimentalQualityDiagnostics.referenceCameraMatrixFy))"
+                        )
+                        debugRow(
+                            title: "Reference ratio",
+                            value: "\(safeNumber(experimentalQualityDiagnostics.referenceVsActiveFxRatio)) / \(safeNumber(experimentalQualityDiagnostics.referenceVsActiveFyRatio))"
+                        )
+                        debugRow(
+                            title: "Reference warning",
+                            value: safeText(
+                                experimentalQualityDiagnostics.referenceCameraMatrixResolutionMismatchWarning
+                            )
+                        )
+                        debugRow(
+                            title: "ROI center",
+                            value: "\(safeNumber(experimentalQualityDiagnostics.roiCenterNormalizedX)) / \(safeNumber(experimentalQualityDiagnostics.roiCenterNormalizedY))"
+                        )
+                        debugRow(
+                            title: "Focus point",
+                            value: "\(safeNumber(experimentalQualityDiagnostics.lastFocusPointNormalizedX)) / \(safeNumber(experimentalQualityDiagnostics.lastFocusPointNormalizedY))"
+                        )
+                        debugRow(
+                            title: "Exposure point",
+                            value: "\(safeNumber(experimentalQualityDiagnostics.lastExposurePointNormalizedX)) / \(safeNumber(experimentalQualityDiagnostics.lastExposurePointNormalizedY))"
+                        )
+                        debugRow(
+                            title: "Focus ROI distance",
+                            value: safeNumber(experimentalQualityDiagnostics.focusPointDistanceToROICenter)
+                        )
+                        debugRow(
+                            title: "Angle samples",
+                            value: safeInt(experimentalQualityDiagnostics.experimentalAngularSamplesCount)
+                        )
+                        debugRow(
+                            title: "Angle std",
+                            value: safeDegrees(experimentalQualityDiagnostics.experimentalAngularStdDeg)
+                        )
+                        debugRow(
+                            title: "Angle score",
+                            value: safePercent(experimentalQualityDiagnostics.experimentalAngleDiversityScore)
+                        )
                     }
 
                     VStack(alignment: .leading, spacing: 6) {

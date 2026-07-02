@@ -205,6 +205,16 @@ final class ScannerViewModel: ObservableObject {
         static let nearEdgeNormalizedDistance: Double = 0.05
     }
 
+    private enum ExperimentalQualityModeConfiguration {
+        static let enableExperimentalQualityMode = true
+        static let enableExperimentalObservationGate = true
+        static let enableExperimentalHighResolutionCameraProfile = false
+        static let enableReferenceCameraMatrixDiagnostics = true
+        static let enableExperimentalAngleDiversityDiagnostics = true
+        static let enableExperimentalROICenterFocus = false
+        static let highResolutionDimensions = "3840x2160"
+    }
+
     private enum StaticPoseStabilityConfiguration {
         static let windowSeconds: Double = 5.0
         static let unstablePositionStdDevMm: Double = 0.35
@@ -969,6 +979,9 @@ final class ScannerViewModel: ObservableObject {
     var debugFrameMaskQualityMessage: String {
         currentFrameMaskDiagnostics.frameMaskQualityMessage
     }
+    var debugExperimentalQualityDiagnostics: ExperimentalQualityDiagnostics {
+        currentExperimentalQualityDiagnostics
+    }
     @Published private(set) var scanCoverageReady: Bool = false
     @Published private(set) var scanGoodFramesReady: Bool = false
     @Published private(set) var scanDistanceReady: Bool = false
@@ -1064,6 +1077,7 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var distanceGuideStateTitle: String = "Sem marker confiavel"
     @Published private(set) var lastDistanceGuideDistanceMm: Double?
     @Published private(set) var currentFrameMaskDiagnostics: FrameMaskDiagnostics = .empty
+    @Published private(set) var currentExperimentalQualityDiagnostics: ExperimentalQualityDiagnostics = .empty
     @Published private(set) var screenAwakeEnabled: Bool = false
     @Published private(set) var idleTimerDisabled: Bool = false
     @Published private(set) var diagnosticsEnabled: Bool = true
@@ -1231,6 +1245,8 @@ final class ScannerViewModel: ObservableObject {
     private var lastBlockingReasonBeforeExport: String?
     private var normalFinalizationLastAcceptedFrameTimestamp: Double?
     private var relativeMarkerDistanceSamples: [RelativeMarkerDistanceSample] = []
+    private var experimentalMarkerQualityDiagnosticsByMarkerId:
+        [Int: ExperimentalMarkerQualityDiagnostics] = [:]
     private var staticPoseSamples: [StaticPoseSample] = []
     private var staticPosePairDistanceSamples: [StaticPosePairDistanceSample] = []
     private var staticPosePlaneSamples: [StaticPosePlaneSample] = []
@@ -2729,6 +2745,12 @@ final class ScannerViewModel: ObservableObject {
                     in: implantMetrics.implantPoseResults
                 )
                 self.updatePrecisionValidationCurrentError()
+                self.recordExperimentalQualityObservations(
+                    poseResults: poseMetrics.rawPoseResults,
+                    frameMaskDiagnostics: frameMaskDiagnostics,
+                    cameraQuality: frame.cameraQuality,
+                    expectedMarkerIds: self.expectedExportMarkerIds(for: activeMarkerProfile)
+                )
                 self.recordScanFrame(
                     rawPoseResults: poseMetrics.rawPoseResults,
                     consolidatedPoseResults: consolidatedPoseResults,
@@ -2917,6 +2939,8 @@ final class ScannerViewModel: ObservableObject {
         distanceGuideStateTitle = "Sem marker confiavel"
         lastDistanceGuideDistanceMm = nil
         currentFrameMaskDiagnostics = .empty
+        experimentalMarkerQualityDiagnosticsByMarkerId = [:]
+        currentExperimentalQualityDiagnostics = makeExperimentalQualityDiagnosticsSnapshot()
         scanTagCoverages = [:]
         scanReprojectionErrors = []
         scanPoseHistoryByMarkerId = [:]
@@ -4629,6 +4653,422 @@ final class ScannerViewModel: ObservableObject {
         }
 
         return String(format: "%.0f, %.0f - %.0f, %.0f", minX, minY, maxX, maxY)
+    }
+
+    @MainActor
+    private func recordExperimentalQualityObservations(
+        poseResults: [PoseResult],
+        frameMaskDiagnostics: FrameMaskDiagnostics,
+        cameraQuality: CameraFrameQuality,
+        expectedMarkerIds: [Int]
+    ) {
+        guard ExperimentalQualityModeConfiguration.enableExperimentalQualityMode else {
+            currentExperimentalQualityDiagnostics = makeExperimentalQualityDiagnosticsSnapshot()
+            return
+        }
+
+        let expectedMarkerIdSet = Set(expectedMarkerIds)
+        let profile = deviceQualityProfile
+        let minimumFrames = profile.minValidFramesPerMarker ?? 65
+
+        for poseResult in poseResults {
+            var markerDiagnostics = experimentalMarkerQualityDiagnosticsByMarkerId[poseResult.markerId] ??
+                ExperimentalMarkerQualityDiagnostics.empty(markerId: poseResult.markerId)
+            markerDiagnostics.rawObservationCount += 1
+
+            let rejectionReason = ExperimentalQualityModeConfiguration.enableExperimentalObservationGate
+                ? experimentalObservationRejectionReason(
+                    poseResult: poseResult,
+                    frameMaskDiagnostics: frameMaskDiagnostics,
+                    cameraQuality: cameraQuality,
+                    deviceQualityProfile: profile,
+                    expectedMarkerIdSet: expectedMarkerIdSet
+                )
+                : nil
+
+            if let rejectionReason {
+                markerDiagnostics.rejectedObservationCount += 1
+                switch rejectionReason {
+                case .frameMask:
+                    markerDiagnostics.rejectedByFrameMaskCount += 1
+                case .tooClose:
+                    markerDiagnostics.rejectedByTooCloseCount += 1
+                case .tooFar:
+                    markerDiagnostics.rejectedByTooFarCount += 1
+                case .focusRisk:
+                    markerDiagnostics.rejectedByFocusRiskCount += 1
+                case .invalidPose:
+                    markerDiagnostics.rejectedByInvalidPoseCount += 1
+                case .notFinite:
+                    markerDiagnostics.rejectedByNotFiniteCount += 1
+                case .unknownFrame, .unknownDistance, .unknownMarker:
+                    markerDiagnostics.rejectedByUnknownCount += 1
+                }
+            } else {
+                markerDiagnostics.acceptedObservationCount += 1
+            }
+
+            markerDiagnostics.usefulProgress = experimentalUsefulProgress(
+                acceptedCount: markerDiagnostics.acceptedObservationCount,
+                minimumFrames: minimumFrames
+            )
+            markerDiagnostics.usefulReady =
+                markerDiagnostics.acceptedObservationCount >= minimumFrames
+            experimentalMarkerQualityDiagnosticsByMarkerId[poseResult.markerId] = markerDiagnostics
+        }
+
+        currentExperimentalQualityDiagnostics = makeExperimentalQualityDiagnosticsSnapshot()
+    }
+
+    private func experimentalObservationRejectionReason(
+        poseResult: PoseResult,
+        frameMaskDiagnostics: FrameMaskDiagnostics,
+        cameraQuality: CameraFrameQuality,
+        deviceQualityProfile: DeviceQualityProfile,
+        expectedMarkerIdSet: Set<Int>
+    ) -> ExperimentalObservationRejectionReason? {
+        if !expectedMarkerIdSet.isEmpty,
+           !expectedMarkerIdSet.contains(poseResult.markerId) {
+            return .unknownMarker
+        }
+
+        guard PoseMath.isFinite(poseResult.translationVector),
+              PoseMath.isFinite(poseResult.rotationVector),
+              PoseMath.isFinite(poseResult.rotationMatrix)
+        else {
+            return .notFinite
+        }
+
+        guard poseResult.distanceMm.isFinite,
+              poseResult.distanceMm > 0
+        else {
+            return .unknownDistance
+        }
+
+        guard poseResult.reprojectionError.isFinite else {
+            return .invalidPose
+        }
+
+        guard let markerFrameMaskDiagnostics =
+            frameMaskDiagnostics.markerDiagnosticsByMarkerId[poseResult.markerId]
+        else {
+            return .unknownFrame
+        }
+
+        if markerFrameMaskDiagnostics.markerInsideFrameMask != true ||
+            markerFrameMaskDiagnostics.markerFrameMaskViolation != nil {
+            return .frameMask
+        }
+
+        if cameraQuality.isAdjustingFocus || cameraQuality.isFocusSettling {
+            return .focusRisk
+        }
+
+        if let tooCloseFocusRiskDistanceMm = deviceQualityProfile.tooCloseFocusRiskDistanceMm,
+           poseResult.distanceMm < tooCloseFocusRiskDistanceMm {
+            return .focusRisk
+        }
+
+        if let minDistanceMm = deviceQualityProfile.minDistanceMm,
+           poseResult.distanceMm < minDistanceMm {
+            return .tooClose
+        }
+
+        if let maxDistanceMm = deviceQualityProfile.maxDistanceMm,
+           poseResult.distanceMm > maxDistanceMm {
+            return .tooFar
+        }
+
+        return nil
+    }
+
+    private func experimentalUsefulProgress(
+        acceptedCount: Int,
+        minimumFrames: Int
+    ) -> Double {
+        guard minimumFrames > 0 else {
+            return acceptedCount > 0 ? 1.0 : 0.0
+        }
+
+        return min(max(Double(acceptedCount) / Double(minimumFrames), 0), 1)
+    }
+
+    private func makeExperimentalQualityDiagnosticsSnapshot() -> ExperimentalQualityDiagnostics {
+        let profile = deviceQualityProfile
+        let expectedMarkerIds = expectedExportMarkerIds(for: markerProfile)
+        let minimumFrames = profile.minValidFramesPerMarker ?? 65
+        let targetFrames = profile.targetOptimizationFrames ?? 300
+        let markerDiagnostics = experimentalMarkerQualityDiagnosticsByMarkerId
+        let expectedMarkerDiagnostics = expectedMarkerIds.map {
+            markerDiagnostics[$0] ?? ExperimentalMarkerQualityDiagnostics.empty(markerId: $0)
+        }
+        let allMarkerDiagnostics = Array(markerDiagnostics.values)
+        let globalDiagnostics = allMarkerDiagnostics.isEmpty ? expectedMarkerDiagnostics : allMarkerDiagnostics
+        let usefulReadyCount = expectedMarkerDiagnostics.filter(\.usefulReady).count
+        let usefulProgressValues = expectedMarkerDiagnostics.map(\.usefulProgress)
+        let overallProgress = usefulProgressValues.isEmpty ? nil : usefulProgressValues.min()
+        let referenceDiagnostics = makeReferenceCameraMatrixDiagnostics(profile: profile)
+        let roiFocusDiagnostics = makeROIFocusDiagnostics(profile: profile)
+        let highResolutionSelected =
+            cameraProfile.identifier == .wide15xHighResolutionExperimental
+        let highResolutionFallbackReason: String?
+        if highResolutionSelected &&
+            !ExperimentalQualityModeConfiguration.enableExperimentalHighResolutionCameraProfile {
+            highResolutionFallbackReason = "High resolution format selection disabled"
+        } else {
+            highResolutionFallbackReason = nil
+        }
+        let angularSampleCount = globalDiagnostics.reduce(0) {
+            $0 + $1.rawObservationCount
+        }
+        let angularUsefulSampleCount = globalDiagnostics.reduce(0) {
+            $0 + $1.acceptedObservationCount
+        }
+
+        return ExperimentalQualityDiagnostics(
+            experimentalQualityModeEnabled:
+                ExperimentalQualityModeConfiguration.enableExperimentalQualityMode,
+            experimentalObservationGateEnabled:
+                ExperimentalQualityModeConfiguration.enableExperimentalObservationGate,
+            experimentalMinValidFramesPerMarker: minimumFrames,
+            experimentalTargetOptimizationFrames: targetFrames,
+            experimentalRawObservationCount: globalDiagnostics.reduce(0) {
+                $0 + $1.rawObservationCount
+            },
+            experimentalAcceptedObservationCount: globalDiagnostics.reduce(0) {
+                $0 + $1.acceptedObservationCount
+            },
+            experimentalRejectedObservationCount: globalDiagnostics.reduce(0) {
+                $0 + $1.rejectedObservationCount
+            },
+            experimentalRejectedByFrameMaskCount: globalDiagnostics.reduce(0) {
+                $0 + $1.rejectedByFrameMaskCount
+            },
+            experimentalRejectedByTooCloseCount: globalDiagnostics.reduce(0) {
+                $0 + $1.rejectedByTooCloseCount
+            },
+            experimentalRejectedByTooFarCount: globalDiagnostics.reduce(0) {
+                $0 + $1.rejectedByTooFarCount
+            },
+            experimentalRejectedByFocusRiskCount: globalDiagnostics.reduce(0) {
+                $0 + $1.rejectedByFocusRiskCount
+            },
+            experimentalRejectedByInvalidPoseCount: globalDiagnostics.reduce(0) {
+                $0 + $1.rejectedByInvalidPoseCount
+            },
+            experimentalRejectedByNotFiniteCount: globalDiagnostics.reduce(0) {
+                $0 + $1.rejectedByNotFiniteCount
+            },
+            experimentalRejectedByUnknownCount: globalDiagnostics.reduce(0) {
+                $0 + $1.rejectedByUnknownCount
+            },
+            experimentalUsefulMarkersReadyCount: usefulReadyCount,
+            experimentalUsefulAllMarkersReady: !expectedMarkerDiagnostics.isEmpty &&
+                usefulReadyCount == expectedMarkerDiagnostics.count,
+            experimentalOverallUsefulProgress: finiteOptional(overallProgress),
+            cameraHighResolutionProfileAvailable: true,
+            cameraHighResolutionProfileSelected: highResolutionSelected,
+            cameraRequestedHighResolutionDimensions:
+                ExperimentalQualityModeConfiguration.highResolutionDimensions,
+            cameraAppliedHighResolutionDimensions: currentCameraDebugSnapshot.resolutionText,
+            cameraHighResolutionFallbackReason: highResolutionFallbackReason,
+            referenceCameraMatrixDiagnosticsEnabled:
+                ExperimentalQualityModeConfiguration.enableReferenceCameraMatrixDiagnostics,
+            referenceCameraMatrixSource: referenceDiagnostics.source,
+            referenceCameraMatrixFx: finiteOptional(referenceDiagnostics.fx),
+            referenceCameraMatrixFy: finiteOptional(referenceDiagnostics.fy),
+            referenceCameraMatrixCx: finiteOptional(referenceDiagnostics.cx),
+            referenceCameraMatrixCy: finiteOptional(referenceDiagnostics.cy),
+            activeCameraIntrinsicFx: finiteOptional(currentCameraDebugSnapshot.fx),
+            activeCameraIntrinsicFy: finiteOptional(currentCameraDebugSnapshot.fy),
+            activeCameraIntrinsicCx: finiteOptional(currentCameraDebugSnapshot.cx),
+            activeCameraIntrinsicCy: finiteOptional(currentCameraDebugSnapshot.cy),
+            referenceVsActiveFxDelta: finiteOptional(referenceDiagnostics.fxDelta),
+            referenceVsActiveFyDelta: finiteOptional(referenceDiagnostics.fyDelta),
+            referenceVsActiveCxDelta: finiteOptional(referenceDiagnostics.cxDelta),
+            referenceVsActiveCyDelta: finiteOptional(referenceDiagnostics.cyDelta),
+            referenceVsActiveFxRatio: finiteOptional(referenceDiagnostics.fxRatio),
+            referenceVsActiveFyRatio: finiteOptional(referenceDiagnostics.fyRatio),
+            referenceCameraMatrixResolutionMismatchWarning:
+                referenceDiagnostics.resolutionMismatchWarning,
+            roiCenterNormalizedX: roiFocusDiagnostics.roiCenterX,
+            roiCenterNormalizedY: roiFocusDiagnostics.roiCenterY,
+            lastFocusPointNormalizedX: roiFocusDiagnostics.focusX,
+            lastFocusPointNormalizedY: roiFocusDiagnostics.focusY,
+            lastExposurePointNormalizedX: roiFocusDiagnostics.exposureX,
+            lastExposurePointNormalizedY: roiFocusDiagnostics.exposureY,
+            focusPointInsideROI: roiFocusDiagnostics.focusInsideROI,
+            focusPointDistanceToROICenter: roiFocusDiagnostics.focusDistanceToROICenter,
+            experimentalAngularSamplesCount:
+                ExperimentalQualityModeConfiguration.enableExperimentalAngleDiversityDiagnostics
+                    ? angularSampleCount
+                    : nil,
+            experimentalAngularUsefulSamplesCount:
+                ExperimentalQualityModeConfiguration.enableExperimentalAngleDiversityDiagnostics
+                    ? angularUsefulSampleCount
+                    : nil,
+            experimentalAngularStdDeg: nil,
+            experimentalAngularMinSeparationDeg: nil,
+            experimentalAngleDiversityScore: nil,
+            experimentalAngleDiversityReady:
+                ExperimentalQualityModeConfiguration.enableExperimentalAngleDiversityDiagnostics
+                    ? false
+                    : nil,
+            markerDiagnosticsByMarkerId: markerDiagnostics
+        )
+    }
+
+    private func makeReferenceCameraMatrixDiagnostics(
+        profile: DeviceQualityProfile
+    ) -> (
+        source: String?,
+        fx: Double?,
+        fy: Double?,
+        cx: Double?,
+        cy: Double?,
+        fxDelta: Double?,
+        fyDelta: Double?,
+        cxDelta: Double?,
+        cyDelta: Double?,
+        fxRatio: Double?,
+        fyRatio: Double?,
+        resolutionMismatchWarning: String?
+    ) {
+        guard ExperimentalQualityModeConfiguration.enableReferenceCameraMatrixDiagnostics,
+              let referenceMatrix = referenceCameraMatrix(for: profile.qualityClass)
+        else {
+            return (nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+        }
+
+        let activeFx = currentCameraDebugSnapshot.fx
+        let activeFy = currentCameraDebugSnapshot.fy
+        let activeCx = currentCameraDebugSnapshot.cx
+        let activeCy = currentCameraDebugSnapshot.cy
+        let warning: String?
+        if let dimensions = currentCameraDebugSnapshot.resolutionText,
+           !dimensions.contains("3840") || !dimensions.contains("2160") {
+            warning = "Reference matrix may not match active video dimensions"
+        } else {
+            warning = nil
+        }
+
+        return (
+            referenceMatrix.source,
+            referenceMatrix.fx,
+            referenceMatrix.fy,
+            referenceMatrix.cx,
+            referenceMatrix.cy,
+            finiteDelta(referenceMatrix.fx, activeFx),
+            finiteDelta(referenceMatrix.fy, activeFy),
+            finiteDelta(referenceMatrix.cx, activeCx),
+            finiteDelta(referenceMatrix.cy, activeCy),
+            finiteRatio(referenceMatrix.fx, activeFx),
+            finiteRatio(referenceMatrix.fy, activeFy),
+            warning
+        )
+    }
+
+    private func referenceCameraMatrix(
+        for qualityClass: DeviceQualityClass
+    ) -> (source: String, fx: Double, fy: Double, cx: Double, cy: Double)? {
+        switch qualityClass {
+        case .iPhone:
+            return ("iPhone reference", 2925.940877, 2925.195448, 1920.537327, 1095.175293)
+        case .iPhonePro:
+            return ("iPhonePro reference", 1527.209, 1527.209, 1914.56, 1062.09)
+        case .iPad:
+            return ("iPad reference", 3135.940877, 3130.195448, 1923.537327, 1106.175293)
+        case .unknown:
+            return nil
+        }
+    }
+
+    private func finiteDelta(_ reference: Double?, _ active: Double?) -> Double? {
+        guard let reference,
+              let active,
+              reference.isFinite,
+              active.isFinite
+        else {
+            return nil
+        }
+
+        return active - reference
+    }
+
+    private func finiteRatio(_ reference: Double?, _ active: Double?) -> Double? {
+        guard let reference,
+              let active,
+              reference.isFinite,
+              active.isFinite,
+              abs(active) > 1e-9
+        else {
+            return nil
+        }
+
+        return reference / active
+    }
+
+    private func makeROIFocusDiagnostics(
+        profile: DeviceQualityProfile
+    ) -> (
+        roiCenterX: Double?,
+        roiCenterY: Double?,
+        focusX: Double?,
+        focusY: Double?,
+        exposureX: Double?,
+        exposureY: Double?,
+        focusInsideROI: Bool?,
+        focusDistanceToROICenter: Double?
+    ) {
+        let horizontalBorder = sanitizedFrameMaskBorderPercent(
+            profile.frameMaskHorizontalBorderPercent
+        )
+        let verticalBorder = sanitizedFrameMaskBorderPercent(
+            profile.frameMaskVerticalBorderPercent
+        )
+        let roiCenterX = horizontalBorder == nil ? nil : 0.5
+        let roiCenterY = verticalBorder == nil ? nil : 0.5
+        let focusX = finiteOptional(lastFocusPoint.map { Double($0.x) })
+        let focusY = finiteOptional(lastFocusPoint.map { Double($0.y) })
+        let exposureX = focusX
+        let exposureY = focusY
+
+        let focusInsideROI: Bool?
+        if let focusX,
+           let focusY,
+           let horizontalBorder,
+           let verticalBorder {
+            focusInsideROI =
+                focusX >= horizontalBorder &&
+                focusX <= 1.0 - horizontalBorder &&
+                focusY >= verticalBorder &&
+                focusY <= 1.0 - verticalBorder
+        } else {
+            focusInsideROI = nil
+        }
+
+        let focusDistanceToROICenter: Double?
+        if let focusX,
+           let focusY,
+           let roiCenterX,
+           let roiCenterY {
+            let dx = focusX - roiCenterX
+            let dy = focusY - roiCenterY
+            focusDistanceToROICenter = sqrt(dx * dx + dy * dy)
+        } else {
+            focusDistanceToROICenter = nil
+        }
+
+        return (
+            roiCenterX,
+            roiCenterY,
+            focusX,
+            focusY,
+            exposureX,
+            exposureY,
+            focusInsideROI,
+            finiteOptional(focusDistanceToROICenter)
+        )
     }
 
     @MainActor
@@ -8756,6 +9196,7 @@ final class ScannerViewModel: ObservableObject {
     ) -> ScanDiagnosticsSnapshot {
         let qualityProfile = deviceQualityProfile
         let frameMaskDiagnostics = currentFrameMaskDiagnostics
+        let experimentalQualityDiagnostics = currentExperimentalQualityDiagnostics
 
         return diagnosticsRecorder.makeSnapshot(
             timestamp: sanitizedDiagnosticsTimestamp(timestamp ?? lastFrameTimestamp),
@@ -8815,6 +9256,7 @@ final class ScannerViewModel: ObservableObject {
             distanceGuideMessage: distanceGuideStateTitle,
             lastDistanceMm: lastDistanceGuideDistanceMm ?? poseDistanceMm,
             frameMaskDiagnostics: frameMaskDiagnostics,
+            experimentalQualityDiagnostics: experimentalQualityDiagnostics,
             userFeedbackState: scanUserFeedbackState,
             userFeedbackMessage: scanUserFeedbackMessage,
             captureProgressPercent: scanCaptureProgressPercent,
@@ -8885,6 +9327,8 @@ final class ScannerViewModel: ObservableObject {
             candidateVsFinalGeometryDelta:
                 relativeMarkerGeometryDiagnostics.candidateVsFinalGeometryDelta,
             markerFrameMaskDiagnosticsByMarkerId: frameMaskDiagnostics.markerDiagnosticsByMarkerId,
+            experimentalMarkerDiagnosticsByMarkerId:
+                experimentalQualityDiagnostics.markerDiagnosticsByMarkerId,
             guidedStaticCaptureEnabled: guidedStaticCaptureEnabled,
             guidedStages: guidedStaticCaptureEnabled
                 ? guidedStaticStageSnapshots.map(diagnosticsGuidedStageSummary)
@@ -10137,6 +10581,7 @@ final class ScannerViewModel: ObservableObject {
         )
         let qualityProfile = deviceQualityProfile
         let frameMaskDiagnostics = currentFrameMaskDiagnostics
+        let experimentalQualityDiagnostics = currentExperimentalQualityDiagnostics
 
         return ScanTechnicalReport(
             createdAt: Self.reportDateFormatter.string(from: createdAt),
@@ -10258,6 +10703,111 @@ final class ScannerViewModel: ObservableObject {
             anyMarkerNearFrameEdge: frameMaskDiagnostics.anyMarkerNearFrameEdge,
             frameMaskQualityState: frameMaskDiagnostics.frameMaskQualityState,
             frameMaskQualityMessage: frameMaskDiagnostics.frameMaskQualityMessage,
+            experimentalQualityModeEnabled:
+                experimentalQualityDiagnostics.experimentalQualityModeEnabled,
+            experimentalObservationGateEnabled:
+                experimentalQualityDiagnostics.experimentalObservationGateEnabled,
+            experimentalMinValidFramesPerMarker:
+                experimentalQualityDiagnostics.experimentalMinValidFramesPerMarker,
+            experimentalTargetOptimizationFrames:
+                experimentalQualityDiagnostics.experimentalTargetOptimizationFrames,
+            experimentalRawObservationCount:
+                experimentalQualityDiagnostics.experimentalRawObservationCount,
+            experimentalAcceptedObservationCount:
+                experimentalQualityDiagnostics.experimentalAcceptedObservationCount,
+            experimentalRejectedObservationCount:
+                experimentalQualityDiagnostics.experimentalRejectedObservationCount,
+            experimentalRejectedByFrameMaskCount:
+                experimentalQualityDiagnostics.experimentalRejectedByFrameMaskCount,
+            experimentalRejectedByTooCloseCount:
+                experimentalQualityDiagnostics.experimentalRejectedByTooCloseCount,
+            experimentalRejectedByTooFarCount:
+                experimentalQualityDiagnostics.experimentalRejectedByTooFarCount,
+            experimentalRejectedByFocusRiskCount:
+                experimentalQualityDiagnostics.experimentalRejectedByFocusRiskCount,
+            experimentalRejectedByInvalidPoseCount:
+                experimentalQualityDiagnostics.experimentalRejectedByInvalidPoseCount,
+            experimentalRejectedByNotFiniteCount:
+                experimentalQualityDiagnostics.experimentalRejectedByNotFiniteCount,
+            experimentalRejectedByUnknownCount:
+                experimentalQualityDiagnostics.experimentalRejectedByUnknownCount,
+            experimentalUsefulMarkersReadyCount:
+                experimentalQualityDiagnostics.experimentalUsefulMarkersReadyCount,
+            experimentalUsefulAllMarkersReady:
+                experimentalQualityDiagnostics.experimentalUsefulAllMarkersReady,
+            experimentalOverallUsefulProgress:
+                finiteReportDouble(experimentalQualityDiagnostics.experimentalOverallUsefulProgress),
+            cameraHighResolutionProfileAvailable:
+                experimentalQualityDiagnostics.cameraHighResolutionProfileAvailable,
+            cameraHighResolutionProfileSelected:
+                experimentalQualityDiagnostics.cameraHighResolutionProfileSelected,
+            cameraRequestedHighResolutionDimensions:
+                experimentalQualityDiagnostics.cameraRequestedHighResolutionDimensions,
+            cameraAppliedHighResolutionDimensions:
+                experimentalQualityDiagnostics.cameraAppliedHighResolutionDimensions,
+            cameraHighResolutionFallbackReason:
+                experimentalQualityDiagnostics.cameraHighResolutionFallbackReason,
+            referenceCameraMatrixDiagnosticsEnabled:
+                experimentalQualityDiagnostics.referenceCameraMatrixDiagnosticsEnabled,
+            referenceCameraMatrixSource:
+                experimentalQualityDiagnostics.referenceCameraMatrixSource,
+            referenceCameraMatrixFx:
+                finiteReportDouble(experimentalQualityDiagnostics.referenceCameraMatrixFx),
+            referenceCameraMatrixFy:
+                finiteReportDouble(experimentalQualityDiagnostics.referenceCameraMatrixFy),
+            referenceCameraMatrixCx:
+                finiteReportDouble(experimentalQualityDiagnostics.referenceCameraMatrixCx),
+            referenceCameraMatrixCy:
+                finiteReportDouble(experimentalQualityDiagnostics.referenceCameraMatrixCy),
+            activeCameraIntrinsicFx:
+                finiteReportDouble(experimentalQualityDiagnostics.activeCameraIntrinsicFx),
+            activeCameraIntrinsicFy:
+                finiteReportDouble(experimentalQualityDiagnostics.activeCameraIntrinsicFy),
+            activeCameraIntrinsicCx:
+                finiteReportDouble(experimentalQualityDiagnostics.activeCameraIntrinsicCx),
+            activeCameraIntrinsicCy:
+                finiteReportDouble(experimentalQualityDiagnostics.activeCameraIntrinsicCy),
+            referenceVsActiveFxDelta:
+                finiteReportDouble(experimentalQualityDiagnostics.referenceVsActiveFxDelta),
+            referenceVsActiveFyDelta:
+                finiteReportDouble(experimentalQualityDiagnostics.referenceVsActiveFyDelta),
+            referenceVsActiveCxDelta:
+                finiteReportDouble(experimentalQualityDiagnostics.referenceVsActiveCxDelta),
+            referenceVsActiveCyDelta:
+                finiteReportDouble(experimentalQualityDiagnostics.referenceVsActiveCyDelta),
+            referenceVsActiveFxRatio:
+                finiteReportDouble(experimentalQualityDiagnostics.referenceVsActiveFxRatio),
+            referenceVsActiveFyRatio:
+                finiteReportDouble(experimentalQualityDiagnostics.referenceVsActiveFyRatio),
+            referenceCameraMatrixResolutionMismatchWarning:
+                experimentalQualityDiagnostics.referenceCameraMatrixResolutionMismatchWarning,
+            roiCenterNormalizedX:
+                finiteReportDouble(experimentalQualityDiagnostics.roiCenterNormalizedX),
+            roiCenterNormalizedY:
+                finiteReportDouble(experimentalQualityDiagnostics.roiCenterNormalizedY),
+            lastFocusPointNormalizedX:
+                finiteReportDouble(experimentalQualityDiagnostics.lastFocusPointNormalizedX),
+            lastFocusPointNormalizedY:
+                finiteReportDouble(experimentalQualityDiagnostics.lastFocusPointNormalizedY),
+            lastExposurePointNormalizedX:
+                finiteReportDouble(experimentalQualityDiagnostics.lastExposurePointNormalizedX),
+            lastExposurePointNormalizedY:
+                finiteReportDouble(experimentalQualityDiagnostics.lastExposurePointNormalizedY),
+            focusPointInsideROI: experimentalQualityDiagnostics.focusPointInsideROI,
+            focusPointDistanceToROICenter:
+                finiteReportDouble(experimentalQualityDiagnostics.focusPointDistanceToROICenter),
+            experimentalAngularSamplesCount:
+                experimentalQualityDiagnostics.experimentalAngularSamplesCount,
+            experimentalAngularUsefulSamplesCount:
+                experimentalQualityDiagnostics.experimentalAngularUsefulSamplesCount,
+            experimentalAngularStdDeg:
+                finiteReportDouble(experimentalQualityDiagnostics.experimentalAngularStdDeg),
+            experimentalAngularMinSeparationDeg:
+                finiteReportDouble(experimentalQualityDiagnostics.experimentalAngularMinSeparationDeg),
+            experimentalAngleDiversityScore:
+                finiteReportDouble(experimentalQualityDiagnostics.experimentalAngleDiversityScore),
+            experimentalAngleDiversityReady:
+                experimentalQualityDiagnostics.experimentalAngleDiversityReady,
             tagAreaPixelsMean: finiteReportDouble(averageTagAreaPixelsForReport()),
             userFeedbackState: scanUserFeedbackState,
             userFeedbackMessage: scanUserFeedbackMessage,
@@ -10434,6 +10984,8 @@ final class ScannerViewModel: ObservableObject {
         let diagnostics = finalObservationDiagnosticsByMarkerId[pose.markerId]
         let frameMaskDiagnostics =
             currentFrameMaskDiagnostics.markerDiagnosticsByMarkerId[pose.markerId]
+        let experimentalDiagnostics =
+            currentExperimentalQualityDiagnostics.markerDiagnosticsByMarkerId[pose.markerId]
 
         return ScanTechnicalReport.Marker(
             markerId: pose.markerId,
@@ -10472,7 +11024,30 @@ final class ScannerViewModel: ObservableObject {
                 finiteReportDouble(frameMaskDiagnostics?.markerDistanceToFrameMaskEdgePx),
             markerDistanceToFrameMaskEdgeNormalized:
                 finiteReportDouble(frameMaskDiagnostics?.markerDistanceToFrameMaskEdgeNormalized),
-            markerNearFrameEdgeWarning: frameMaskDiagnostics?.markerNearFrameEdgeWarning
+            markerNearFrameEdgeWarning: frameMaskDiagnostics?.markerNearFrameEdgeWarning,
+            markerExperimentalRawObservationCount: experimentalDiagnostics?.rawObservationCount,
+            markerExperimentalAcceptedObservationCount:
+                experimentalDiagnostics?.acceptedObservationCount,
+            markerExperimentalRejectedObservationCount:
+                experimentalDiagnostics?.rejectedObservationCount,
+            markerExperimentalRejectedByFrameMaskCount:
+                experimentalDiagnostics?.rejectedByFrameMaskCount,
+            markerExperimentalRejectedByTooCloseCount:
+                experimentalDiagnostics?.rejectedByTooCloseCount,
+            markerExperimentalRejectedByTooFarCount:
+                experimentalDiagnostics?.rejectedByTooFarCount,
+            markerExperimentalRejectedByFocusRiskCount:
+                experimentalDiagnostics?.rejectedByFocusRiskCount,
+            markerExperimentalRejectedByInvalidPoseCount:
+                experimentalDiagnostics?.rejectedByInvalidPoseCount,
+            markerExperimentalRejectedByNotFiniteCount:
+                experimentalDiagnostics?.rejectedByNotFiniteCount,
+            markerExperimentalRejectedByUnknownCount:
+                experimentalDiagnostics?.rejectedByUnknownCount,
+            markerExperimentalUsefulProgress:
+                finiteReportDouble(experimentalDiagnostics?.usefulProgress),
+            markerExperimentalUsefulReady:
+                experimentalDiagnostics?.usefulReady
         )
     }
 

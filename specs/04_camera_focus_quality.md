@@ -111,6 +111,22 @@ Centralize os markers
 
 Essa etapa nao bloqueia export, readiness ou finalizacao.
 
+### Experimental Quality Mode
+
+Foi adicionado um modo experimental diagnostics-first para separar observacoes brutas de observacoes uteis, sem alterar o pipeline principal.
+
+Regras atuais:
+
+* `enableExperimentalQualityMode = true`;
+* `enableExperimentalObservationGate = true`;
+* ROI/frame mask, distancia, risco de foco e pose finita classificam observacoes aceitas/rejeitadas;
+* o progresso util experimental roda em paralelo ao progresso visual/readiness atual;
+* `minValidFramesPerMarker = 65` e `targetOptimizationFrames = 300` sao registrados por device quality profile;
+* High Resolution Camera Profile fica disponivel para diagnostico manual, mas nao e selecionado automaticamente;
+* Reference Camera Matrix Diagnostics e read-only e nao altera solvePnP/export.
+
+O modo existe para comparar aparelhos/perfis antes de qualquer mudanca em export, readiness ou finalizacao.
+
 Reports e diagnostics devem registrar:
 
 ```txt
@@ -160,6 +176,18 @@ visibleMarkersViolatingFrameMaskCount
 anyMarkerNearFrameEdge
 frameMaskQualityState
 frameMaskQualityMessage
+experimentalQualityModeEnabled
+experimentalObservationGateEnabled
+experimentalMinValidFramesPerMarker
+experimentalTargetOptimizationFrames
+experimentalAcceptedObservationCount
+experimentalRejectedObservationCount
+experimentalUsefulMarkersReadyCount
+experimentalOverallUsefulProgress
+cameraHighResolutionProfileAvailable
+cameraHighResolutionProfileSelected
+referenceCameraMatrixDiagnosticsEnabled
+referenceVsActiveFxRatio
 ```
 
 ### Wide física

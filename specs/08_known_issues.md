@@ -48,7 +48,7 @@ Resultados iniciais no iPhone 16 indicam:
 * distâncias abaixo de aproximadamente 120-125 mm aumentam o risco de perda de foco;
 * a faixa inicial recomendada para iPhone 16 com `Wide 1.5x` é 150-180 mm.
 
-## 2.2. ROI/frame mask ainda e diagnostics-only
+## 2.2. ROI/frame mask e observacoes uteis ainda nao controlam export
 
 Foi adicionada mascara/ROI por classe de device para detectar markers perto demais da borda da imagem.
 
@@ -60,12 +60,21 @@ warning -> Evite as bordas da camera / Centralize os markers
 unknown -> sem dados suficientes
 ```
 
-Essa etapa ainda nao bloqueia export, readiness ou finalizacao. Ela serve para gerar evidencia em `_report.json`, `_diagnostics.json` e debug emergencial antes de virar gate de qualidade.
+O Experimental Quality Mode agora classifica observacoes brutas como aceitas/rejeitadas usando ROI, distancia, risco de foco e pose finita. Esse progresso util experimental fica em paralelo e ainda nao bloqueia export, readiness ou finalizacao.
+
+Valores iniciais registrados:
+
+```txt
+minValidFramesPerMarker = 65
+targetOptimizationFrames = 300
+```
+
+Ela serve para gerar evidencia em `_report.json`, `_diagnostics.json` e debug emergencial antes de qualquer decisao de produto.
 
 Proximos passos ainda pendentes:
 
-* separar observacoes uteis de observacoes brutas;
-* medir diversidade angular;
+* validar se observacoes uteis correlacionam com scans melhores;
+* medir diversidade angular completa;
 * investigar PnP/reprojection por canto;
 * so depois considerar soft gate por ROI.
 
