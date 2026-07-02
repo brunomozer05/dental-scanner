@@ -8757,7 +8757,7 @@ final class ScannerViewModel: ObservableObject {
         let qualityProfile = deviceQualityProfile
         let frameMaskDiagnostics = currentFrameMaskDiagnostics
 
-        diagnosticsRecorder.makeSnapshot(
+        return diagnosticsRecorder.makeSnapshot(
             timestamp: sanitizedDiagnosticsTimestamp(timestamp ?? lastFrameTimestamp),
             markerProfile: markerProfile.rawValue,
             deviceModelIdentifier: deviceModelInfo.identifier,
