@@ -102,6 +102,21 @@ Esse modo deve testar perfis por uma janela curta e escolher o melhor usando:
 
 Nao automatizar antes de comparar resultados por aparelho/perfil nos reports.
 
+Fases ja implementadas como diagnostics/read-only:
+
+```txt
+DeviceQualityProfile por classe de device
+Frame Mask / ROI Quality Diagnostics
+```
+
+Ainda pendente:
+
+* separar observacoes uteis de observacoes brutas;
+* adicionar diagnostics de diversidade angular;
+* adicionar PnP robustness diagnostics;
+* atualizar o comparador para expor os novos campos;
+* decidir, com dados, se ROI vira soft gate.
+
 ## Prioridade 5 — Comparar v1 vs v2
 
 Objetivo:

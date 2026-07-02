@@ -201,6 +201,10 @@ final class ScannerViewModel: ObservableObject {
         static let minimumFramesForWarning: Int = 5
     }
 
+    private enum FrameMaskDiagnosticsConfiguration {
+        static let nearEdgeNormalizedDistance: Double = 0.05
+    }
+
     private enum StaticPoseStabilityConfiguration {
         static let windowSeconds: Double = 5.0
         static let unstablePositionStdDevMm: Double = 0.35
@@ -905,6 +909,66 @@ final class ScannerViewModel: ObservableObject {
     var debugDistanceGuideMessage: String {
         distanceGuideStateTitle
     }
+    var debugDeviceQualityClass: String {
+        deviceQualityProfile.qualityClass.rawValue
+    }
+    var debugDeviceQualityProfileName: String {
+        deviceQualityProfile.profileName
+    }
+    var debugDeviceQualityIsKnown: Bool {
+        deviceQualityProfile.isKnown
+    }
+    var debugDeviceQualityWarning: String? {
+        deviceQualityProfile.warning
+    }
+    var debugDeviceQualityMinDistanceMm: Double? {
+        deviceQualityProfile.minDistanceMm
+    }
+    var debugDeviceQualityIdealMinDistanceMm: Double? {
+        deviceQualityProfile.idealMinDistanceMm
+    }
+    var debugDeviceQualityIdealMaxDistanceMm: Double? {
+        deviceQualityProfile.idealMaxDistanceMm
+    }
+    var debugDeviceQualityMaxDistanceMm: Double? {
+        deviceQualityProfile.maxDistanceMm
+    }
+    var debugDeviceQualityTooCloseFocusRiskDistanceMm: Double? {
+        deviceQualityProfile.tooCloseFocusRiskDistanceMm
+    }
+    var debugDeviceQualityFocusVarianceThreshold: Double? {
+        deviceQualityProfile.focusVarianceThreshold
+    }
+    var debugDeviceQualityOverlayScale: Double? {
+        deviceQualityProfile.overlayScale
+    }
+    var debugDeviceQualityFrameMaskVerticalBorderPercent: Double? {
+        deviceQualityProfile.frameMaskVerticalBorderPercent
+    }
+    var debugDeviceQualityFrameMaskHorizontalBorderPercent: Double? {
+        deviceQualityProfile.frameMaskHorizontalBorderPercent
+    }
+    var debugDeviceQualityRecommendedCameraProfileName: String? {
+        deviceQualityProfile.recommendedCameraProfileName
+    }
+    var debugFrameMaskSafeRectText: String {
+        safeRectDebugText(currentFrameMaskDiagnostics)
+    }
+    var debugVisibleMarkersInsideFrameMaskCount: Int {
+        currentFrameMaskDiagnostics.visibleMarkersInsideFrameMaskCount
+    }
+    var debugVisibleMarkersViolatingFrameMaskCount: Int {
+        currentFrameMaskDiagnostics.visibleMarkersViolatingFrameMaskCount
+    }
+    var debugAnyMarkerNearFrameEdge: Bool {
+        currentFrameMaskDiagnostics.anyMarkerNearFrameEdge
+    }
+    var debugFrameMaskQualityState: String {
+        currentFrameMaskDiagnostics.frameMaskQualityState
+    }
+    var debugFrameMaskQualityMessage: String {
+        currentFrameMaskDiagnostics.frameMaskQualityMessage
+    }
     @Published private(set) var scanCoverageReady: Bool = false
     @Published private(set) var scanGoodFramesReady: Bool = false
     @Published private(set) var scanDistanceReady: Bool = false
@@ -999,6 +1063,7 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var centerFocusRecoveryCount: Int = 0
     @Published private(set) var distanceGuideStateTitle: String = "Sem marker confiavel"
     @Published private(set) var lastDistanceGuideDistanceMm: Double?
+    @Published private(set) var currentFrameMaskDiagnostics: FrameMaskDiagnostics = .empty
     @Published private(set) var screenAwakeEnabled: Bool = false
     @Published private(set) var idleTimerDisabled: Bool = false
     @Published private(set) var diagnosticsEnabled: Bool = true
@@ -1115,6 +1180,13 @@ final class ScannerViewModel: ObservableObject {
     private let diagnosticsRecorder: ScanDiagnosticsRecorder
     private let crashReportingService: CrashReportingService
     private let deviceModelInfo = DeviceModelInfo.current
+
+    private var deviceQualityProfile: DeviceQualityProfile {
+        DeviceQualityProfileResolver.profile(
+            deviceModelIdentifier: deviceModelInfo.identifier,
+            deviceMarketingName: deviceModelInfo.marketingName
+        )
+    }
     private var shouldRunCamera = false
     private var totalFramesCounter: Int = 0
     private var recentFrameTimestamps: [Double] = []
@@ -2489,15 +2561,22 @@ final class ScannerViewModel: ObservableObject {
             timestamp: metrics.lastFrameTimestamp,
             frameIndex: metrics.totalFramesReceived
         )
+        let currentFrameOverlayMarkers = makeOverlayMarkers(
+            detections: arucoMetrics.detections,
+            poseResults: poseMetrics.rawPoseResults,
+            markerProfile: activeMarkerProfile,
+            dualMarkerDefinitions: dualMarkerDefinitions,
+            timestamp: metrics.lastFrameTimestamp,
+            frameIndex: metrics.totalFramesReceived
+        )
+        let frameMaskDiagnostics = makeFrameMaskDiagnostics(
+            markers: currentFrameOverlayMarkers,
+            frame: frame,
+            deviceQualityProfile: deviceQualityProfile,
+            expectedMarkerIds: expectedExportMarkerIds(for: activeMarkerProfile)
+        )
         let overlayMarkers = stabilizedOverlayMarkers(
-            from: makeOverlayMarkers(
-                detections: arucoMetrics.detections,
-                poseResults: poseMetrics.rawPoseResults,
-                markerProfile: activeMarkerProfile,
-                dualMarkerDefinitions: dualMarkerDefinitions,
-                timestamp: metrics.lastFrameTimestamp,
-                frameIndex: metrics.totalFramesReceived
-            ),
+            from: currentFrameOverlayMarkers,
             timestamp: metrics.lastFrameTimestamp,
             markerProfile: activeMarkerProfile
         )
@@ -2590,6 +2669,7 @@ final class ScannerViewModel: ObservableObject {
             self.detectedMarkerIds = arucoMetrics.detectedMarkerIds
             self.detectedMarkers = arucoMetrics.detections
             self.overlayMarkers = overlayMarkers
+            self.currentFrameMaskDiagnostics = frameMaskDiagnostics
             self.arucoErrorMessage = arucoMetrics.errorMessage
             self.hasFrameReachedArucoDetector = arucoMetrics.hasFrameReachedDetector
             self.arucoDetectionCallCount = arucoMetrics.detectionCallCount
@@ -2836,6 +2916,7 @@ final class ScannerViewModel: ObservableObject {
         lastArucoFocusErrorMessage = nil
         distanceGuideStateTitle = "Sem marker confiavel"
         lastDistanceGuideDistanceMm = nil
+        currentFrameMaskDiagnostics = .empty
         scanTagCoverages = [:]
         scanReprojectionErrors = []
         scanPoseHistoryByMarkerId = [:]
@@ -4354,6 +4435,200 @@ final class ScannerViewModel: ObservableObject {
         }
 
         return "Aproxime um pouco"
+    }
+
+    private func makeFrameMaskDiagnostics(
+        markers: [MarkerOverlayResult],
+        frame: CameraFrame,
+        deviceQualityProfile: DeviceQualityProfile,
+        expectedMarkerIds: [Int]
+    ) -> FrameMaskDiagnostics {
+        let frameWidth = Double(frame.width)
+        let frameHeight = Double(frame.height)
+        guard frameWidth.isFinite,
+              frameHeight.isFinite,
+              frameWidth > 0,
+              frameHeight > 0,
+              let verticalBorderPercent = sanitizedFrameMaskBorderPercent(
+                deviceQualityProfile.frameMaskVerticalBorderPercent
+              ),
+              let horizontalBorderPercent = sanitizedFrameMaskBorderPercent(
+                deviceQualityProfile.frameMaskHorizontalBorderPercent
+              )
+        else {
+            return .empty
+        }
+
+        let safeMinX = frameWidth * horizontalBorderPercent
+        let safeMaxX = frameWidth * (1.0 - horizontalBorderPercent)
+        let safeMinY = frameHeight * verticalBorderPercent
+        let safeMaxY = frameHeight * (1.0 - verticalBorderPercent)
+        let expectedMarkerIdSet = Set(expectedMarkerIds)
+        let visibleMarkers = expectedMarkerIdSet.isEmpty
+            ? markers
+            : markers.filter { expectedMarkerIdSet.contains($0.markerId) }
+        let markerDiagnostics = visibleMarkers.compactMap { marker -> MarkerFrameMaskDiagnostics? in
+            makeMarkerFrameMaskDiagnostics(
+                marker: marker,
+                frameWidth: frameWidth,
+                frameHeight: frameHeight,
+                safeMinX: safeMinX,
+                safeMinY: safeMinY,
+                safeMaxX: safeMaxX,
+                safeMaxY: safeMaxY
+            )
+        }
+        var markerDiagnosticsByMarkerId: [Int: MarkerFrameMaskDiagnostics] = [:]
+        for markerDiagnostics in markerDiagnostics {
+            markerDiagnosticsByMarkerId[markerDiagnostics.markerId] = markerDiagnostics
+        }
+        let insideCount = markerDiagnostics.filter {
+            $0.markerInsideFrameMask == true
+        }.count
+        let violatingCount = markerDiagnostics.filter {
+            $0.markerInsideFrameMask == false
+        }.count
+        let anyNearEdge = markerDiagnostics.contains {
+            $0.markerNearFrameEdgeWarning == true
+        }
+        let qualityState: String
+        let qualityMessage: String
+
+        if markerDiagnostics.isEmpty {
+            qualityState = "unknown"
+            qualityMessage = "Centralize os markers"
+        } else if violatingCount > 0 {
+            qualityState = "warning"
+            qualityMessage = "Centralize os markers"
+        } else if anyNearEdge {
+            qualityState = "warning"
+            qualityMessage = "Evite as bordas da camera"
+        } else {
+            qualityState = "ok"
+            qualityMessage = "Markers centralizados"
+        }
+
+        return FrameMaskDiagnostics(
+            frameMaskVerticalBorderPercent: verticalBorderPercent,
+            frameMaskHorizontalBorderPercent: horizontalBorderPercent,
+            frameMaskSafeRectMinX: safeMinX,
+            frameMaskSafeRectMinY: safeMinY,
+            frameMaskSafeRectMaxX: safeMaxX,
+            frameMaskSafeRectMaxY: safeMaxY,
+            visibleMarkersInsideFrameMaskCount: insideCount,
+            visibleMarkersViolatingFrameMaskCount: violatingCount,
+            anyMarkerNearFrameEdge: anyNearEdge,
+            frameMaskQualityState: qualityState,
+            frameMaskQualityMessage: qualityMessage,
+            markerDiagnosticsByMarkerId: markerDiagnosticsByMarkerId
+        )
+    }
+
+    private func makeMarkerFrameMaskDiagnostics(
+        marker: MarkerOverlayResult,
+        frameWidth: Double,
+        frameHeight: Double,
+        safeMinX: Double,
+        safeMinY: Double,
+        safeMaxX: Double,
+        safeMaxY: Double
+    ) -> MarkerFrameMaskDiagnostics? {
+        guard !marker.corners.isEmpty else {
+            return nil
+        }
+
+        let xValues = marker.corners.map { Double($0.x) }.filter { $0.isFinite }
+        let yValues = marker.corners.map { Double($0.y) }.filter { $0.isFinite }
+        guard xValues.count == marker.corners.count,
+              yValues.count == marker.corners.count,
+              let minX = xValues.min(),
+              let maxX = xValues.max(),
+              let minY = yValues.min(),
+              let maxY = yValues.max()
+        else {
+            return nil
+        }
+
+        let centerX = xValues.reduce(0, +) / Double(xValues.count)
+        let centerY = yValues.reduce(0, +) / Double(yValues.count)
+        let normalizedCenterX = centerX / frameWidth
+        let normalizedCenterY = centerY / frameHeight
+        let insideFrameMask = minX >= safeMinX &&
+            maxX <= safeMaxX &&
+            minY >= safeMinY &&
+            maxY <= safeMaxY
+        let distanceToFrameMaskEdgePx = [
+            minX - safeMinX,
+            safeMaxX - maxX,
+            minY - safeMinY,
+            safeMaxY - maxY
+        ].min()
+        let distanceNormalizer = min(frameWidth, frameHeight)
+        let distanceToFrameMaskEdgeNormalized: Double?
+        if let distanceToFrameMaskEdgePx,
+           distanceNormalizer > 0 {
+            distanceToFrameMaskEdgeNormalized = distanceToFrameMaskEdgePx / distanceNormalizer
+        } else {
+            distanceToFrameMaskEdgeNormalized = nil
+        }
+        let nearFrameEdge = insideFrameMask &&
+            (distanceToFrameMaskEdgeNormalized ?? .infinity) <
+                FrameMaskDiagnosticsConfiguration.nearEdgeNormalizedDistance
+        let violation: String?
+        if insideFrameMask {
+            violation = nearFrameEdge ? "near_frame_edge" : nil
+        } else {
+            violation = "outside_frame_mask"
+        }
+
+        return MarkerFrameMaskDiagnostics(
+            markerId: marker.markerId,
+            markerFrameCenterX: finiteOptional(centerX),
+            markerFrameCenterY: finiteOptional(centerY),
+            markerFrameNormalizedCenterX: finiteOptional(normalizedCenterX),
+            markerFrameNormalizedCenterY: finiteOptional(normalizedCenterY),
+            markerFrameMinX: finiteOptional(minX),
+            markerFrameMinY: finiteOptional(minY),
+            markerFrameMaxX: finiteOptional(maxX),
+            markerFrameMaxY: finiteOptional(maxY),
+            markerInsideFrameMask: insideFrameMask,
+            markerFrameMaskViolation: violation,
+            markerDistanceToFrameMaskEdgePx: finiteOptional(distanceToFrameMaskEdgePx),
+            markerDistanceToFrameMaskEdgeNormalized: finiteOptional(distanceToFrameMaskEdgeNormalized),
+            markerNearFrameEdgeWarning: nearFrameEdge || !insideFrameMask
+        )
+    }
+
+    private func sanitizedFrameMaskBorderPercent(_ value: Double?) -> Double? {
+        guard let value, value.isFinite else {
+            return nil
+        }
+
+        return min(max(value, 0.0), 0.49)
+    }
+
+    private func finiteOptional(_ value: Double?) -> Double? {
+        guard let value, value.isFinite else {
+            return nil
+        }
+
+        return value
+    }
+
+    private func safeRectDebugText(_ diagnostics: FrameMaskDiagnostics) -> String {
+        guard let minX = diagnostics.frameMaskSafeRectMinX,
+              let minY = diagnostics.frameMaskSafeRectMinY,
+              let maxX = diagnostics.frameMaskSafeRectMaxX,
+              let maxY = diagnostics.frameMaskSafeRectMaxY,
+              minX.isFinite,
+              minY.isFinite,
+              maxX.isFinite,
+              maxY.isFinite
+        else {
+            return "N/A"
+        }
+
+        return String(format: "%.0f, %.0f - %.0f, %.0f", minX, minY, maxX, maxY)
     }
 
     @MainActor
@@ -8479,6 +8754,9 @@ final class ScannerViewModel: ObservableObject {
         currentBlockingReasonOverride: String? = nil,
         lastBlockingReasonBeforeExportOverride: String? = nil
     ) -> ScanDiagnosticsSnapshot {
+        let qualityProfile = deviceQualityProfile
+        let frameMaskDiagnostics = currentFrameMaskDiagnostics
+
         diagnosticsRecorder.makeSnapshot(
             timestamp: sanitizedDiagnosticsTimestamp(timestamp ?? lastFrameTimestamp),
             markerProfile: markerProfile.rawValue,
@@ -8495,6 +8773,19 @@ final class ScannerViewModel: ObservableObject {
             cameraProfilePreferredIdealMaxScanDistanceMm:
                 cameraProfile.preferredIdealMaxScanDistanceMm,
             cameraProfilePreferredMaxScanDistanceMm: cameraProfile.preferredMaxScanDistanceMm,
+            deviceQualityClass: qualityProfile.qualityClass.rawValue,
+            deviceQualityProfileName: qualityProfile.profileName,
+            deviceQualityIsKnown: qualityProfile.isKnown,
+            deviceQualityWarning: qualityProfile.warning,
+            deviceQualityMinDistanceMm: qualityProfile.minDistanceMm,
+            deviceQualityIdealMinDistanceMm: qualityProfile.idealMinDistanceMm,
+            deviceQualityIdealMaxDistanceMm: qualityProfile.idealMaxDistanceMm,
+            deviceQualityMaxDistanceMm: qualityProfile.maxDistanceMm,
+            deviceQualityTooCloseFocusRiskDistanceMm: qualityProfile.tooCloseFocusRiskDistanceMm,
+            deviceQualityFocusVarianceThreshold: qualityProfile.focusVarianceThreshold,
+            deviceQualityOverlayScale: qualityProfile.overlayScale,
+            deviceQualityFrameMaskVerticalBorderPercent: qualityProfile.frameMaskVerticalBorderPercent,
+            deviceQualityFrameMaskHorizontalBorderPercent: qualityProfile.frameMaskHorizontalBorderPercent,
             selectedCameraLocalizedName: currentCameraDebugSnapshot.deviceName,
             selectedCameraDeviceType: currentCameraDebugSnapshot.deviceType,
             requestedZoomFactor: requestedZoomFactorForCurrentProfile(),
@@ -8523,6 +8814,7 @@ final class ScannerViewModel: ObservableObject {
             distanceGuideState: distanceGuideStateTitle,
             distanceGuideMessage: distanceGuideStateTitle,
             lastDistanceMm: lastDistanceGuideDistanceMm ?? poseDistanceMm,
+            frameMaskDiagnostics: frameMaskDiagnostics,
             userFeedbackState: scanUserFeedbackState,
             userFeedbackMessage: scanUserFeedbackMessage,
             captureProgressPercent: scanCaptureProgressPercent,
@@ -8592,6 +8884,7 @@ final class ScannerViewModel: ObservableObject {
                 relativeMarkerGeometryDiagnostics.candidateVsFinalRotationDeltaMean,
             candidateVsFinalGeometryDelta:
                 relativeMarkerGeometryDiagnostics.candidateVsFinalGeometryDelta,
+            markerFrameMaskDiagnosticsByMarkerId: frameMaskDiagnostics.markerDiagnosticsByMarkerId,
             guidedStaticCaptureEnabled: guidedStaticCaptureEnabled,
             guidedStages: guidedStaticCaptureEnabled
                 ? guidedStaticStageSnapshots.map(diagnosticsGuidedStageSummary)
@@ -9842,6 +10135,8 @@ final class ScannerViewModel: ObservableObject {
             candidatePoses: bestFinalPoseCandidate?.exportablePoses,
             distanceStability: relativeMarkerDistanceStability()
         )
+        let qualityProfile = deviceQualityProfile
+        let frameMaskDiagnostics = currentFrameMaskDiagnostics
 
         return ScanTechnicalReport(
             createdAt: Self.reportDateFormatter.string(from: createdAt),
@@ -9864,6 +10159,23 @@ final class ScannerViewModel: ObservableObject {
                 finiteReportDouble(cameraProfile.preferredIdealMaxScanDistanceMm),
             cameraProfilePreferredMaxScanDistanceMm:
                 finiteReportDouble(cameraProfile.preferredMaxScanDistanceMm),
+            deviceQualityClass: qualityProfile.qualityClass.rawValue,
+            deviceQualityProfileName: qualityProfile.profileName,
+            deviceQualityIsKnown: qualityProfile.isKnown,
+            deviceQualityWarning: qualityProfile.warning,
+            deviceQualityMinDistanceMm: finiteReportDouble(qualityProfile.minDistanceMm),
+            deviceQualityIdealMinDistanceMm: finiteReportDouble(qualityProfile.idealMinDistanceMm),
+            deviceQualityIdealMaxDistanceMm: finiteReportDouble(qualityProfile.idealMaxDistanceMm),
+            deviceQualityMaxDistanceMm: finiteReportDouble(qualityProfile.maxDistanceMm),
+            deviceQualityTooCloseFocusRiskDistanceMm:
+                finiteReportDouble(qualityProfile.tooCloseFocusRiskDistanceMm),
+            deviceQualityFocusVarianceThreshold:
+                finiteReportDouble(qualityProfile.focusVarianceThreshold),
+            deviceQualityOverlayScale: finiteReportDouble(qualityProfile.overlayScale),
+            deviceQualityFrameMaskVerticalBorderPercent:
+                finiteReportDouble(qualityProfile.frameMaskVerticalBorderPercent),
+            deviceQualityFrameMaskHorizontalBorderPercent:
+                finiteReportDouble(qualityProfile.frameMaskHorizontalBorderPercent),
             selectedCameraLocalizedName: currentCameraDebugSnapshot.deviceName,
             selectedCameraDeviceType: currentCameraDebugSnapshot.deviceType,
             requestedZoomFactor: finiteReportDouble(requestedZoomFactorForCurrentProfile()),
@@ -9935,6 +10247,17 @@ final class ScannerViewModel: ObservableObject {
             distanceGuideState: distanceGuideStateTitle,
             distanceGuideMessage: distanceGuideStateTitle,
             lastDistanceMm: finiteReportDouble(lastDistanceGuideDistanceMm ?? poseDistanceMm),
+            frameMaskSafeRectMinX: finiteReportDouble(frameMaskDiagnostics.frameMaskSafeRectMinX),
+            frameMaskSafeRectMinY: finiteReportDouble(frameMaskDiagnostics.frameMaskSafeRectMinY),
+            frameMaskSafeRectMaxX: finiteReportDouble(frameMaskDiagnostics.frameMaskSafeRectMaxX),
+            frameMaskSafeRectMaxY: finiteReportDouble(frameMaskDiagnostics.frameMaskSafeRectMaxY),
+            visibleMarkersInsideFrameMaskCount:
+                frameMaskDiagnostics.visibleMarkersInsideFrameMaskCount,
+            visibleMarkersViolatingFrameMaskCount:
+                frameMaskDiagnostics.visibleMarkersViolatingFrameMaskCount,
+            anyMarkerNearFrameEdge: frameMaskDiagnostics.anyMarkerNearFrameEdge,
+            frameMaskQualityState: frameMaskDiagnostics.frameMaskQualityState,
+            frameMaskQualityMessage: frameMaskDiagnostics.frameMaskQualityMessage,
             tagAreaPixelsMean: finiteReportDouble(averageTagAreaPixelsForReport()),
             userFeedbackState: scanUserFeedbackState,
             userFeedbackMessage: scanUserFeedbackMessage,
@@ -10109,6 +10432,8 @@ final class ScannerViewModel: ObservableObject {
         markerProfile: MarkerProfile
     ) -> ScanTechnicalReport.Marker {
         let diagnostics = finalObservationDiagnosticsByMarkerId[pose.markerId]
+        let frameMaskDiagnostics =
+            currentFrameMaskDiagnostics.markerDiagnosticsByMarkerId[pose.markerId]
 
         return ScanTechnicalReport.Marker(
             markerId: pose.markerId,
@@ -10130,7 +10455,24 @@ final class ScannerViewModel: ObservableObject {
             ),
             sharpnessMean: averageSharpnessForReport(markerId: pose.markerId),
             normalStdDegrees: finiteReportDouble(diagnostics?.finalNormalStdDevDegrees),
-            finalObservationsUsed: diagnostics?.selectedObservationCount
+            finalObservationsUsed: diagnostics?.selectedObservationCount,
+            markerFrameCenterX: finiteReportDouble(frameMaskDiagnostics?.markerFrameCenterX),
+            markerFrameCenterY: finiteReportDouble(frameMaskDiagnostics?.markerFrameCenterY),
+            markerFrameNormalizedCenterX:
+                finiteReportDouble(frameMaskDiagnostics?.markerFrameNormalizedCenterX),
+            markerFrameNormalizedCenterY:
+                finiteReportDouble(frameMaskDiagnostics?.markerFrameNormalizedCenterY),
+            markerFrameMinX: finiteReportDouble(frameMaskDiagnostics?.markerFrameMinX),
+            markerFrameMinY: finiteReportDouble(frameMaskDiagnostics?.markerFrameMinY),
+            markerFrameMaxX: finiteReportDouble(frameMaskDiagnostics?.markerFrameMaxX),
+            markerFrameMaxY: finiteReportDouble(frameMaskDiagnostics?.markerFrameMaxY),
+            markerInsideFrameMask: frameMaskDiagnostics?.markerInsideFrameMask,
+            markerFrameMaskViolation: frameMaskDiagnostics?.markerFrameMaskViolation,
+            markerDistanceToFrameMaskEdgePx:
+                finiteReportDouble(frameMaskDiagnostics?.markerDistanceToFrameMaskEdgePx),
+            markerDistanceToFrameMaskEdgeNormalized:
+                finiteReportDouble(frameMaskDiagnostics?.markerDistanceToFrameMaskEdgeNormalized),
+            markerNearFrameEdgeWarning: frameMaskDiagnostics?.markerNearFrameEdgeWarning
         )
     }
 

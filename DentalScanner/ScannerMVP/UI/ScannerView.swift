@@ -241,6 +241,46 @@ struct ScannerView: View {
                                     viewModel.debugDistanceGuideState,
                                 distanceGuideMessage:
                                     viewModel.debugDistanceGuideMessage,
+                                deviceQualityClass:
+                                    viewModel.debugDeviceQualityClass,
+                                deviceQualityProfileName:
+                                    viewModel.debugDeviceQualityProfileName,
+                                deviceQualityIsKnown:
+                                    viewModel.debugDeviceQualityIsKnown,
+                                deviceQualityWarning:
+                                    viewModel.debugDeviceQualityWarning,
+                                deviceQualityMinDistanceMm:
+                                    viewModel.debugDeviceQualityMinDistanceMm,
+                                deviceQualityIdealMinDistanceMm:
+                                    viewModel.debugDeviceQualityIdealMinDistanceMm,
+                                deviceQualityIdealMaxDistanceMm:
+                                    viewModel.debugDeviceQualityIdealMaxDistanceMm,
+                                deviceQualityMaxDistanceMm:
+                                    viewModel.debugDeviceQualityMaxDistanceMm,
+                                deviceQualityTooCloseFocusRiskDistanceMm:
+                                    viewModel.debugDeviceQualityTooCloseFocusRiskDistanceMm,
+                                deviceQualityFocusVarianceThreshold:
+                                    viewModel.debugDeviceQualityFocusVarianceThreshold,
+                                deviceQualityOverlayScale:
+                                    viewModel.debugDeviceQualityOverlayScale,
+                                deviceQualityFrameMaskVerticalBorderPercent:
+                                    viewModel.debugDeviceQualityFrameMaskVerticalBorderPercent,
+                                deviceQualityFrameMaskHorizontalBorderPercent:
+                                    viewModel.debugDeviceQualityFrameMaskHorizontalBorderPercent,
+                                deviceQualityRecommendedCameraProfileName:
+                                    viewModel.debugDeviceQualityRecommendedCameraProfileName,
+                                frameMaskSafeRectText:
+                                    viewModel.debugFrameMaskSafeRectText,
+                                visibleMarkersInsideFrameMaskCount:
+                                    viewModel.debugVisibleMarkersInsideFrameMaskCount,
+                                visibleMarkersViolatingFrameMaskCount:
+                                    viewModel.debugVisibleMarkersViolatingFrameMaskCount,
+                                anyMarkerNearFrameEdge:
+                                    viewModel.debugAnyMarkerNearFrameEdge,
+                                frameMaskQualityState:
+                                    viewModel.debugFrameMaskQualityState,
+                                frameMaskQualityMessage:
+                                    viewModel.debugFrameMaskQualityMessage,
                                 relativeMarkerGeometryScore:
                                     viewModel.debugRelativeMarkerGeometryScore,
                                 relativeMarkerDistanceStdMean:
@@ -1901,6 +1941,26 @@ private struct ScannerDebugEmergencyPanelView: View {
     let cameraProfilePreferredMaxScanDistanceMm: Double?
     let distanceGuideState: String
     let distanceGuideMessage: String
+    let deviceQualityClass: String
+    let deviceQualityProfileName: String
+    let deviceQualityIsKnown: Bool
+    let deviceQualityWarning: String?
+    let deviceQualityMinDistanceMm: Double?
+    let deviceQualityIdealMinDistanceMm: Double?
+    let deviceQualityIdealMaxDistanceMm: Double?
+    let deviceQualityMaxDistanceMm: Double?
+    let deviceQualityTooCloseFocusRiskDistanceMm: Double?
+    let deviceQualityFocusVarianceThreshold: Double?
+    let deviceQualityOverlayScale: Double?
+    let deviceQualityFrameMaskVerticalBorderPercent: Double?
+    let deviceQualityFrameMaskHorizontalBorderPercent: Double?
+    let deviceQualityRecommendedCameraProfileName: String?
+    let frameMaskSafeRectText: String
+    let visibleMarkersInsideFrameMaskCount: Int
+    let visibleMarkersViolatingFrameMaskCount: Int
+    let anyMarkerNearFrameEdge: Bool
+    let frameMaskQualityState: String
+    let frameMaskQualityMessage: String
     let relativeMarkerGeometryScore: Double?
     let relativeMarkerDistanceStdMean: Double?
     let relativeMarkerDistanceStdMax: Double?
@@ -2111,6 +2171,67 @@ private struct ScannerDebugEmergencyPanelView: View {
                             )
                         }
                         .padding(.top, 4)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Device quality:")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white.opacity(0.82))
+
+                        debugRow(title: "Class", value: safeText(deviceQualityClass))
+                        debugRow(title: "Profile", value: safeText(deviceQualityProfileName))
+                        debugRow(title: "Known", value: deviceQualityIsKnown ? "yes" : "no")
+                        debugRow(title: "Warning", value: safeText(deviceQualityWarning))
+                        debugRow(
+                            title: "Recommended camera",
+                            value: safeText(deviceQualityRecommendedCameraProfileName)
+                        )
+                        debugRow(title: "Distance min", value: safeMillimeters(deviceQualityMinDistanceMm))
+                        debugRow(
+                            title: "Ideal min",
+                            value: safeMillimeters(deviceQualityIdealMinDistanceMm)
+                        )
+                        debugRow(
+                            title: "Ideal max",
+                            value: safeMillimeters(deviceQualityIdealMaxDistanceMm)
+                        )
+                        debugRow(title: "Distance max", value: safeMillimeters(deviceQualityMaxDistanceMm))
+                        debugRow(
+                            title: "Focus risk",
+                            value: safeMillimeters(deviceQualityTooCloseFocusRiskDistanceMm)
+                        )
+                        debugRow(
+                            title: "Focus threshold",
+                            value: safeNumber(deviceQualityFocusVarianceThreshold)
+                        )
+                        debugRow(title: "Overlay scale", value: safeNumber(deviceQualityOverlayScale))
+                        debugRow(
+                            title: "Frame mask V",
+                            value: safePercent(deviceQualityFrameMaskVerticalBorderPercent)
+                        )
+                        debugRow(
+                            title: "Frame mask H",
+                            value: safePercent(deviceQualityFrameMaskHorizontalBorderPercent)
+                        )
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Frame mask:")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white.opacity(0.82))
+
+                        debugRow(title: "Safe ROI", value: safeText(frameMaskSafeRectText))
+                        debugRow(
+                            title: "Markers inside",
+                            value: "\(visibleMarkersInsideFrameMaskCount)"
+                        )
+                        debugRow(
+                            title: "Markers violating",
+                            value: "\(visibleMarkersViolatingFrameMaskCount)"
+                        )
+                        debugRow(title: "Near edge", value: anyMarkerNearFrameEdge ? "yes" : "no")
+                        debugRow(title: "ROI state", value: safeText(frameMaskQualityState))
+                        debugRow(title: "ROI message", value: safeText(frameMaskQualityMessage))
                     }
 
                     VStack(alignment: .leading, spacing: 6) {

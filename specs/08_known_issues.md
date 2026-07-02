@@ -48,6 +48,27 @@ Resultados iniciais no iPhone 16 indicam:
 * distâncias abaixo de aproximadamente 120-125 mm aumentam o risco de perda de foco;
 * a faixa inicial recomendada para iPhone 16 com `Wide 1.5x` é 150-180 mm.
 
+## 2.2. ROI/frame mask ainda e diagnostics-only
+
+Foi adicionada mascara/ROI por classe de device para detectar markers perto demais da borda da imagem.
+
+Estados esperados:
+
+```txt
+ok      -> Markers centralizados
+warning -> Evite as bordas da camera / Centralize os markers
+unknown -> sem dados suficientes
+```
+
+Essa etapa ainda nao bloqueia export, readiness ou finalizacao. Ela serve para gerar evidencia em `_report.json`, `_diagnostics.json` e debug emergencial antes de virar gate de qualidade.
+
+Proximos passos ainda pendentes:
+
+* separar observacoes uteis de observacoes brutas;
+* medir diversidade angular;
+* investigar PnP/reprojection por canto;
+* so depois considerar soft gate por ROI.
+
 ## 3. Distância de captura afeta muito
 
 Scans perto ficaram muito mais parecidos com a realidade.

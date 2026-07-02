@@ -81,6 +81,36 @@ preferredIdealMaxScanDistanceMm = 180
 preferredMaxScanDistanceMm = 220
 ```
 
+### Device quality profile e ROI
+
+Foi adicionada uma camada read-only de `DeviceQualityProfile`, separada de `CameraProfile`.
+
+Responsabilidades:
+
+* `CameraProfile` continua controlando camera/zoom/foco selecionados.
+* `DeviceQualityProfile` registra classe de device, faixa de distancia, risco de foco, escala de overlay e mascara/ROI.
+
+Classes iniciais:
+
+```txt
+iPhone
+iPhonePro
+iPad
+unknown
+```
+
+Para iPhone 16 / `iPhone17,*`, a recomendacao continua sendo testar `Wide 1.5x`, com distancia ideal inicial de 150-180 mm.
+
+A mascara/ROI calcula uma area segura no frame a partir de bordas percentuais por classe de aparelho. Markers perto ou fora dessa area geram apenas diagnostics e aviso visual/debug:
+
+```txt
+Markers centralizados
+Evite as bordas da camera
+Centralize os markers
+```
+
+Essa etapa nao bloqueia export, readiness ou finalizacao.
+
 Reports e diagnostics devem registrar:
 
 ```txt
@@ -108,6 +138,28 @@ activeVideoDimensions
 activeFormatDescription
 distanceGuideState
 distanceGuideMessage
+deviceQualityClass
+deviceQualityProfileName
+deviceQualityIsKnown
+deviceQualityWarning
+deviceQualityMinDistanceMm
+deviceQualityIdealMinDistanceMm
+deviceQualityIdealMaxDistanceMm
+deviceQualityMaxDistanceMm
+deviceQualityTooCloseFocusRiskDistanceMm
+deviceQualityFocusVarianceThreshold
+deviceQualityOverlayScale
+deviceQualityFrameMaskVerticalBorderPercent
+deviceQualityFrameMaskHorizontalBorderPercent
+frameMaskSafeRectMinX
+frameMaskSafeRectMinY
+frameMaskSafeRectMaxX
+frameMaskSafeRectMaxY
+visibleMarkersInsideFrameMaskCount
+visibleMarkersViolatingFrameMaskCount
+anyMarkerNearFrameEdge
+frameMaskQualityState
+frameMaskQualityMessage
 ```
 
 ### Wide física

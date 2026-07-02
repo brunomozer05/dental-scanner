@@ -299,6 +299,19 @@ final class ScanDiagnosticsRecorder {
         cameraProfilePreferredIdealMinScanDistanceMm: Double?,
         cameraProfilePreferredIdealMaxScanDistanceMm: Double?,
         cameraProfilePreferredMaxScanDistanceMm: Double?,
+        deviceQualityClass: String?,
+        deviceQualityProfileName: String?,
+        deviceQualityIsKnown: Bool?,
+        deviceQualityWarning: String?,
+        deviceQualityMinDistanceMm: Double?,
+        deviceQualityIdealMinDistanceMm: Double?,
+        deviceQualityIdealMaxDistanceMm: Double?,
+        deviceQualityMaxDistanceMm: Double?,
+        deviceQualityTooCloseFocusRiskDistanceMm: Double?,
+        deviceQualityFocusVarianceThreshold: Double?,
+        deviceQualityOverlayScale: Double?,
+        deviceQualityFrameMaskVerticalBorderPercent: Double?,
+        deviceQualityFrameMaskHorizontalBorderPercent: Double?,
         selectedCameraLocalizedName: String?,
         selectedCameraDeviceType: String?,
         requestedZoomFactor: Double?,
@@ -327,6 +340,7 @@ final class ScanDiagnosticsRecorder {
         distanceGuideState: String?,
         distanceGuideMessage: String?,
         lastDistanceMm: Double?,
+        frameMaskDiagnostics: FrameMaskDiagnostics?,
         userFeedbackState: String?,
         userFeedbackMessage: String?,
         captureProgressPercent: Double?,
@@ -385,6 +399,7 @@ final class ScanDiagnosticsRecorder {
         candidateVsFinalTranslationDeltaMean: Double?,
         candidateVsFinalRotationDeltaMean: Double?,
         candidateVsFinalGeometryDelta: Double?,
+        markerFrameMaskDiagnosticsByMarkerId: [Int: MarkerFrameMaskDiagnostics],
         guidedStaticCaptureEnabled: Bool,
         guidedStages: [ScanDiagnosticsSnapshot.GuidedStageSummary]?
     ) -> ScanDiagnosticsSnapshot {
@@ -406,6 +421,7 @@ final class ScanDiagnosticsRecorder {
             .sorted()
             .map { markerId in
                 let state = markerStates[markerId] ?? MarkerState()
+                let frameMaskDiagnostics = markerFrameMaskDiagnosticsByMarkerId[markerId]
                 return ScanDiagnosticsSnapshot.MarkerSummary(
                     markerId: markerId,
                     firstSeenAtSeconds: finite(state.firstSeenAt),
@@ -418,7 +434,22 @@ final class ScanDiagnosticsRecorder {
                     reprojectionError: finite(state.reprojectionError),
                     exportable: state.exportable,
                     invalidReason: state.invalidReason,
-                    waitingReason: state.waitingReason
+                    waitingReason: state.waitingReason,
+                    markerFrameCenterX: finite(frameMaskDiagnostics?.markerFrameCenterX),
+                    markerFrameCenterY: finite(frameMaskDiagnostics?.markerFrameCenterY),
+                    markerFrameNormalizedCenterX: finite(frameMaskDiagnostics?.markerFrameNormalizedCenterX),
+                    markerFrameNormalizedCenterY: finite(frameMaskDiagnostics?.markerFrameNormalizedCenterY),
+                    markerFrameMinX: finite(frameMaskDiagnostics?.markerFrameMinX),
+                    markerFrameMinY: finite(frameMaskDiagnostics?.markerFrameMinY),
+                    markerFrameMaxX: finite(frameMaskDiagnostics?.markerFrameMaxX),
+                    markerFrameMaxY: finite(frameMaskDiagnostics?.markerFrameMaxY),
+                    markerInsideFrameMask: frameMaskDiagnostics?.markerInsideFrameMask,
+                    markerFrameMaskViolation: frameMaskDiagnostics?.markerFrameMaskViolation,
+                    markerDistanceToFrameMaskEdgePx:
+                        finite(frameMaskDiagnostics?.markerDistanceToFrameMaskEdgePx),
+                    markerDistanceToFrameMaskEdgeNormalized:
+                        finite(frameMaskDiagnostics?.markerDistanceToFrameMaskEdgeNormalized),
+                    markerNearFrameEdgeWarning: frameMaskDiagnostics?.markerNearFrameEdgeWarning
                 )
             }
 
@@ -438,6 +469,20 @@ final class ScanDiagnosticsRecorder {
             cameraProfilePreferredIdealMaxScanDistanceMm:
                 finite(cameraProfilePreferredIdealMaxScanDistanceMm),
             cameraProfilePreferredMaxScanDistanceMm: finite(cameraProfilePreferredMaxScanDistanceMm),
+            deviceQualityClass: deviceQualityClass,
+            deviceQualityProfileName: deviceQualityProfileName,
+            deviceQualityIsKnown: deviceQualityIsKnown,
+            deviceQualityWarning: deviceQualityWarning,
+            deviceQualityMinDistanceMm: finite(deviceQualityMinDistanceMm),
+            deviceQualityIdealMinDistanceMm: finite(deviceQualityIdealMinDistanceMm),
+            deviceQualityIdealMaxDistanceMm: finite(deviceQualityIdealMaxDistanceMm),
+            deviceQualityMaxDistanceMm: finite(deviceQualityMaxDistanceMm),
+            deviceQualityTooCloseFocusRiskDistanceMm: finite(deviceQualityTooCloseFocusRiskDistanceMm),
+            deviceQualityFocusVarianceThreshold: finite(deviceQualityFocusVarianceThreshold),
+            deviceQualityOverlayScale: finite(deviceQualityOverlayScale),
+            deviceQualityFrameMaskVerticalBorderPercent: finite(deviceQualityFrameMaskVerticalBorderPercent),
+            deviceQualityFrameMaskHorizontalBorderPercent:
+                finite(deviceQualityFrameMaskHorizontalBorderPercent),
             selectedCameraLocalizedName: selectedCameraLocalizedName,
             selectedCameraDeviceType: selectedCameraDeviceType,
             requestedZoomFactor: finite(requestedZoomFactor),
@@ -485,6 +530,17 @@ final class ScanDiagnosticsRecorder {
             distanceGuideState: distanceGuideState,
             distanceGuideMessage: distanceGuideMessage,
             lastDistanceMm: finite(lastDistanceMm),
+            frameMaskSafeRectMinX: finite(frameMaskDiagnostics?.frameMaskSafeRectMinX),
+            frameMaskSafeRectMinY: finite(frameMaskDiagnostics?.frameMaskSafeRectMinY),
+            frameMaskSafeRectMaxX: finite(frameMaskDiagnostics?.frameMaskSafeRectMaxX),
+            frameMaskSafeRectMaxY: finite(frameMaskDiagnostics?.frameMaskSafeRectMaxY),
+            visibleMarkersInsideFrameMaskCount:
+                frameMaskDiagnostics?.visibleMarkersInsideFrameMaskCount,
+            visibleMarkersViolatingFrameMaskCount:
+                frameMaskDiagnostics?.visibleMarkersViolatingFrameMaskCount,
+            anyMarkerNearFrameEdge: frameMaskDiagnostics?.anyMarkerNearFrameEdge,
+            frameMaskQualityState: frameMaskDiagnostics?.frameMaskQualityState,
+            frameMaskQualityMessage: frameMaskDiagnostics?.frameMaskQualityMessage,
             distanceSamplesTotal: distanceSampleCount,
             distanceSamplesValid: distanceValidSampleCount,
             distanceValidPercent: finite(distanceValidPercent),

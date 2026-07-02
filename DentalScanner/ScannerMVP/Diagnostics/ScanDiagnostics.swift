@@ -38,6 +38,19 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
     var cameraProfilePreferredIdealMinScanDistanceMm: Double?
     var cameraProfilePreferredIdealMaxScanDistanceMm: Double?
     var cameraProfilePreferredMaxScanDistanceMm: Double?
+    var deviceQualityClass: String?
+    var deviceQualityProfileName: String?
+    var deviceQualityIsKnown: Bool?
+    var deviceQualityWarning: String?
+    var deviceQualityMinDistanceMm: Double?
+    var deviceQualityIdealMinDistanceMm: Double?
+    var deviceQualityIdealMaxDistanceMm: Double?
+    var deviceQualityMaxDistanceMm: Double?
+    var deviceQualityTooCloseFocusRiskDistanceMm: Double?
+    var deviceQualityFocusVarianceThreshold: Double?
+    var deviceQualityOverlayScale: Double?
+    var deviceQualityFrameMaskVerticalBorderPercent: Double?
+    var deviceQualityFrameMaskHorizontalBorderPercent: Double?
     var selectedCameraLocalizedName: String?
     var selectedCameraDeviceType: String?
     var requestedZoomFactor: Double?
@@ -82,6 +95,15 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
     var distanceGuideState: String?
     var distanceGuideMessage: String?
     var lastDistanceMm: Double?
+    var frameMaskSafeRectMinX: Double?
+    var frameMaskSafeRectMinY: Double?
+    var frameMaskSafeRectMaxX: Double?
+    var frameMaskSafeRectMaxY: Double?
+    var visibleMarkersInsideFrameMaskCount: Int?
+    var visibleMarkersViolatingFrameMaskCount: Int?
+    var anyMarkerNearFrameEdge: Bool?
+    var frameMaskQualityState: String?
+    var frameMaskQualityMessage: String?
     var distanceSamplesTotal: Int
     var distanceSamplesValid: Int
     var distanceValidPercent: Double?
@@ -166,6 +188,19 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
         cameraProfilePreferredIdealMinScanDistanceMm: nil,
         cameraProfilePreferredIdealMaxScanDistanceMm: nil,
         cameraProfilePreferredMaxScanDistanceMm: nil,
+        deviceQualityClass: nil,
+        deviceQualityProfileName: nil,
+        deviceQualityIsKnown: nil,
+        deviceQualityWarning: nil,
+        deviceQualityMinDistanceMm: nil,
+        deviceQualityIdealMinDistanceMm: nil,
+        deviceQualityIdealMaxDistanceMm: nil,
+        deviceQualityMaxDistanceMm: nil,
+        deviceQualityTooCloseFocusRiskDistanceMm: nil,
+        deviceQualityFocusVarianceThreshold: nil,
+        deviceQualityOverlayScale: nil,
+        deviceQualityFrameMaskVerticalBorderPercent: nil,
+        deviceQualityFrameMaskHorizontalBorderPercent: nil,
         selectedCameraLocalizedName: nil,
         selectedCameraDeviceType: nil,
         requestedZoomFactor: nil,
@@ -210,6 +245,15 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
         distanceGuideState: nil,
         distanceGuideMessage: nil,
         lastDistanceMm: nil,
+        frameMaskSafeRectMinX: nil,
+        frameMaskSafeRectMinY: nil,
+        frameMaskSafeRectMaxX: nil,
+        frameMaskSafeRectMaxY: nil,
+        visibleMarkersInsideFrameMaskCount: nil,
+        visibleMarkersViolatingFrameMaskCount: nil,
+        anyMarkerNearFrameEdge: nil,
+        frameMaskQualityState: nil,
+        frameMaskQualityMessage: nil,
         distanceSamplesTotal: 0,
         distanceSamplesValid: 0,
         distanceValidPercent: nil,
@@ -294,6 +338,19 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
         var exportable: Bool
         var invalidReason: String?
         var waitingReason: String?
+        var markerFrameCenterX: Double?
+        var markerFrameCenterY: Double?
+        var markerFrameNormalizedCenterX: Double?
+        var markerFrameNormalizedCenterY: Double?
+        var markerFrameMinX: Double?
+        var markerFrameMinY: Double?
+        var markerFrameMaxX: Double?
+        var markerFrameMaxY: Double?
+        var markerInsideFrameMask: Bool?
+        var markerFrameMaskViolation: String?
+        var markerDistanceToFrameMaskEdgePx: Double?
+        var markerDistanceToFrameMaskEdgeNormalized: Double?
+        var markerNearFrameEdgeWarning: Bool?
 
         var id: Int {
             markerId

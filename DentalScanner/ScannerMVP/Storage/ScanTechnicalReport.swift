@@ -16,6 +16,19 @@ struct ScanTechnicalReport: Codable {
     var cameraProfilePreferredIdealMinScanDistanceMm: Double?
     var cameraProfilePreferredIdealMaxScanDistanceMm: Double?
     var cameraProfilePreferredMaxScanDistanceMm: Double?
+    var deviceQualityClass: String?
+    var deviceQualityProfileName: String?
+    var deviceQualityIsKnown: Bool?
+    var deviceQualityWarning: String?
+    var deviceQualityMinDistanceMm: Double?
+    var deviceQualityIdealMinDistanceMm: Double?
+    var deviceQualityIdealMaxDistanceMm: Double?
+    var deviceQualityMaxDistanceMm: Double?
+    var deviceQualityTooCloseFocusRiskDistanceMm: Double?
+    var deviceQualityFocusVarianceThreshold: Double?
+    var deviceQualityOverlayScale: Double?
+    var deviceQualityFrameMaskVerticalBorderPercent: Double?
+    var deviceQualityFrameMaskHorizontalBorderPercent: Double?
     var selectedCameraLocalizedName: String?
     var selectedCameraDeviceType: String?
     var requestedZoomFactor: Double?
@@ -53,6 +66,15 @@ struct ScanTechnicalReport: Codable {
     var distanceGuideState: String?
     var distanceGuideMessage: String?
     var lastDistanceMm: Double?
+    var frameMaskSafeRectMinX: Double?
+    var frameMaskSafeRectMinY: Double?
+    var frameMaskSafeRectMaxX: Double?
+    var frameMaskSafeRectMaxY: Double?
+    var visibleMarkersInsideFrameMaskCount: Int?
+    var visibleMarkersViolatingFrameMaskCount: Int?
+    var anyMarkerNearFrameEdge: Bool?
+    var frameMaskQualityState: String?
+    var frameMaskQualityMessage: String?
     var tagAreaPixelsMean: Double?
     var userFeedbackState: String?
     var userFeedbackMessage: String?
@@ -141,6 +163,19 @@ struct ScanTechnicalReport: Codable {
         var sharpnessMean: Double?
         var normalStdDegrees: Double?
         var finalObservationsUsed: Int?
+        var markerFrameCenterX: Double?
+        var markerFrameCenterY: Double?
+        var markerFrameNormalizedCenterX: Double?
+        var markerFrameNormalizedCenterY: Double?
+        var markerFrameMinX: Double?
+        var markerFrameMinY: Double?
+        var markerFrameMaxX: Double?
+        var markerFrameMaxY: Double?
+        var markerInsideFrameMask: Bool?
+        var markerFrameMaskViolation: String?
+        var markerDistanceToFrameMaskEdgePx: Double?
+        var markerDistanceToFrameMaskEdgeNormalized: Double?
+        var markerNearFrameEdgeWarning: Bool?
     }
 
     struct ScanQuality: Codable {
