@@ -243,6 +243,25 @@ struct ScannerDebugSnapshot: Equatable {
         let normalFinalizationCanAutoExport: String
     }
 
+    struct FrameObservationsSection: Equatable {
+        let enabled: String
+        let bufferedFrames: String
+        let bufferLimit: String
+        let dropped: String
+        let oldestTimestamp: String
+        let newestTimestamp: String
+        let framesWithMarkers: String
+        let framesWithExpectedMarkers: String
+        let marker0Observations: String
+        let marker1Observations: String
+        let marker2Observations: String
+        let marker3Observations: String
+        let markerCountMismatches: String
+        let pointCountMismatches: String
+        let missingIntrinsics: String
+        let nonFinitePoses: String
+    }
+
     struct GuidedStaticSection: Equatable {
         let enabled: String
         let currentStage: String
@@ -317,6 +336,7 @@ struct ScannerDebugSnapshot: Equatable {
     let exportGate: ExportGateSection
     let performance: PerformanceSection
     let diagnostics: DiagnosticsSection
+    let frameObservations: FrameObservationsSection
     let guidedStatic: GuidedStaticSection
     let isDualArucoV2: Bool
     let markerV2Rows: [MarkerV2Row]
@@ -326,7 +346,8 @@ struct ScannerDebugSnapshot: Equatable {
 
 extension ScannerViewModel {
     var scannerDebugSnapshot: ScannerDebugSnapshot {
-        ScannerDebugSnapshot(
+        let frameObservationDiagnostics = frameObservationDiagnosticsForDebug
+        return ScannerDebugSnapshot(
             state: ScannerDebugSnapshot.StateSection(
                 scanState: Self.debugScanStateTitle(scanState),
                 markerProfile: markerProfile.debugTitle,
@@ -520,6 +541,40 @@ extension ScannerViewModel {
                 captureProgressPercent: scanCaptureProgressPercent,
                 refinementProgressPercent: scanRefinementProgressPercent,
                 friendlyBlockingReason: scanFriendlyBlockingReason
+            ),
+            frameObservations: ScannerDebugSnapshot.FrameObservationsSection(
+                enabled: debugBool(frameObservationDiagnostics.frameObservationModelEnabled),
+                bufferedFrames: "\(frameObservationDiagnostics.frameObservationCount)",
+                bufferLimit: "\(frameObservationDiagnostics.frameObservationBufferLimit)",
+                dropped: "\(frameObservationDiagnostics.frameObservationDroppedCount)",
+                oldestTimestamp: Self.debugNumber(
+                    frameObservationDiagnostics.frameObservationOldestTimestamp,
+                    decimals: 3
+                ),
+                newestTimestamp: Self.debugNumber(
+                    frameObservationDiagnostics.frameObservationNewestTimestamp,
+                    decimals: 3
+                ),
+                framesWithMarkers:
+                    "\(frameObservationDiagnostics.framesWithAnyMarkerObservationCount)",
+                framesWithExpectedMarkers:
+                    "\(frameObservationDiagnostics.framesWithExpectedMarkersObservationCount)",
+                marker0Observations:
+                    "\(frameObservationDiagnostics.perMarkerFrameObservationCount[0, default: 0])",
+                marker1Observations:
+                    "\(frameObservationDiagnostics.perMarkerFrameObservationCount[1, default: 0])",
+                marker2Observations:
+                    "\(frameObservationDiagnostics.perMarkerFrameObservationCount[2, default: 0])",
+                marker3Observations:
+                    "\(frameObservationDiagnostics.perMarkerFrameObservationCount[3, default: 0])",
+                markerCountMismatches:
+                    "\(frameObservationDiagnostics.frameObservationMarkerCountMismatchCount)",
+                pointCountMismatches:
+                    "\(frameObservationDiagnostics.frameObservationPointCountMismatchCount)",
+                missingIntrinsics:
+                    "\(frameObservationDiagnostics.frameObservationMissingIntrinsicsCount)",
+                nonFinitePoses:
+                    "\(frameObservationDiagnostics.frameObservationNonFinitePoseCount)"
             ),
             guidedStatic: Self.debugGuidedStaticSection(
                 enabled: guidedStaticCaptureEnabled,

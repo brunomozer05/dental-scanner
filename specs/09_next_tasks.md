@@ -217,7 +217,7 @@ that 4K frames arrive but detection or pose acceptance fails.
 
 ## Roadmap arquitetural — observações e otimização multi-frame
 
-As próximas fundações arquiteturais devem ser executadas em commits separados e na ordem abaixo. Nenhuma está marcada como implementada.
+As próximas fundações arquiteturais devem ser executadas em commits separados e na ordem abaixo. Somente a primeira fase diagnostics-only da Phase A está implementada; as Phases B-D permanecem não implementadas.
 
 ### Phase A — Spec 16
 
@@ -235,6 +235,8 @@ quality metadata
 ```
 
 Não alterar acumulador, readiness, finalization ou export nessa fase.
+
+Status: primeira fase diagnostics-only implementada em 2026-07-12, com modelo explícito por frame, buffer limitado, diagnostics agregados e reset de sessão. Persistência/replay e qualquer consumo pelo pipeline primário permanecem pendentes.
 
 ### Phase B — Spec 17
 

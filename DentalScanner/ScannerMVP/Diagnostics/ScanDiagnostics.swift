@@ -108,6 +108,22 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
     var anyMarkerNearFrameEdge: Bool?
     var frameMaskQualityState: String?
     var frameMaskQualityMessage: String?
+    var frameObservationModelEnabled: Bool?
+    var frameObservationCount: Int?
+    var frameObservationDroppedCount: Int?
+    var frameObservationBufferLimit: Int?
+    var frameObservationOldestTimestamp: Double?
+    var frameObservationNewestTimestamp: Double?
+    var framesWithAnyMarkerObservationCount: Int?
+    var framesWithExpectedMarkersObservationCount: Int?
+    var markerFrameObservationCountM0: Int?
+    var markerFrameObservationCountM1: Int?
+    var markerFrameObservationCountM2: Int?
+    var markerFrameObservationCountM3: Int?
+    var frameObservationMarkerCountMismatchCount: Int?
+    var frameObservationPointCountMismatchCount: Int?
+    var frameObservationMissingIntrinsicsCount: Int?
+    var frameObservationNonFinitePoseCount: Int?
     var experimentalQualityModeEnabled: Bool?
     var experimentalObservationGateEnabled: Bool?
     var experimentalMinValidFramesPerMarker: Int?

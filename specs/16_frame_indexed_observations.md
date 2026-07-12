@@ -2,9 +2,9 @@
 
 ## Status
 
-Next architecture foundation.
+Phase 1 diagnostics-only implemented on 2026-07-12.
 
-Not implemented. This spec defines a diagnostics-first data foundation and does not authorize changes to the primary scan or export pipeline.
+The bounded in-memory observation model, aggregate diagnostics, emergency debug summary, and session reset are implemented. The model remains read-only relative to the primary scan and export pipeline. Replay, pre-accumulation gating, and offline optimization are not implemented.
 
 ## Goal
 
@@ -183,3 +183,17 @@ Each step should be isolated and reversible. Do not implement specs 17–19 in t
 - Primary angle-diversity integration.
 - Pose graph.
 - Marker v3 or extra geometric points.
+
+## Phase 1 implementation record
+
+Implemented:
+
+- value-only `FrameObservation` and `MarkerFrameObservation` snapshots;
+- ordered, serializable 2D/3D correspondence values;
+- session-relative frame index derived from the existing processed-frame counter;
+- capture timestamp and same-frame camera intrinsics;
+- a thread-safe 600-frame buffer with oldest-first eviction;
+- aggregate consistency counters, diagnostics/report fields, and emergency debug rows;
+- reset with the primary scan-session reset.
+
+The recorder is diagnostics-only. No primary pipeline component reads its buffer, and full observation persistence remains reserved for spec 18.

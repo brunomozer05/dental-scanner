@@ -215,6 +215,34 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Diag Hz", value: snapshot.performance.diagnosticsUpdateHz)
                     }
 
+                    debugSection(title: "Frame Indexed Observations") {
+                        debugRow(title: "Enabled", value: snapshot.frameObservations.enabled)
+                        debugRow(title: "Buffered frames", value: snapshot.frameObservations.bufferedFrames)
+                        debugRow(title: "Buffer limit", value: snapshot.frameObservations.bufferLimit)
+                        debugRow(title: "Dropped", value: snapshot.frameObservations.dropped)
+                        debugRow(title: "Oldest timestamp", value: snapshot.frameObservations.oldestTimestamp)
+                        debugRow(title: "Newest timestamp", value: snapshot.frameObservations.newestTimestamp)
+                        debugRow(title: "Frames with markers", value: snapshot.frameObservations.framesWithMarkers)
+                        debugRow(
+                            title: "Frames with expected markers",
+                            value: snapshot.frameObservations.framesWithExpectedMarkers
+                        )
+                        debugRow(title: "M0 observations", value: snapshot.frameObservations.marker0Observations)
+                        debugRow(title: "M1 observations", value: snapshot.frameObservations.marker1Observations)
+                        debugRow(title: "M2 observations", value: snapshot.frameObservations.marker2Observations)
+                        debugRow(title: "M3 observations", value: snapshot.frameObservations.marker3Observations)
+                        debugRow(
+                            title: "Marker count mismatches",
+                            value: snapshot.frameObservations.markerCountMismatches
+                        )
+                        debugRow(
+                            title: "Point count mismatches",
+                            value: snapshot.frameObservations.pointCountMismatches
+                        )
+                        debugRow(title: "Missing intrinsics", value: snapshot.frameObservations.missingIntrinsics)
+                        debugRow(title: "Non-finite poses", value: snapshot.frameObservations.nonFinitePoses)
+                    }
+
                     debugSection(title: "Diagnostics") {
                         debugRow(title: "Diagnostics enabled", value: snapshot.diagnostics.enabled)
                         debugRow(title: "Events count", value: snapshot.diagnostics.eventsCount)

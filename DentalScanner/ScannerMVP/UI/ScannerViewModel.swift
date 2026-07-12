@@ -1222,8 +1222,13 @@ final class ScannerViewModel: ObservableObject {
     private let stlExporter: STLExporter
     private let scanStorageManager: ScanStorageManager
     private let diagnosticsRecorder: ScanDiagnosticsRecorder
+    private let frameObservationRecorder = FrameObservationRecorder()
     private let crashReportingService: CrashReportingService
     private let deviceModelInfo = DeviceModelInfo.current
+
+    var frameObservationDiagnosticsForDebug: FrameObservationDiagnosticsSnapshot {
+        frameObservationRecorder.diagnosticsSnapshot()
+    }
 
     private var deviceQualityProfile: DeviceQualityProfile {
         DeviceQualityProfileResolver.profile(
@@ -2618,6 +2623,7 @@ final class ScannerViewModel: ObservableObject {
         )
         let markerSizeMillimeters = poseMarkerSizeMillimeters
         let activeMarkerProfile = markerProfile
+        let activeCameraProfile = cameraProfile
         let dualMarkerDefinitions = MarkerConfiguration.dualMarkers
         let poseMetrics = estimatePose(
             from: arucoMetrics.detections,
@@ -2704,6 +2710,21 @@ final class ScannerViewModel: ObservableObject {
                 arKitQuality: arKitQuality
             )
             : []
+        let frameObservation = shouldCollectScanFrame
+            ? makeFrameObservation(
+                sourceFrameIndex: metrics.totalFramesReceived,
+                timestamp: metrics.lastFrameTimestamp,
+                frame: frame,
+                detections: arucoMetrics.detections,
+                poseResults: poseMetrics.rawPoseResults,
+                markerSizeMillimeters: markerSizeMillimeters,
+                markerProfile: activeMarkerProfile,
+                cameraProfile: activeCameraProfile,
+                dualMarkerDefinitions: dualMarkerDefinitions,
+                frameMaskDiagnostics: frameMaskDiagnostics,
+                motionQuality: motionQuality
+            )
+            : nil
         let staticPoseObservations: [FinalPoseObservation]
         if shouldCollectStaticPoseFrame && shouldCollectScanFrame {
             staticPoseObservations = frameFinalPoseObservations
@@ -2812,6 +2833,13 @@ final class ScannerViewModel: ObservableObject {
             }
 
             if shouldCollectScanFrame && self.scanState.isCollectingFrames {
+                if let frameObservation {
+                    self.frameObservationRecorder.append(
+                        frameObservation,
+                        sourceFrameIndex: metrics.totalFramesReceived,
+                        expectedMarkerIds: self.expectedExportMarkerIds(for: activeMarkerProfile)
+                    )
+                }
                 self.recordCameraFrameDiagnostics(
                     snapshot: frame.cameraDebugSnapshot,
                     quality: frame.cameraQuality
@@ -2893,6 +2921,7 @@ final class ScannerViewModel: ObservableObject {
     private func resetScanSession() {
         arUcoConsistencyFilter.reset()
         multiFramePoseAccumulator.reset()
+        frameObservationRecorder.reset()
         detectedMarkerCount = 0
         detectedMarkerIds = []
         detectedMarkers = []
@@ -9124,6 +9153,155 @@ final class ScannerViewModel: ObservableObject {
         )
     }
 
+    private func makeFrameObservation(
+        sourceFrameIndex: Int,
+        timestamp: Double,
+        frame: CameraFrame,
+        detections: [ArUcoDetectionResult],
+        poseResults: [PoseResult],
+        markerSizeMillimeters: Double,
+        markerProfile: MarkerProfile,
+        cameraProfile: CameraProfile,
+        dualMarkerDefinitions: [DualArucoMarkerDefinition],
+        frameMaskDiagnostics: FrameMaskDiagnostics,
+        motionQuality: MotionFrameQuality
+    ) -> FrameObservation {
+        let intrinsics = frame.metadata.intrinsicMatrix.flatMap(CameraIntrinsics.init(matrix:))
+        let intrinsicsAvailable = frame.metadata.intrinsicMatrix != nil
+        let intrinsicsFinite = intrinsics != nil
+        let detectionsByMarkerId = Dictionary(
+            detections.map { ($0.markerId, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let definitionsByPhysicalMarkerId = Dictionary(
+            uniqueKeysWithValues: dualMarkerDefinitions.map { ($0.physicalMarkerId, $0) }
+        )
+
+        let singleObjectPoints: [SIMD3<Double>]
+        if markerSizeMillimeters.isFinite, markerSizeMillimeters > 0 {
+            singleObjectPoints = FinalPoseObservation.markerObjectPoints(
+                markerSizeMillimeters: markerSizeMillimeters
+            )
+        } else {
+            singleObjectPoints = []
+        }
+
+        let markerObservations = poseResults.map { poseResult -> MarkerFrameObservation in
+            let correspondence: (objectPoints: [SIMD3<Double>], imagePoints: [CGPoint])
+            switch markerProfile {
+            case .singleArucoV1:
+                correspondence = (
+                    objectPoints: singleObjectPoints,
+                    imagePoints: detectionsByMarkerId[poseResult.markerId]?.corners ?? []
+                )
+            case .dualArucoV2:
+                if let definition = definitionsByPhysicalMarkerId[poseResult.markerId],
+                   let points = dualMarkerObservationPoints(
+                    for: poseResult,
+                    definition: definition,
+                    detectionsByTagId: detectionsByMarkerId
+                   ) {
+                    correspondence = (
+                        objectPoints: points.objectPoints,
+                        imagePoints: points.imagePoints
+                    )
+                } else {
+                    correspondence = (objectPoints: [], imagePoints: [])
+                }
+            }
+
+            let imageCorners = correspondence.imagePoints.map {
+                ObservationPoint2D(x: Double($0.x), y: Double($0.y))
+            }
+            let objectPoints = correspondence.objectPoints.map {
+                ObservationPoint3D(x: $0.x, y: $0.y, z: $0.z)
+            }
+            let poseFinite = Self.isFiniteFrameObservationPose(poseResult)
+            let pointCountsMatch = imageCorners.count == objectPoints.count
+            let pointsFinite = imageCorners.allSatisfy { $0.x.isFinite && $0.y.isFinite } &&
+                objectPoints.allSatisfy { $0.x.isFinite && $0.y.isFinite && $0.z.isFinite }
+            let hasCorrespondences = !imageCorners.isEmpty && !objectPoints.isEmpty
+            let markerMask = frameMaskDiagnostics.markerDiagnosticsByMarkerId[poseResult.markerId]
+
+            return MarkerFrameObservation(
+                markerId: poseResult.markerId,
+                markerSource: poseResult.poseSource.debugTitle,
+                markerProfileId: poseResult.markerProfile.rawValue,
+                imageCorners: imageCorners,
+                objectPoints: objectPoints,
+                rotationVector: ObservationPoint3D(
+                    x: poseResult.rotationVector.x,
+                    y: poseResult.rotationVector.y,
+                    z: poseResult.rotationVector.z
+                ),
+                translationVector: ObservationPoint3D(
+                    x: poseResult.translationVector.x,
+                    y: poseResult.translationVector.y,
+                    z: poseResult.translationVector.z
+                ),
+                reprojectionError: poseResult.reprojectionError.isFinite
+                    ? poseResult.reprojectionError
+                    : nil,
+                distanceMm: poseResult.distanceMm.isFinite ? poseResult.distanceMm : nil,
+                frameMaskState: frameMaskDiagnostics.frameMaskQualityState,
+                insideFrameMask: markerMask?.markerInsideFrameMask,
+                frameMaskViolation: markerMask?.markerFrameMaskViolation,
+                focusQualityState: Self.frameObservationFocusQualityState(frame.cameraQuality),
+                focusVariance: nil,
+                motionQualityState: motionQuality.isRecent
+                    ? (motionQuality.isStable ? "stable" : "unstable")
+                    : "unavailable",
+                motionMagnitude: motionQuality.isRecent && motionQuality.accelerationMagnitude.isFinite
+                    ? motionQuality.accelerationMagnitude
+                    : nil,
+                poseFinite: poseFinite,
+                intrinsicsFinite: intrinsicsFinite,
+                observationValid: poseFinite && intrinsicsFinite && pointCountsMatch &&
+                    pointsFinite && hasCorrespondences
+            )
+        }
+
+        return FrameObservation(
+            frameIndex: sourceFrameIndex,
+            timestampSeconds: timestamp.isFinite ? timestamp : nil,
+            frameWidth: frame.width,
+            frameHeight: frame.height,
+            intrinsicsAvailable: intrinsicsAvailable,
+            intrinsicFx: intrinsics?.focalLengthX,
+            intrinsicFy: intrinsics?.focalLengthY,
+            intrinsicCx: intrinsics?.principalPointX,
+            intrinsicCy: intrinsics?.principalPointY,
+            cameraProfileId: cameraProfile.id,
+            cameraProfileName: cameraProfile.name,
+            markerObservations: markerObservations
+        )
+    }
+
+    private static func isFiniteFrameObservationPose(_ pose: PoseResult) -> Bool {
+        let rotation = pose.rotationVector
+        let translation = pose.translationVector
+        let matrix = pose.rotationMatrix
+        return rotation.x.isFinite && rotation.y.isFinite && rotation.z.isFinite &&
+            translation.x.isFinite && translation.y.isFinite && translation.z.isFinite &&
+            matrix.columns.0.x.isFinite && matrix.columns.0.y.isFinite && matrix.columns.0.z.isFinite &&
+            matrix.columns.1.x.isFinite && matrix.columns.1.y.isFinite && matrix.columns.1.z.isFinite &&
+            matrix.columns.2.x.isFinite && matrix.columns.2.y.isFinite && matrix.columns.2.z.isFinite &&
+            pose.distanceMm.isFinite && pose.reprojectionError.isFinite
+    }
+
+    private static func frameObservationFocusQualityState(_ quality: CameraFrameQuality) -> String {
+        if quality.isAdjustingFocus {
+            return "adjusting"
+        }
+        if quality.isFocusSettling {
+            return "settling"
+        }
+        if !quality.isSharpnessAcceptable {
+            return "sharpness_risk"
+        }
+        return quality.isFocusStable ? "stable" : "unstable"
+    }
+
     private func makeFinalPoseObservations(
         from detections: [ArUcoDetectionResult],
         poseResults: [PoseResult],
@@ -9443,7 +9621,7 @@ final class ScannerViewModel: ObservableObject {
         let experimentalQualityDiagnostics = currentExperimentalQualityDiagnostics
         let activeDistanceGuideConfiguration = distanceGuideConfiguration
 
-        return diagnosticsRecorder.makeSnapshot(
+        var snapshot = diagnosticsRecorder.makeSnapshot(
             timestamp: sanitizedDiagnosticsTimestamp(timestamp ?? lastFrameTimestamp),
             markerProfile: markerProfile.rawValue,
             deviceModelIdentifier: deviceModelInfo.identifier,
@@ -9583,6 +9761,39 @@ final class ScannerViewModel: ObservableObject {
                 ? guidedStaticStageSnapshots.map(diagnosticsGuidedStageSummary)
                 : nil
         )
+        let frameObservationDiagnostics = frameObservationRecorder.diagnosticsSnapshot()
+        snapshot.frameObservationModelEnabled =
+            frameObservationDiagnostics.frameObservationModelEnabled
+        snapshot.frameObservationCount = frameObservationDiagnostics.frameObservationCount
+        snapshot.frameObservationDroppedCount =
+            frameObservationDiagnostics.frameObservationDroppedCount
+        snapshot.frameObservationBufferLimit =
+            frameObservationDiagnostics.frameObservationBufferLimit
+        snapshot.frameObservationOldestTimestamp =
+            frameObservationDiagnostics.frameObservationOldestTimestamp
+        snapshot.frameObservationNewestTimestamp =
+            frameObservationDiagnostics.frameObservationNewestTimestamp
+        snapshot.framesWithAnyMarkerObservationCount =
+            frameObservationDiagnostics.framesWithAnyMarkerObservationCount
+        snapshot.framesWithExpectedMarkersObservationCount =
+            frameObservationDiagnostics.framesWithExpectedMarkersObservationCount
+        snapshot.markerFrameObservationCountM0 =
+            frameObservationDiagnostics.perMarkerFrameObservationCount[0, default: 0]
+        snapshot.markerFrameObservationCountM1 =
+            frameObservationDiagnostics.perMarkerFrameObservationCount[1, default: 0]
+        snapshot.markerFrameObservationCountM2 =
+            frameObservationDiagnostics.perMarkerFrameObservationCount[2, default: 0]
+        snapshot.markerFrameObservationCountM3 =
+            frameObservationDiagnostics.perMarkerFrameObservationCount[3, default: 0]
+        snapshot.frameObservationMarkerCountMismatchCount =
+            frameObservationDiagnostics.frameObservationMarkerCountMismatchCount
+        snapshot.frameObservationPointCountMismatchCount =
+            frameObservationDiagnostics.frameObservationPointCountMismatchCount
+        snapshot.frameObservationMissingIntrinsicsCount =
+            frameObservationDiagnostics.frameObservationMissingIntrinsicsCount
+        snapshot.frameObservationNonFinitePoseCount =
+            frameObservationDiagnostics.frameObservationNonFinitePoseCount
+        return snapshot
     }
 
     private func diagnosticsCurrentBlockingReason() -> String {
@@ -10831,6 +11042,7 @@ final class ScannerViewModel: ObservableObject {
         let qualityProfile = deviceQualityProfile
         let frameMaskDiagnostics = currentFrameMaskDiagnostics
         let experimentalQualityDiagnostics = currentExperimentalQualityDiagnostics
+        let frameObservationDiagnostics = frameObservationRecorder.diagnosticsSnapshot()
         let activeDistanceGuideConfiguration = distanceGuideConfiguration
 
         return ScanTechnicalReport(
@@ -10961,6 +11173,37 @@ final class ScannerViewModel: ObservableObject {
             anyMarkerNearFrameEdge: frameMaskDiagnostics.anyMarkerNearFrameEdge,
             frameMaskQualityState: frameMaskDiagnostics.frameMaskQualityState,
             frameMaskQualityMessage: frameMaskDiagnostics.frameMaskQualityMessage,
+            frameObservationModelEnabled:
+                frameObservationDiagnostics.frameObservationModelEnabled,
+            frameObservationCount: frameObservationDiagnostics.frameObservationCount,
+            frameObservationDroppedCount:
+                frameObservationDiagnostics.frameObservationDroppedCount,
+            frameObservationBufferLimit:
+                frameObservationDiagnostics.frameObservationBufferLimit,
+            frameObservationOldestTimestamp:
+                finiteReportDouble(frameObservationDiagnostics.frameObservationOldestTimestamp),
+            frameObservationNewestTimestamp:
+                finiteReportDouble(frameObservationDiagnostics.frameObservationNewestTimestamp),
+            framesWithAnyMarkerObservationCount:
+                frameObservationDiagnostics.framesWithAnyMarkerObservationCount,
+            framesWithExpectedMarkersObservationCount:
+                frameObservationDiagnostics.framesWithExpectedMarkersObservationCount,
+            markerFrameObservationCountM0:
+                frameObservationDiagnostics.perMarkerFrameObservationCount[0, default: 0],
+            markerFrameObservationCountM1:
+                frameObservationDiagnostics.perMarkerFrameObservationCount[1, default: 0],
+            markerFrameObservationCountM2:
+                frameObservationDiagnostics.perMarkerFrameObservationCount[2, default: 0],
+            markerFrameObservationCountM3:
+                frameObservationDiagnostics.perMarkerFrameObservationCount[3, default: 0],
+            frameObservationMarkerCountMismatchCount:
+                frameObservationDiagnostics.frameObservationMarkerCountMismatchCount,
+            frameObservationPointCountMismatchCount:
+                frameObservationDiagnostics.frameObservationPointCountMismatchCount,
+            frameObservationMissingIntrinsicsCount:
+                frameObservationDiagnostics.frameObservationMissingIntrinsicsCount,
+            frameObservationNonFinitePoseCount:
+                frameObservationDiagnostics.frameObservationNonFinitePoseCount,
             experimentalQualityModeEnabled:
                 experimentalQualityDiagnostics.experimentalQualityModeEnabled,
             experimentalObservationGateEnabled:
