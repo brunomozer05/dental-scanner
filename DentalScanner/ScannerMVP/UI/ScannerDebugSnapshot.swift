@@ -262,6 +262,28 @@ struct ScannerDebugSnapshot: Equatable {
         let nonFinitePoses: String
     }
 
+    struct PreAccumulationGateSection: Equatable {
+        let diagnosticsEnabled: String
+        let blockingEnabled: String
+        let raw: String
+        let wouldAccept: String
+        let wouldReject: String
+        let acceptRatio: String
+        let rejectRatio: String
+        let topRejectReason: String
+        let frameMask: String
+        let tooClose: String
+        let tooFar: String
+        let focusRisk: String
+        let highReprojection: String
+        let highMotion: String
+        let invalidPose: String
+        let missingOrInvalidIntrinsics: String
+        let experimentalComparisonAvailable: String
+        let agreement: String
+        let disagreement: String
+    }
+
     struct GuidedStaticSection: Equatable {
         let enabled: String
         let currentStage: String
@@ -337,6 +359,7 @@ struct ScannerDebugSnapshot: Equatable {
     let performance: PerformanceSection
     let diagnostics: DiagnosticsSection
     let frameObservations: FrameObservationsSection
+    let preAccumulationGate: PreAccumulationGateSection
     let guidedStatic: GuidedStaticSection
     let isDualArucoV2: Bool
     let markerV2Rows: [MarkerV2Row]
@@ -347,6 +370,7 @@ struct ScannerDebugSnapshot: Equatable {
 extension ScannerViewModel {
     var scannerDebugSnapshot: ScannerDebugSnapshot {
         let frameObservationDiagnostics = frameObservationDiagnosticsForDebug
+        let preAccumulationDiagnostics = preAccumulationObservationGateDiagnosticsForDebug
         return ScannerDebugSnapshot(
             state: ScannerDebugSnapshot.StateSection(
                 scanState: Self.debugScanStateTitle(scanState),
@@ -575,6 +599,38 @@ extension ScannerViewModel {
                     "\(frameObservationDiagnostics.frameObservationMissingIntrinsicsCount)",
                 nonFinitePoses:
                     "\(frameObservationDiagnostics.frameObservationNonFinitePoseCount)"
+            ),
+            preAccumulationGate: ScannerDebugSnapshot.PreAccumulationGateSection(
+                diagnosticsEnabled: debugBool(preAccumulationDiagnostics.diagnosticsEnabled),
+                blockingEnabled: debugBool(preAccumulationDiagnostics.blockingEnabled),
+                raw: "\(preAccumulationDiagnostics.rawObservationCount)",
+                wouldAccept: "\(preAccumulationDiagnostics.wouldAcceptCount)",
+                wouldReject: "\(preAccumulationDiagnostics.wouldRejectCount)",
+                acceptRatio: Self.debugUnitIntervalPercent(
+                    preAccumulationDiagnostics.wouldAcceptRatio
+                ),
+                rejectRatio: Self.debugUnitIntervalPercent(
+                    preAccumulationDiagnostics.wouldRejectRatio
+                ),
+                topRejectReason: debugString(
+                    preAccumulationDiagnostics.topRejectReason
+                ),
+                frameMask: "\(preAccumulationDiagnostics.wouldRejectByFrameMaskCount)",
+                tooClose: "\(preAccumulationDiagnostics.wouldRejectByTooCloseCount)",
+                tooFar: "\(preAccumulationDiagnostics.wouldRejectByTooFarCount)",
+                focusRisk: "\(preAccumulationDiagnostics.wouldRejectByFocusRiskCount)",
+                highReprojection:
+                    "\(preAccumulationDiagnostics.wouldRejectByHighReprojectionCount)",
+                highMotion: "\(preAccumulationDiagnostics.wouldRejectByHighMotionCount)",
+                invalidPose:
+                    "\(preAccumulationDiagnostics.wouldRejectByInvalidPoseCount + preAccumulationDiagnostics.wouldRejectByNotFinitePoseCount)",
+                missingOrInvalidIntrinsics:
+                    "\(preAccumulationDiagnostics.wouldRejectByMissingIntrinsicsCount + preAccumulationDiagnostics.wouldRejectByInvalidIntrinsicsCount)",
+                experimentalComparisonAvailable: debugBool(
+                    preAccumulationDiagnostics.experimentalComparisonAvailable
+                ),
+                agreement: "\(preAccumulationDiagnostics.experimentalAgreementCount)",
+                disagreement: "\(preAccumulationDiagnostics.experimentalDisagreementCount)"
             ),
             guidedStatic: Self.debugGuidedStaticSection(
                 enabled: guidedStaticCaptureEnabled,

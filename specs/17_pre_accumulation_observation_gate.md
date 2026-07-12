@@ -2,9 +2,9 @@
 
 ## Status
 
-Planned after spec 16.
+Shadow diagnostics implemented on 2026-07-12.
 
-Not implemented. The first version must be experimental, measurable, and disabled by default.
+Blocking is not enabled. The current implementation evaluates and records every per-frame pose immediately before the primary accumulator, but always forwards the original pose array unchanged. Gate ON/OFF behavioral A/B validation remains pending.
 
 ## Goal
 
@@ -28,18 +28,19 @@ The gate must receive immutable observation data and return a classification. It
 
 ## Feature flag
 
-The first implementation must use:
+The shadow implementation uses two explicit flags to avoid ambiguous semantics:
 
 ```swift
-enablePreAccumulationObservationGate = false
+enablePreAccumulationObservationGateDiagnostics = true
+enablePreAccumulationObservationGateBlocking = false
 ```
 
 Rules:
 
-- `false` preserves current accumulator behavior exactly;
-- `true` inserts only accepted observations into the experimental gated path;
-- the active flag value must be recorded in diagnostics and replay metadata;
-- changing the default requires a separate validated decision.
+- diagnostics evaluates and records the decision before accumulation;
+- blocking remains `false` and no decision filters accumulator input;
+- both flag values are recorded in diagnostics and reports;
+- enabling blocking requires a separate implementation and validated A/B decision.
 
 ## Candidate checks
 
@@ -178,3 +179,24 @@ The first implementation must not:
 - Export, readiness, finalization, and STL generation remain unchanged.
 - A/B reports identify flag state and rejection breakdown.
 - No precision claim is made without ground truth.
+
+## Shadow implementation record
+
+Implemented:
+
+- immutable gate input and deterministic primary-reason decision types;
+- evaluation immediately before `MultiFramePoseAccumulator.update`;
+- shadow forwarding of the original, unfiltered pose array;
+- existing DentalScanner device/profile distance thresholds;
+- existing per-frame reprojection threshold and current motion/focus state;
+- thread-safe global and per-marker counters with session reset;
+- paired comparison with the existing experimental gate using `frameIndex + markerId`;
+- optional decision fields in `MarkerFrameObservation`;
+- aggregate diagnostics/report fields and emergency debug rows.
+
+Still pending:
+
+- blocking accumulator input;
+- gate OFF versus gate ON behavioral A/B;
+- deterministic replay validation from spec 18;
+- any default change.

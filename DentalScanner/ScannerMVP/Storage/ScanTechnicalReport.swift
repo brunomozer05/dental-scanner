@@ -95,6 +95,40 @@ struct ScanTechnicalReport: Codable {
     var frameObservationPointCountMismatchCount: Int?
     var frameObservationMissingIntrinsicsCount: Int?
     var frameObservationNonFinitePoseCount: Int?
+    var preAccumulationGateDiagnosticsEnabled: Bool?
+    var preAccumulationGateBlockingEnabled: Bool?
+    var preAccumulationRawObservationCount: Int?
+    var preAccumulationWouldAcceptCount: Int?
+    var preAccumulationWouldRejectCount: Int?
+    var preAccumulationAccumulatorInsertedCount: Int?
+    var preAccumulationWouldRejectByUnexpectedMarkerCount: Int?
+    var preAccumulationWouldRejectByMissingIntrinsicsCount: Int?
+    var preAccumulationWouldRejectByInvalidIntrinsicsCount: Int?
+    var preAccumulationWouldRejectByNotFinitePoseCount: Int?
+    var preAccumulationWouldRejectByInvalidPoseCount: Int?
+    var preAccumulationWouldRejectByFrameMaskCount: Int?
+    var preAccumulationWouldRejectByTooCloseCount: Int?
+    var preAccumulationWouldRejectByTooFarCount: Int?
+    var preAccumulationWouldRejectByFocusRiskCount: Int?
+    var preAccumulationWouldRejectByHighReprojectionCount: Int?
+    var preAccumulationWouldRejectByHighMotionCount: Int?
+    var preAccumulationWouldRejectByUnknownCount: Int?
+    var preAccumulationWouldAcceptRatio: Double?
+    var preAccumulationWouldRejectRatio: Double?
+    var preAccumulationTopRejectReason: String?
+    var preAccumulationReprojectionEvaluationUnavailableCount: Int?
+    var preAccumulationMotionEvaluationUnavailableCount: Int?
+    var preGateExperimentalComparisonAvailable: Bool?
+    var preGateVsExperimentalAgreementCount: Int?
+    var preGateVsExperimentalDisagreementCount: Int?
+    var preGateAcceptedExperimentalAcceptedCount: Int?
+    var preGateAcceptedExperimentalRejectedCount: Int?
+    var preGateRejectedExperimentalAcceptedCount: Int?
+    var preGateRejectedExperimentalRejectedCount: Int?
+    var preAccumulationMarkerM0: PreAccumulationMarkerGateReportSummary?
+    var preAccumulationMarkerM1: PreAccumulationMarkerGateReportSummary?
+    var preAccumulationMarkerM2: PreAccumulationMarkerGateReportSummary?
+    var preAccumulationMarkerM3: PreAccumulationMarkerGateReportSummary?
     var experimentalQualityModeEnabled: Bool?
     var experimentalObservationGateEnabled: Bool?
     var experimentalMinValidFramesPerMarker: Int?

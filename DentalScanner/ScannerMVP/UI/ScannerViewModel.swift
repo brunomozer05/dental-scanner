@@ -216,6 +216,11 @@ final class ScannerViewModel: ObservableObject {
         static let highResolutionDimensions = "3840x2160"
     }
 
+    private enum PreAccumulationObservationGateConfiguration {
+        static let enablePreAccumulationObservationGateDiagnostics = true
+        static let enablePreAccumulationObservationGateBlocking = false
+    }
+
     private enum StaticPoseStabilityConfiguration {
         static let windowSeconds: Double = 5.0
         static let unstablePositionStdDevMm: Double = 0.35
@@ -1223,11 +1228,23 @@ final class ScannerViewModel: ObservableObject {
     private let scanStorageManager: ScanStorageManager
     private let diagnosticsRecorder: ScanDiagnosticsRecorder
     private let frameObservationRecorder = FrameObservationRecorder()
+    private let preAccumulationObservationGate = PreAccumulationObservationGate()
+    private let preAccumulationObservationGateRecorder = PreAccumulationObservationGateRecorder(
+        diagnosticsEnabled:
+            PreAccumulationObservationGateConfiguration.enablePreAccumulationObservationGateDiagnostics,
+        blockingEnabled:
+            PreAccumulationObservationGateConfiguration.enablePreAccumulationObservationGateBlocking
+    )
     private let crashReportingService: CrashReportingService
     private let deviceModelInfo = DeviceModelInfo.current
 
     var frameObservationDiagnosticsForDebug: FrameObservationDiagnosticsSnapshot {
         frameObservationRecorder.diagnosticsSnapshot()
+    }
+
+    var preAccumulationObservationGateDiagnosticsForDebug:
+        PreAccumulationObservationGateDiagnosticsSnapshot {
+        preAccumulationObservationGateRecorder.diagnosticsSnapshot()
     }
 
     private var deviceQualityProfile: DeviceQualityProfile {
@@ -2624,6 +2641,8 @@ final class ScannerViewModel: ObservableObject {
         let markerSizeMillimeters = poseMarkerSizeMillimeters
         let activeMarkerProfile = markerProfile
         let activeCameraProfile = cameraProfile
+        let activeDeviceQualityProfile = deviceQualityProfile
+        let expectedMarkerIds = expectedExportMarkerIds(for: activeMarkerProfile)
         let dualMarkerDefinitions = MarkerConfiguration.dualMarkers
         let poseMetrics = estimatePose(
             from: arucoMetrics.detections,
@@ -2664,8 +2683,8 @@ final class ScannerViewModel: ObservableObject {
         let frameMaskDiagnostics = makeFrameMaskDiagnostics(
             markers: currentFrameOverlayMarkers,
             frame: frame,
-            deviceQualityProfile: deviceQualityProfile,
-            expectedMarkerIds: expectedExportMarkerIds(for: activeMarkerProfile)
+            deviceQualityProfile: activeDeviceQualityProfile,
+            expectedMarkerIds: expectedMarkerIds
         )
         let overlayMarkers = stabilizedOverlayMarkers(
             from: currentFrameOverlayMarkers,
@@ -2689,9 +2708,33 @@ final class ScannerViewModel: ObservableObject {
         let shouldCollectScanFrame = scanStateForFrame.isCollectingFrames
         let shouldCollectStaticPoseFrame = staticPoseStabilityMode &&
             activeMarkerProfile == .dualArucoV2
-        let fusedPoseResults = shouldCollectScanFrame
-            ? multiFramePoseAccumulator.update(with: poseMetrics.rawPoseResults)
-            : self.fusedPoseResults
+        let preAccumulationGateDecisions: [PreAccumulationObservationGateDecision]
+        let fusedPoseResults: [PoseResult]
+        if shouldCollectScanFrame {
+            preAccumulationGateDecisions = makePreAccumulationObservationGateDecisions(
+                poseResults: poseMetrics.rawPoseResults,
+                frame: frame,
+                frameIndex: metrics.totalFramesReceived,
+                timestamp: metrics.lastFrameTimestamp,
+                expectedMarkerIds: expectedMarkerIds,
+                frameMaskDiagnostics: frameMaskDiagnostics,
+                cameraQuality: frame.cameraQuality,
+                motionQuality: motionQuality,
+                deviceQualityProfile: activeDeviceQualityProfile
+            )
+            preAccumulationObservationGateRecorder.record(
+                decisions: preAccumulationGateDecisions
+            )
+
+            // Shadow mode: every pose still reaches the unchanged primary accumulator.
+            fusedPoseResults = multiFramePoseAccumulator.update(with: poseMetrics.rawPoseResults)
+            preAccumulationObservationGateRecorder.recordAccumulatorInputs(
+                markerIds: poseMetrics.rawPoseResults.map(\.markerId)
+            )
+        } else {
+            preAccumulationGateDecisions = []
+            fusedPoseResults = self.fusedPoseResults
+        }
         let consolidatedPoseResults = shouldCollectScanFrame
             ? (fusedPoseResults.isEmpty ? poseMetrics.rawPoseResults : fusedPoseResults)
             : []
@@ -2722,7 +2765,8 @@ final class ScannerViewModel: ObservableObject {
                 cameraProfile: activeCameraProfile,
                 dualMarkerDefinitions: dualMarkerDefinitions,
                 frameMaskDiagnostics: frameMaskDiagnostics,
-                motionQuality: motionQuality
+                motionQuality: motionQuality,
+                preAccumulationGateDecisions: preAccumulationGateDecisions
             )
             : nil
         let staticPoseObservations: [FinalPoseObservation]
@@ -2837,7 +2881,7 @@ final class ScannerViewModel: ObservableObject {
                     self.frameObservationRecorder.append(
                         frameObservation,
                         sourceFrameIndex: metrics.totalFramesReceived,
-                        expectedMarkerIds: self.expectedExportMarkerIds(for: activeMarkerProfile)
+                        expectedMarkerIds: expectedMarkerIds
                     )
                 }
                 self.recordCameraFrameDiagnostics(
@@ -2852,11 +2896,16 @@ final class ScannerViewModel: ObservableObject {
                     in: implantMetrics.implantPoseResults
                 )
                 self.updatePrecisionValidationCurrentError()
-                self.recordExperimentalQualityObservations(
+                let experimentalGateEvaluations = self.recordExperimentalQualityObservations(
                     poseResults: poseMetrics.rawPoseResults,
                     frameMaskDiagnostics: frameMaskDiagnostics,
                     cameraQuality: frame.cameraQuality,
-                    expectedMarkerIds: self.expectedExportMarkerIds(for: activeMarkerProfile)
+                    expectedMarkerIds: expectedMarkerIds,
+                    frameIndex: metrics.totalFramesReceived
+                )
+                self.preAccumulationObservationGateRecorder.recordExperimentalComparison(
+                    preGateDecisions: preAccumulationGateDecisions,
+                    experimentalEvaluations: experimentalGateEvaluations
                 )
                 self.recordScanFrame(
                     rawPoseResults: poseMetrics.rawPoseResults,
@@ -2922,6 +2971,7 @@ final class ScannerViewModel: ObservableObject {
         arUcoConsistencyFilter.reset()
         multiFramePoseAccumulator.reset()
         frameObservationRecorder.reset()
+        preAccumulationObservationGateRecorder.reset()
         detectedMarkerCount = 0
         detectedMarkerIds = []
         detectedMarkers = []
@@ -4888,16 +4938,18 @@ final class ScannerViewModel: ObservableObject {
         poseResults: [PoseResult],
         frameMaskDiagnostics: FrameMaskDiagnostics,
         cameraQuality: CameraFrameQuality,
-        expectedMarkerIds: [Int]
-    ) {
+        expectedMarkerIds: [Int],
+        frameIndex: Int
+    ) -> [PreAccumulationExperimentalGateEvaluation] {
         guard ExperimentalQualityModeConfiguration.enableExperimentalQualityMode else {
             currentExperimentalQualityDiagnostics = makeExperimentalQualityDiagnosticsSnapshot()
-            return
+            return []
         }
 
         let expectedMarkerIdSet = Set(expectedMarkerIds)
         let profile = deviceQualityProfile
         let minimumFrames = profile.minValidFramesPerMarker ?? 65
+        var evaluations: [PreAccumulationExperimentalGateEvaluation] = []
 
         for poseResult in poseResults {
             var markerDiagnostics = experimentalMarkerQualityDiagnosticsByMarkerId[poseResult.markerId] ??
@@ -4913,6 +4965,15 @@ final class ScannerViewModel: ObservableObject {
                     expectedMarkerIdSet: expectedMarkerIdSet
                 )
                 : nil
+            evaluations.append(
+                PreAccumulationExperimentalGateEvaluation(
+                    identity: PreAccumulationObservationIdentity(
+                        frameIndex: frameIndex,
+                        markerId: poseResult.markerId
+                    ),
+                    wouldAccept: rejectionReason == nil
+                )
+            )
 
             if let rejectionReason {
                 markerDiagnostics.rejectedObservationCount += 1
@@ -4946,6 +5007,7 @@ final class ScannerViewModel: ObservableObject {
         }
 
         currentExperimentalQualityDiagnostics = makeExperimentalQualityDiagnosticsSnapshot()
+        return evaluations
     }
 
     private func experimentalObservationRejectionReason(
@@ -9153,6 +9215,83 @@ final class ScannerViewModel: ObservableObject {
         )
     }
 
+    private func makePreAccumulationObservationGateDecisions(
+        poseResults: [PoseResult],
+        frame: CameraFrame,
+        frameIndex: Int,
+        timestamp: Double,
+        expectedMarkerIds: [Int],
+        frameMaskDiagnostics: FrameMaskDiagnostics,
+        cameraQuality: CameraFrameQuality,
+        motionQuality: MotionFrameQuality,
+        deviceQualityProfile: DeviceQualityProfile
+    ) -> [PreAccumulationObservationGateDecision] {
+        guard PreAccumulationObservationGateConfiguration
+            .enablePreAccumulationObservationGateDiagnostics
+        else {
+            return []
+        }
+
+        let expectedMarkerIdSet = Set(expectedMarkerIds)
+        let intrinsicsAvailable = frame.metadata.intrinsicMatrix != nil
+        let intrinsicsFinite = frame.metadata.intrinsicMatrix
+            .flatMap(CameraIntrinsics.init(matrix:)) != nil
+        let focusQualityState = Self.frameObservationFocusQualityState(cameraQuality)
+        let motionAvailable = motionQuality.isRecent
+        let motionQualityState = motionAvailable
+            ? (motionQuality.isStable ? "stable" : "unstable")
+            : nil
+
+        return poseResults.map { poseResult in
+            let markerMask = frameMaskDiagnostics.markerDiagnosticsByMarkerId[poseResult.markerId]
+            let poseFinite = Self.isFiniteFrameObservationPose(poseResult)
+            let poseValid = poseResult.markerId >= 0 &&
+                poseResult.usedPointCount > 0 &&
+                poseResult.distanceMm.isFinite && poseResult.distanceMm > 0 &&
+                poseResult.reprojectionError.isFinite && poseResult.reprojectionError >= 0
+            let input = PreAccumulationObservationGateInput(
+                identity: PreAccumulationObservationIdentity(
+                    frameIndex: frameIndex,
+                    markerId: poseResult.markerId
+                ),
+                timestampSeconds: timestamp.isFinite ? timestamp : nil,
+                expectedMarker: expectedMarkerIdSet.isEmpty ||
+                    expectedMarkerIdSet.contains(poseResult.markerId),
+                intrinsicsAvailable: intrinsicsAvailable,
+                intrinsicsFinite: intrinsicsFinite,
+                rotationVector: ObservationPoint3D(
+                    x: poseResult.rotationVector.x,
+                    y: poseResult.rotationVector.y,
+                    z: poseResult.rotationVector.z
+                ),
+                translationVector: ObservationPoint3D(
+                    x: poseResult.translationVector.x,
+                    y: poseResult.translationVector.y,
+                    z: poseResult.translationVector.z
+                ),
+                poseFinite: poseFinite,
+                poseValid: poseValid,
+                distanceMm: poseResult.distanceMm.isFinite ? poseResult.distanceMm : nil,
+                insideFrameMask: markerMask?.markerInsideFrameMask,
+                frameMaskViolation: markerMask?.markerFrameMaskViolation,
+                focusQualityState: focusQualityState,
+                tooCloseFocusRiskDistanceMm: deviceQualityProfile.tooCloseFocusRiskDistanceMm,
+                minimumDistanceMm: deviceQualityProfile.minDistanceMm,
+                maximumDistanceMm: deviceQualityProfile.maxDistanceMm,
+                reprojectionError: poseResult.reprojectionError.isFinite
+                    ? poseResult.reprojectionError
+                    : nil,
+                maximumReprojectionError: ScanConfiguration.maximumAverageReprojectionError,
+                motionEvaluationAvailable: motionAvailable,
+                motionQualityState: motionQualityState,
+                motionMagnitude: motionAvailable && motionQuality.accelerationMagnitude.isFinite
+                    ? motionQuality.accelerationMagnitude
+                    : nil
+            )
+            return preAccumulationObservationGate.evaluate(input)
+        }
+    }
+
     private func makeFrameObservation(
         sourceFrameIndex: Int,
         timestamp: Double,
@@ -9164,7 +9303,8 @@ final class ScannerViewModel: ObservableObject {
         cameraProfile: CameraProfile,
         dualMarkerDefinitions: [DualArucoMarkerDefinition],
         frameMaskDiagnostics: FrameMaskDiagnostics,
-        motionQuality: MotionFrameQuality
+        motionQuality: MotionFrameQuality,
+        preAccumulationGateDecisions: [PreAccumulationObservationGateDecision]
     ) -> FrameObservation {
         let intrinsics = frame.metadata.intrinsicMatrix.flatMap(CameraIntrinsics.init(matrix:))
         let intrinsicsAvailable = frame.metadata.intrinsicMatrix != nil
@@ -9175,6 +9315,10 @@ final class ScannerViewModel: ObservableObject {
         )
         let definitionsByPhysicalMarkerId = Dictionary(
             uniqueKeysWithValues: dualMarkerDefinitions.map { ($0.physicalMarkerId, $0) }
+        )
+        let preAccumulationDecisionsByIdentity = Dictionary(
+            preAccumulationGateDecisions.map { ($0.identity, $0) },
+            uniquingKeysWith: { first, _ in first }
         )
 
         let singleObjectPoints: [SIMD3<Double>]
@@ -9222,6 +9366,12 @@ final class ScannerViewModel: ObservableObject {
                 objectPoints.allSatisfy { $0.x.isFinite && $0.y.isFinite && $0.z.isFinite }
             let hasCorrespondences = !imageCorners.isEmpty && !objectPoints.isEmpty
             let markerMask = frameMaskDiagnostics.markerDiagnosticsByMarkerId[poseResult.markerId]
+            let preAccumulationDecision = preAccumulationDecisionsByIdentity[
+                PreAccumulationObservationIdentity(
+                    frameIndex: sourceFrameIndex,
+                    markerId: poseResult.markerId
+                )
+            ]
 
             return MarkerFrameObservation(
                 markerId: poseResult.markerId,
@@ -9257,7 +9407,11 @@ final class ScannerViewModel: ObservableObject {
                 poseFinite: poseFinite,
                 intrinsicsFinite: intrinsicsFinite,
                 observationValid: poseFinite && intrinsicsFinite && pointCountsMatch &&
-                    pointsFinite && hasCorrespondences
+                    pointsFinite && hasCorrespondences,
+                preAccumulationGateEvaluated: preAccumulationDecision != nil,
+                preAccumulationGateWouldAccept: preAccumulationDecision?.wouldAccept,
+                preAccumulationGateRejectReason:
+                    preAccumulationDecision?.primaryRejectReason?.rawValue
             )
         }
 
@@ -9793,6 +9947,68 @@ final class ScannerViewModel: ObservableObject {
             frameObservationDiagnostics.frameObservationMissingIntrinsicsCount
         snapshot.frameObservationNonFinitePoseCount =
             frameObservationDiagnostics.frameObservationNonFinitePoseCount
+        let preAccumulationDiagnostics =
+            preAccumulationObservationGateRecorder.diagnosticsSnapshot()
+        snapshot.preAccumulationGateDiagnosticsEnabled = preAccumulationDiagnostics.diagnosticsEnabled
+        snapshot.preAccumulationGateBlockingEnabled = preAccumulationDiagnostics.blockingEnabled
+        snapshot.preAccumulationRawObservationCount = preAccumulationDiagnostics.rawObservationCount
+        snapshot.preAccumulationWouldAcceptCount = preAccumulationDiagnostics.wouldAcceptCount
+        snapshot.preAccumulationWouldRejectCount = preAccumulationDiagnostics.wouldRejectCount
+        snapshot.preAccumulationAccumulatorInsertedCount =
+            preAccumulationDiagnostics.accumulatorInsertedCount
+        snapshot.preAccumulationWouldRejectByUnexpectedMarkerCount =
+            preAccumulationDiagnostics.wouldRejectByUnexpectedMarkerCount
+        snapshot.preAccumulationWouldRejectByMissingIntrinsicsCount =
+            preAccumulationDiagnostics.wouldRejectByMissingIntrinsicsCount
+        snapshot.preAccumulationWouldRejectByInvalidIntrinsicsCount =
+            preAccumulationDiagnostics.wouldRejectByInvalidIntrinsicsCount
+        snapshot.preAccumulationWouldRejectByNotFinitePoseCount =
+            preAccumulationDiagnostics.wouldRejectByNotFinitePoseCount
+        snapshot.preAccumulationWouldRejectByInvalidPoseCount =
+            preAccumulationDiagnostics.wouldRejectByInvalidPoseCount
+        snapshot.preAccumulationWouldRejectByFrameMaskCount =
+            preAccumulationDiagnostics.wouldRejectByFrameMaskCount
+        snapshot.preAccumulationWouldRejectByTooCloseCount =
+            preAccumulationDiagnostics.wouldRejectByTooCloseCount
+        snapshot.preAccumulationWouldRejectByTooFarCount =
+            preAccumulationDiagnostics.wouldRejectByTooFarCount
+        snapshot.preAccumulationWouldRejectByFocusRiskCount =
+            preAccumulationDiagnostics.wouldRejectByFocusRiskCount
+        snapshot.preAccumulationWouldRejectByHighReprojectionCount =
+            preAccumulationDiagnostics.wouldRejectByHighReprojectionCount
+        snapshot.preAccumulationWouldRejectByHighMotionCount =
+            preAccumulationDiagnostics.wouldRejectByHighMotionCount
+        snapshot.preAccumulationWouldRejectByUnknownCount =
+            preAccumulationDiagnostics.wouldRejectByUnknownCount
+        snapshot.preAccumulationWouldAcceptRatio = preAccumulationDiagnostics.wouldAcceptRatio
+        snapshot.preAccumulationWouldRejectRatio = preAccumulationDiagnostics.wouldRejectRatio
+        snapshot.preAccumulationTopRejectReason = preAccumulationDiagnostics.topRejectReason
+        snapshot.preAccumulationReprojectionEvaluationUnavailableCount =
+            preAccumulationDiagnostics.reprojectionEvaluationUnavailableCount
+        snapshot.preAccumulationMotionEvaluationUnavailableCount =
+            preAccumulationDiagnostics.motionEvaluationUnavailableCount
+        snapshot.preGateExperimentalComparisonAvailable =
+            preAccumulationDiagnostics.experimentalComparisonAvailable
+        snapshot.preGateVsExperimentalAgreementCount =
+            preAccumulationDiagnostics.experimentalAgreementCount
+        snapshot.preGateVsExperimentalDisagreementCount =
+            preAccumulationDiagnostics.experimentalDisagreementCount
+        snapshot.preGateAcceptedExperimentalAcceptedCount =
+            preAccumulationDiagnostics.preGateAcceptedExperimentalAcceptedCount
+        snapshot.preGateAcceptedExperimentalRejectedCount =
+            preAccumulationDiagnostics.preGateAcceptedExperimentalRejectedCount
+        snapshot.preGateRejectedExperimentalAcceptedCount =
+            preAccumulationDiagnostics.preGateRejectedExperimentalAcceptedCount
+        snapshot.preGateRejectedExperimentalRejectedCount =
+            preAccumulationDiagnostics.preGateRejectedExperimentalRejectedCount
+        snapshot.preAccumulationMarkerM0 = preAccumulationDiagnostics.markerDiagnosticsByMarkerId[0]
+            .map(PreAccumulationMarkerGateReportSummary.init)
+        snapshot.preAccumulationMarkerM1 = preAccumulationDiagnostics.markerDiagnosticsByMarkerId[1]
+            .map(PreAccumulationMarkerGateReportSummary.init)
+        snapshot.preAccumulationMarkerM2 = preAccumulationDiagnostics.markerDiagnosticsByMarkerId[2]
+            .map(PreAccumulationMarkerGateReportSummary.init)
+        snapshot.preAccumulationMarkerM3 = preAccumulationDiagnostics.markerDiagnosticsByMarkerId[3]
+            .map(PreAccumulationMarkerGateReportSummary.init)
         return snapshot
     }
 
@@ -11043,6 +11259,8 @@ final class ScannerViewModel: ObservableObject {
         let frameMaskDiagnostics = currentFrameMaskDiagnostics
         let experimentalQualityDiagnostics = currentExperimentalQualityDiagnostics
         let frameObservationDiagnostics = frameObservationRecorder.diagnosticsSnapshot()
+        let preAccumulationDiagnostics =
+            preAccumulationObservationGateRecorder.diagnosticsSnapshot()
         let activeDistanceGuideConfiguration = distanceGuideConfiguration
 
         return ScanTechnicalReport(
@@ -11204,6 +11422,78 @@ final class ScannerViewModel: ObservableObject {
                 frameObservationDiagnostics.frameObservationMissingIntrinsicsCount,
             frameObservationNonFinitePoseCount:
                 frameObservationDiagnostics.frameObservationNonFinitePoseCount,
+            preAccumulationGateDiagnosticsEnabled:
+                preAccumulationDiagnostics.diagnosticsEnabled,
+            preAccumulationGateBlockingEnabled:
+                preAccumulationDiagnostics.blockingEnabled,
+            preAccumulationRawObservationCount:
+                preAccumulationDiagnostics.rawObservationCount,
+            preAccumulationWouldAcceptCount:
+                preAccumulationDiagnostics.wouldAcceptCount,
+            preAccumulationWouldRejectCount:
+                preAccumulationDiagnostics.wouldRejectCount,
+            preAccumulationAccumulatorInsertedCount:
+                preAccumulationDiagnostics.accumulatorInsertedCount,
+            preAccumulationWouldRejectByUnexpectedMarkerCount:
+                preAccumulationDiagnostics.wouldRejectByUnexpectedMarkerCount,
+            preAccumulationWouldRejectByMissingIntrinsicsCount:
+                preAccumulationDiagnostics.wouldRejectByMissingIntrinsicsCount,
+            preAccumulationWouldRejectByInvalidIntrinsicsCount:
+                preAccumulationDiagnostics.wouldRejectByInvalidIntrinsicsCount,
+            preAccumulationWouldRejectByNotFinitePoseCount:
+                preAccumulationDiagnostics.wouldRejectByNotFinitePoseCount,
+            preAccumulationWouldRejectByInvalidPoseCount:
+                preAccumulationDiagnostics.wouldRejectByInvalidPoseCount,
+            preAccumulationWouldRejectByFrameMaskCount:
+                preAccumulationDiagnostics.wouldRejectByFrameMaskCount,
+            preAccumulationWouldRejectByTooCloseCount:
+                preAccumulationDiagnostics.wouldRejectByTooCloseCount,
+            preAccumulationWouldRejectByTooFarCount:
+                preAccumulationDiagnostics.wouldRejectByTooFarCount,
+            preAccumulationWouldRejectByFocusRiskCount:
+                preAccumulationDiagnostics.wouldRejectByFocusRiskCount,
+            preAccumulationWouldRejectByHighReprojectionCount:
+                preAccumulationDiagnostics.wouldRejectByHighReprojectionCount,
+            preAccumulationWouldRejectByHighMotionCount:
+                preAccumulationDiagnostics.wouldRejectByHighMotionCount,
+            preAccumulationWouldRejectByUnknownCount:
+                preAccumulationDiagnostics.wouldRejectByUnknownCount,
+            preAccumulationWouldAcceptRatio:
+                finiteReportDouble(preAccumulationDiagnostics.wouldAcceptRatio),
+            preAccumulationWouldRejectRatio:
+                finiteReportDouble(preAccumulationDiagnostics.wouldRejectRatio),
+            preAccumulationTopRejectReason:
+                preAccumulationDiagnostics.topRejectReason,
+            preAccumulationReprojectionEvaluationUnavailableCount:
+                preAccumulationDiagnostics.reprojectionEvaluationUnavailableCount,
+            preAccumulationMotionEvaluationUnavailableCount:
+                preAccumulationDiagnostics.motionEvaluationUnavailableCount,
+            preGateExperimentalComparisonAvailable:
+                preAccumulationDiagnostics.experimentalComparisonAvailable,
+            preGateVsExperimentalAgreementCount:
+                preAccumulationDiagnostics.experimentalAgreementCount,
+            preGateVsExperimentalDisagreementCount:
+                preAccumulationDiagnostics.experimentalDisagreementCount,
+            preGateAcceptedExperimentalAcceptedCount:
+                preAccumulationDiagnostics.preGateAcceptedExperimentalAcceptedCount,
+            preGateAcceptedExperimentalRejectedCount:
+                preAccumulationDiagnostics.preGateAcceptedExperimentalRejectedCount,
+            preGateRejectedExperimentalAcceptedCount:
+                preAccumulationDiagnostics.preGateRejectedExperimentalAcceptedCount,
+            preGateRejectedExperimentalRejectedCount:
+                preAccumulationDiagnostics.preGateRejectedExperimentalRejectedCount,
+            preAccumulationMarkerM0:
+                preAccumulationDiagnostics.markerDiagnosticsByMarkerId[0]
+                    .map(PreAccumulationMarkerGateReportSummary.init),
+            preAccumulationMarkerM1:
+                preAccumulationDiagnostics.markerDiagnosticsByMarkerId[1]
+                    .map(PreAccumulationMarkerGateReportSummary.init),
+            preAccumulationMarkerM2:
+                preAccumulationDiagnostics.markerDiagnosticsByMarkerId[2]
+                    .map(PreAccumulationMarkerGateReportSummary.init),
+            preAccumulationMarkerM3:
+                preAccumulationDiagnostics.markerDiagnosticsByMarkerId[3]
+                    .map(PreAccumulationMarkerGateReportSummary.init),
             experimentalQualityModeEnabled:
                 experimentalQualityDiagnostics.experimentalQualityModeEnabled,
             experimentalObservationGateEnabled:

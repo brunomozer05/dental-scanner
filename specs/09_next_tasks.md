@@ -217,7 +217,7 @@ that 4K frames arrive but detection or pose acceptance fails.
 
 ## Roadmap arquitetural — observações e otimização multi-frame
 
-As próximas fundações arquiteturais devem ser executadas em commits separados e na ordem abaixo. Somente a primeira fase diagnostics-only da Phase A está implementada; as Phases B-D permanecem não implementadas.
+As próximas fundações arquiteturais devem ser executadas em commits separados e na ordem abaixo. A primeira fase diagnostics-only da Phase A e o shadow diagnostics da Phase B estão implementados; blocking da Phase B e as Phases C-D permanecem não implementados.
 
 ### Phase A — Spec 16
 
@@ -252,6 +252,8 @@ gate ON
 ```
 
 Diversidade angular não entra no primeiro commit dessa fase.
+
+Status: shadow diagnostics implementado em 2026-07-12. O gate avalia antes do accumulator e registra decisões/ comparação pareada, mas blocking permanece desligado e o A/B comportamental gate OFF versus gate ON continua pendente.
 
 ### Phase C — Spec 18
 

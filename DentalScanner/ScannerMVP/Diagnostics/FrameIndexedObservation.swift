@@ -37,6 +37,10 @@ struct MarkerFrameObservation: Codable, Equatable, Sendable {
     let poseFinite: Bool
     let intrinsicsFinite: Bool
     let observationValid: Bool
+
+    let preAccumulationGateEvaluated: Bool?
+    let preAccumulationGateWouldAccept: Bool?
+    let preAccumulationGateRejectReason: String?
 }
 
 struct FrameObservation: Codable, Equatable, Sendable {

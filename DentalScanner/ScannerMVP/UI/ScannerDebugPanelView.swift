@@ -243,6 +243,46 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Non-finite poses", value: snapshot.frameObservations.nonFinitePoses)
                     }
 
+                    debugSection(title: "Pre-Accumulation Gate") {
+                        debugRow(
+                            title: "Diagnostics enabled",
+                            value: snapshot.preAccumulationGate.diagnosticsEnabled
+                        )
+                        debugRow(
+                            title: "Blocking enabled",
+                            value: snapshot.preAccumulationGate.blockingEnabled
+                        )
+                        debugRow(title: "Raw", value: snapshot.preAccumulationGate.raw)
+                        debugRow(title: "Would accept", value: snapshot.preAccumulationGate.wouldAccept)
+                        debugRow(title: "Would reject", value: snapshot.preAccumulationGate.wouldReject)
+                        debugRow(title: "Accept ratio", value: snapshot.preAccumulationGate.acceptRatio)
+                        debugRow(title: "Reject ratio", value: snapshot.preAccumulationGate.rejectRatio)
+                        debugRow(
+                            title: "Top reject reason",
+                            value: snapshot.preAccumulationGate.topRejectReason
+                        )
+                        debugRow(title: "Frame mask", value: snapshot.preAccumulationGate.frameMask)
+                        debugRow(title: "Too close", value: snapshot.preAccumulationGate.tooClose)
+                        debugRow(title: "Too far", value: snapshot.preAccumulationGate.tooFar)
+                        debugRow(title: "Focus risk", value: snapshot.preAccumulationGate.focusRisk)
+                        debugRow(
+                            title: "High reprojection",
+                            value: snapshot.preAccumulationGate.highReprojection
+                        )
+                        debugRow(title: "High motion", value: snapshot.preAccumulationGate.highMotion)
+                        debugRow(title: "Invalid pose", value: snapshot.preAccumulationGate.invalidPose)
+                        debugRow(
+                            title: "Missing/invalid intrinsics",
+                            value: snapshot.preAccumulationGate.missingOrInvalidIntrinsics
+                        )
+                        debugRow(
+                            title: "Gate vs experimental available",
+                            value: snapshot.preAccumulationGate.experimentalComparisonAvailable
+                        )
+                        debugRow(title: "Agreement", value: snapshot.preAccumulationGate.agreement)
+                        debugRow(title: "Disagreement", value: snapshot.preAccumulationGate.disagreement)
+                    }
+
                     debugSection(title: "Diagnostics") {
                         debugRow(title: "Diagnostics enabled", value: snapshot.diagnostics.enabled)
                         debugRow(title: "Events count", value: snapshot.diagnostics.eventsCount)
