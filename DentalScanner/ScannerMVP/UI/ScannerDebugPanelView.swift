@@ -247,6 +247,22 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "Non-finite poses", value: snapshot.frameObservations.nonFinitePoses)
                     }
 
+                    debugSection(title: "Session Observation Capture") {
+                        debugRow(title: "Enabled", value: snapshot.sessionObservationCapture.enabled)
+                        debugRow(title: "Active", value: snapshot.sessionObservationCapture.active)
+                        debugRow(title: "Completed", value: snapshot.sessionObservationCapture.completed)
+                        debugRow(title: "Schema", value: snapshot.sessionObservationCapture.schema)
+                        debugRow(title: "Enqueued", value: snapshot.sessionObservationCapture.enqueued)
+                        debugRow(title: "Written", value: snapshot.sessionObservationCapture.written)
+                        debugRow(title: "Write failures", value: snapshot.sessionObservationCapture.writeFailures)
+                        debugRow(title: "Order violations", value: snapshot.sessionObservationCapture.orderViolations)
+                        debugRow(title: "Limit reached", value: snapshot.sessionObservationCapture.limitReached)
+                        debugRow(title: "File size", value: snapshot.sessionObservationCapture.fileSize)
+                        debugRow(title: "Last enqueued frame", value: snapshot.sessionObservationCapture.lastEnqueuedFrame)
+                        debugRow(title: "Last written frame", value: snapshot.sessionObservationCapture.lastWrittenFrame)
+                        debugRow(title: "Filename", value: snapshot.sessionObservationCapture.filename)
+                    }
+
                     debugSection(title: "Pre-Accumulation Gate") {
                         debugRow(
                             title: "Diagnostics enabled",

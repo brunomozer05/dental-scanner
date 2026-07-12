@@ -2,9 +2,9 @@
 
 ## Status
 
-Planned after the frame-indexed observation foundation.
+Phase 18A full-session progressive observation capture implemented on 2026-07-12.
 
-Not implemented. This spec defines an offline diagnostic artifact, not a new production scan pipeline.
+The deterministic replay reader, accumulator replay, gate A/B replay, comparator integration, and offline optimizer integration remain pending. The capture artifact is diagnostic and does not create a new production scan pipeline.
 
 ## Goal
 
@@ -20,21 +20,17 @@ The same captured session should be usable to compare the current accumulator, t
 
 Replay capture must not require specs 17 or 19 to be enabled.
 
-## Versioned session schema
+## Versioned session schema — Phase 18A
 
-The top-level session record must include:
+Phase 18A uses NDJSON / JSON Lines with one independently encoded object per line. Every record has `recordType` and `schemaVersion`; schema version 1 defines these record types:
 
 ```txt
-sessionSchemaVersion
-appCommitHash
-appBuildIdentifier
-captureStartedTimestamp
-captureEndedTimestamp
-device
-cameraProfile
-featureFlags
-frameObservations
+sessionHeader
+frameObservation
+sessionFooter
 ```
+
+The header records a session identifier, capture-start timestamp, device model identifier, OS version, camera profile identifier/name, marker profile, expected physical marker IDs, relevant capture/gate feature flags, app version, app build identifier, and an optional app Git commit hash. The commit hash is populated only when reliable build provenance is injected into `AppGitCommitHash`; the current project does not inject it, so this field is normally absent rather than inferred from a development machine.
 
 Each frame record must include, when available:
 
@@ -54,12 +50,16 @@ Each marker record must include:
 ```txt
 markerId
 markerProfile
-poseSource
+stable pose-source identifier and associated fallback tag ID when applicable
 2D image correspondences
 3D object correspondences
 per-frame pose
+explicit rotation-matrix rows used by the current accumulator
 reprojection error
 distance
+marker area in pixels
+used point count
+detected top/bottom tag IDs when applicable
 frame-mask state
 focus quality
 motion quality
@@ -71,14 +71,14 @@ The schema must not contain credentials, tokens, passwords, private endpoints, l
 
 ## Storage decision
 
-The first implementation should use versioned JSON because it is inspectable, easy to diff, and straightforward for comparator integration.
+Phase 18A uses progressive NDJSON rather than a single JSON array. This keeps the artifact inspectable while avoiding full-session retention in memory. Header, frame, and footer lines are written in enqueue order by a private serial writer queue.
 
 Requirements:
 
 - stable field names;
 - explicit schema version;
-- deterministic ordering by frame index and marker ID;
-- finite-number sanitization;
+- persisted frame ordering is enqueue ordering; marker and 2D/3D point order are preserved exactly from the authoritative `FrameObservation`;
+- non-finite numeric values are encoded using explicit `NaN`, `Infinity`, and `-Infinity` strings where a non-optional diagnostic field can contain them;
 - optional fields for unavailable metadata;
 - documented units and coordinate conventions.
 
@@ -88,13 +88,14 @@ If real sessions prove JSON too large or slow, a future binary encoding may be a
 
 Control size through data selection, not by silently dropping arbitrary fields.
 
-The current 600-frame `FrameObservationRecorder` buffer from spec 16 is a rolling diagnostics buffer only. It is not the authoritative full-session replay store. Spec 18 must introduce an explicit progressive or dedicated session-persistence path so replay completeness does not depend on the rolling buffer.
+The current 600-frame `FrameObservationRecorder` buffer from spec 16 remains a rolling diagnostics buffer only. It is not the authoritative full-session replay store. Phase 18A adds a separate progressive writer that receives the same authoritative immutable observation before the unchanged accumulator update.
 
 - No full camera images by default.
 - No `CVPixelBuffer`, video, thumbnails, or external assets.
 - Reuse the numeric-only observation model and explicit bounds from spec 16 without treating its rolling buffer as complete session history.
-- Record whether observations were evicted before serialization.
-- Define a maximum serialized session size and report truncation explicitly.
+- The progressive writer does not evict persisted frames.
+- The schema-1 hard limit is 128 MiB, with footer space reserved. A numeric observation is expected to be roughly 2–8 KiB; at up to approximately 9,000 processed frames in a five-minute 30 FPS session this is approximately 18–72 MiB, leaving conservative headroom without allowing unbounded storage.
+- If the limit or bounded writer backlog is exceeded, capture stops accepting frames, remains incomplete, and reports an integrity failure without affecting the primary scan.
 - Optional compression may be evaluated later without changing replay semantics.
 
 ## Deterministic replay
@@ -114,6 +115,36 @@ floating-point/backend identifier when relevant
 ```
 
 The replay runner must not access the live camera, current device intrinsics, wall-clock timing, or mutable UI state as hidden inputs.
+
+Phase 18A records the complete numeric `PoseResult` inputs currently consumed by `MultiFramePoseAccumulator`: marker/profile/source identity, rotation vector, the exact rotation-matrix rows supplied to the accumulator, translation vector, reprojection error, distance, marker area, used point count, and detected tag IDs. The future reader must validate the matrix shape and use the explicit matrix rather than silently recomputing a potentially numerically different value from Rodrigues data.
+
+The remaining provenance caveat is that `appGitCommitHash` is optional until build tooling injects reliable commit metadata. A replay reader must report that gap and must not substitute the Git HEAD of the machine running the reader.
+
+## Capture lifecycle — Phase 18A
+
+```txt
+new scan
+  -> create a unique *_session.ndjson file in the existing scan Documents storage
+  -> enqueue sessionHeader
+
+authoritative FrameObservation
+  -> rolling diagnostics recorder
+  -> progressive session writer enqueue
+  -> unchanged MultiFramePoseAccumulator.update input
+
+successful completion
+  -> drain previously queued frame records
+  -> write sessionFooter
+  -> synchronize and close
+  -> mark capture completed
+
+reset, cancel, camera stop, or camera error
+  -> drain previously queued frame records
+  -> write sessionFooter with completed = false when possible
+  -> synchronize and close
+```
+
+The writer tracks enqueued/written frame indices and treats a non-increasing enqueue index as an integrity violation. It never silently sorts observations. Capture failures remain non-fatal to readiness, finalization geometry, STL generation, and export.
 
 ## Compatibility
 
@@ -166,20 +197,20 @@ CLI and comparator implementation are follow-up work. This spec does not authori
 
 ## Implementation order
 
-1. Finalize schema names, units, coordinate frames, and versioning rules.
-2. Serialize bounded synthetic `FrameObservation` fixtures.
-3. Add reader validation and old-schema compatibility tests.
-4. Capture diagnostic-only session files behind a disabled feature flag.
-5. Replay the current accumulator and verify deterministic input ordering/output.
-6. Add gate and optimizer consumers only in their own phases.
+1. **Implemented:** schema-1 progressive NDJSON capture behind `enableScanSessionObservationCapture = true` for the experimental development phase.
+2. Add committed synthetic schema fixtures and reader validation.
+3. Add old-schema compatibility and unknown-schema rejection tests.
+4. Replay the current accumulator and verify deterministic input ordering/output.
+5. Add gate A/B replay only in its follow-up phase.
+6. Add comparator and offline optimizer consumers only in their own phases.
 
 ## Acceptance criteria
 
-- Session files include schema, commit, build, device, profile, and feature-flag identity.
+- Phase 18A session files include schema, session, build, device, camera-profile, marker-profile, and expected-marker identity; commit provenance is optional until reliably injected.
 - Frame and marker observations preserve ownership and coordinate conventions.
 - Full camera images are absent by default.
 - File size is bounded and truncation/eviction is reported.
-- The same session produces deterministic replay results within documented tolerance.
+- Pending reader phase: the same session produces deterministic replay results within documented tolerance.
 - Older supported schemas remain readable.
 - Unknown schemas fail clearly.
 - No credentials, private URLs, local paths, or external proprietary material are stored.

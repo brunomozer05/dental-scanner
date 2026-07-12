@@ -263,6 +263,22 @@ struct ScannerDebugSnapshot: Equatable {
         let nonFinitePoses: String
     }
 
+    struct SessionObservationCaptureSection: Equatable {
+        let enabled: String
+        let active: String
+        let completed: String
+        let schema: String
+        let enqueued: String
+        let written: String
+        let writeFailures: String
+        let orderViolations: String
+        let limitReached: String
+        let fileSize: String
+        let lastEnqueuedFrame: String
+        let lastWrittenFrame: String
+        let filename: String
+    }
+
     struct PreAccumulationGateSection: Equatable {
         let diagnosticsEnabled: String
         let blockingEnabled: String
@@ -360,6 +376,7 @@ struct ScannerDebugSnapshot: Equatable {
     let performance: PerformanceSection
     let diagnostics: DiagnosticsSection
     let frameObservations: FrameObservationsSection
+    let sessionObservationCapture: SessionObservationCaptureSection
     let preAccumulationGate: PreAccumulationGateSection
     let guidedStatic: GuidedStaticSection
     let isDualArucoV2: Bool
@@ -371,6 +388,7 @@ struct ScannerDebugSnapshot: Equatable {
 extension ScannerViewModel {
     var scannerDebugSnapshot: ScannerDebugSnapshot {
         let frameObservationDiagnostics = frameObservationDiagnosticsForDebug
+        let sessionCaptureDiagnostics = scanSessionObservationCaptureDiagnosticsForDebug
         let preAccumulationDiagnostics = preAccumulationObservationGateDiagnosticsForDebug
         return ScannerDebugSnapshot(
             state: ScannerDebugSnapshot.StateSection(
@@ -602,6 +620,23 @@ extension ScannerViewModel {
                     "\(frameObservationDiagnostics.frameObservationMissingIntrinsicsCount)",
                 nonFinitePoses:
                     "\(frameObservationDiagnostics.frameObservationNonFinitePoseCount)"
+            ),
+            sessionObservationCapture: ScannerDebugSnapshot.SessionObservationCaptureSection(
+                enabled: debugBool(sessionCaptureDiagnostics.enabled),
+                active: debugBool(sessionCaptureDiagnostics.active),
+                completed: debugBool(sessionCaptureDiagnostics.completed),
+                schema: "\(sessionCaptureDiagnostics.schemaVersion)",
+                enqueued: "\(sessionCaptureDiagnostics.framesEnqueued)",
+                written: "\(sessionCaptureDiagnostics.framesWritten)",
+                writeFailures: "\(sessionCaptureDiagnostics.frameWriteFailureCount)",
+                orderViolations: "\(sessionCaptureDiagnostics.frameOrderViolationCount)",
+                limitReached: debugBool(sessionCaptureDiagnostics.limitReached),
+                fileSize: "\(sessionCaptureDiagnostics.fileSizeBytes)",
+                lastEnqueuedFrame: sessionCaptureDiagnostics.lastEnqueuedFrameIndex.map(String.init)
+                    ?? ScannerDebugSnapshot.missingValue,
+                lastWrittenFrame: sessionCaptureDiagnostics.lastWrittenFrameIndex.map(String.init)
+                    ?? ScannerDebugSnapshot.missingValue,
+                filename: debugString(sessionCaptureDiagnostics.filename)
             ),
             preAccumulationGate: ScannerDebugSnapshot.PreAccumulationGateSection(
                 diagnosticsEnabled: debugBool(preAccumulationDiagnostics.diagnosticsEnabled),

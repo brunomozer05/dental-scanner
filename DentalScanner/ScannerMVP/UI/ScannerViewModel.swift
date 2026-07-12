@@ -221,6 +221,12 @@ final class ScannerViewModel: ObservableObject {
         static let enablePreAccumulationObservationGateBlocking = false
     }
 
+    private enum ScanSessionObservationCaptureConfiguration {
+        static let enableScanSessionObservationCapture = true
+        static let maximumFileSizeBytes =
+            ScanSessionObservationWriter.defaultMaximumFileSizeBytes
+    }
+
     private enum StaticPoseStabilityConfiguration {
         static let windowSeconds: Double = 5.0
         static let unstablePositionStdDevMm: Double = 0.35
@@ -1228,6 +1234,11 @@ final class ScannerViewModel: ObservableObject {
     private let scanStorageManager: ScanStorageManager
     private let diagnosticsRecorder: ScanDiagnosticsRecorder
     private let frameObservationRecorder = FrameObservationRecorder()
+    private let scanSessionObservationWriter = ScanSessionObservationWriter(
+        enabled: ScanSessionObservationCaptureConfiguration.enableScanSessionObservationCapture,
+        maximumFileSizeBytes:
+            ScanSessionObservationCaptureConfiguration.maximumFileSizeBytes
+    )
     private let preAccumulationObservationGate = PreAccumulationObservationGate()
     private let preAccumulationObservationGateRecorder = PreAccumulationObservationGateRecorder(
         diagnosticsEnabled:
@@ -1237,6 +1248,7 @@ final class ScannerViewModel: ObservableObject {
     )
     private let crashReportingService: CrashReportingService
     private let deviceModelInfo = DeviceModelInfo.current
+    private var currentScanSessionCaptureURL: URL?
 
     var frameObservationDiagnosticsForDebug: FrameObservationDiagnosticsSnapshot {
         frameObservationRecorder.diagnosticsSnapshot()
@@ -1245,6 +1257,11 @@ final class ScannerViewModel: ObservableObject {
     var preAccumulationObservationGateDiagnosticsForDebug:
         PreAccumulationObservationGateDiagnosticsSnapshot {
         preAccumulationObservationGateRecorder.diagnosticsSnapshot()
+    }
+
+    var scanSessionObservationCaptureDiagnosticsForDebug:
+        ScanSessionObservationCaptureSnapshot {
+        scanSessionObservationWriter.snapshot()
     }
 
     private var deviceQualityProfile: DeviceQualityProfile {
@@ -1610,6 +1627,7 @@ final class ScannerViewModel: ObservableObject {
     func stopCamera() {
         if scanState == .scanning || scanState == .stabilizing {
             recordDiagnosticEvent(name: "scan_aborted", message: scanReadinessBlockerSummary)
+            finalizeScanSessionObservationCapture(completed: false)
         }
         resetBestFinalPoseCandidate()
         shouldRunCamera = false
@@ -2192,6 +2210,7 @@ final class ScannerViewModel: ObservableObject {
     func startScan() {
         resetScanSession()
         resetScanDiagnostics()
+        startScanSessionObservationCapture()
         setScanState(.scanning)
         scanQualityStatus = "Capturando"
         scanReadinessMessage = "Capturando"
@@ -2211,6 +2230,79 @@ final class ScannerViewModel: ObservableObject {
         )
         lastDiagnosticsSnapshotPublishTimestamp = nil
         currentScanDiagnosticsSnapshot = makeCurrentDiagnosticsSnapshot(timestamp: timestamp)
+    }
+
+    @MainActor
+    private func startScanSessionObservationCapture() {
+        guard ScanSessionObservationCaptureConfiguration
+            .enableScanSessionObservationCapture
+        else {
+            currentScanSessionCaptureURL = nil
+            return
+        }
+
+        let captureDate = Date()
+        do {
+            let captureURL = try scanStorageManager.makeSessionObservationCaptureFileURL(
+                date: captureDate
+            )
+            currentScanSessionCaptureURL = captureURL
+            let bundle = Bundle.main
+            scanSessionObservationWriter.startSession(
+                header: ScanSessionObservationHeader(
+                    sessionIdentifier: UUID().uuidString,
+                    captureStartedTimestamp:
+                        lastFrameTimestamp ?? captureDate.timeIntervalSinceReferenceDate,
+                    deviceModelIdentifier: deviceModelInfo.identifier,
+                    osVersion: UIDevice.current.systemVersion,
+                    cameraProfileId: cameraProfile.id,
+                    cameraProfileName: cameraProfile.name,
+                    markerProfile: markerProfile.rawValue,
+                    expectedPhysicalMarkerIds: expectedExportMarkerIds(for: markerProfile),
+                    appVersion: nonEmptyBundleString("CFBundleShortVersionString", bundle: bundle),
+                    appBuildIdentifier: nonEmptyBundleString("CFBundleVersion", bundle: bundle),
+                    appGitCommitHash: nonEmptyBundleString("AppGitCommitHash", bundle: bundle),
+                    featureFlags: [
+                        "scanSessionObservationCapture":
+                            ScanSessionObservationCaptureConfiguration
+                                .enableScanSessionObservationCapture,
+                        "preAccumulationGateDiagnostics":
+                            PreAccumulationObservationGateConfiguration
+                                .enablePreAccumulationObservationGateDiagnostics,
+                        "preAccumulationGateBlocking":
+                            PreAccumulationObservationGateConfiguration
+                                .enablePreAccumulationObservationGateBlocking,
+                        "legacyConcatenatedMultiFramePnPForSingleArucoV1":
+                            enableLegacyConcatenatedMultiFramePnPForSingleArucoV1
+                    ]
+                ),
+                fileURL: captureURL
+            )
+        } catch {
+            currentScanSessionCaptureURL = nil
+            scanSessionObservationWriter.recordSessionStartFailure()
+        }
+    }
+
+    @MainActor
+    private func finalizeScanSessionObservationCapture(
+        completed: Bool,
+        completion: ((ScanSessionObservationCaptureSnapshot) -> Void)? = nil
+    ) {
+        scanSessionObservationWriter.finalizeSession(
+            completed: completed,
+            captureEndedTimestamp:
+                lastFrameTimestamp ?? Date().timeIntervalSinceReferenceDate,
+            completion: completion
+        )
+    }
+
+    private func nonEmptyBundleString(_ key: String, bundle: Bundle) -> String? {
+        guard let value = bundle.object(forInfoDictionaryKey: key) as? String else {
+            return nil
+        }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     @MainActor
@@ -2741,12 +2833,13 @@ final class ScannerViewModel: ObservableObject {
                 motionQuality: motionQuality,
                 preAccumulationGateDecisions: preAccumulationGateDecisions
             )
-            frameObservationRecorder.append(
+            let authoritativeFrameObservation = frameObservationRecorder.append(
                 frameObservation,
                 sourceFrameIndex: metrics.totalFramesReceived,
                 expectedMarkerIds: expectedMarkerIds,
                 poseInputMarkerIds: accumulatorInputPoseResults.map(\.markerId)
             )
+            scanSessionObservationWriter.enqueue(authoritativeFrameObservation)
 
             // Shadow mode: every pose still reaches the unchanged primary accumulator.
             fusedPoseResults = multiFramePoseAccumulator.update(with: accumulatorInputPoseResults)
@@ -2967,6 +3060,8 @@ final class ScannerViewModel: ObservableObject {
 
     @MainActor
     private func resetScanSession() {
+        finalizeScanSessionObservationCapture(completed: false)
+        currentScanSessionCaptureURL = nil
         arUcoConsistencyFilter.reset()
         multiFramePoseAccumulator.reset()
         frameObservationRecorder.reset()
@@ -9263,6 +9358,23 @@ final class ScannerViewModel: ObservableObject {
                     y: poseResult.rotationVector.y,
                     z: poseResult.rotationVector.z
                 ),
+                rotationMatrixRows: [
+                    ObservationPoint3D(
+                        x: poseResult.rotationMatrix.columns.0.x,
+                        y: poseResult.rotationMatrix.columns.1.x,
+                        z: poseResult.rotationMatrix.columns.2.x
+                    ),
+                    ObservationPoint3D(
+                        x: poseResult.rotationMatrix.columns.0.y,
+                        y: poseResult.rotationMatrix.columns.1.y,
+                        z: poseResult.rotationMatrix.columns.2.y
+                    ),
+                    ObservationPoint3D(
+                        x: poseResult.rotationMatrix.columns.0.z,
+                        y: poseResult.rotationMatrix.columns.1.z,
+                        z: poseResult.rotationMatrix.columns.2.z
+                    )
+                ],
                 translationVector: ObservationPoint3D(
                     x: poseResult.translationVector.x,
                     y: poseResult.translationVector.y,
@@ -9374,7 +9486,12 @@ final class ScannerViewModel: ObservableObject {
 
             return MarkerFrameObservation(
                 markerId: poseResult.markerId,
-                markerSource: poseResult.poseSource.debugTitle,
+                markerSource: Self.frameObservationMarkerSourceIdentifier(
+                    poseResult.poseSource
+                ),
+                markerSourceTagId: Self.frameObservationMarkerSourceTagId(
+                    poseResult.poseSource
+                ),
                 markerProfileId: poseResult.markerProfile.rawValue,
                 imageCorners: imageCorners,
                 objectPoints: objectPoints,
@@ -9392,6 +9509,12 @@ final class ScannerViewModel: ObservableObject {
                     ? poseResult.reprojectionError
                     : nil,
                 distanceMm: poseResult.distanceMm.isFinite ? poseResult.distanceMm : nil,
+                markerAreaPixels: poseResult.markerAreaPixels.isFinite
+                    ? poseResult.markerAreaPixels
+                    : nil,
+                usedPointCount: poseResult.usedPointCount,
+                detectedTopTagId: poseResult.detectedTopTagId,
+                detectedBottomTagId: poseResult.detectedBottomTagId,
                 frameMaskState: frameMaskDiagnostics.frameMaskQualityState,
                 insideFrameMask: markerMask?.markerInsideFrameMask,
                 frameMaskViolation: markerMask?.markerFrameMaskViolation,
@@ -9428,6 +9551,28 @@ final class ScannerViewModel: ObservableObject {
             cameraProfileName: cameraProfile.name,
             markerObservations: markerObservations
         )
+    }
+
+    private static func frameObservationMarkerSourceIdentifier(
+        _ source: MarkerPoseSource
+    ) -> String {
+        switch source {
+        case .singleArucoV1:
+            return "singleArucoV1"
+        case .dualTag:
+            return "dualTag"
+        case let .singleFallback(_, role):
+            return role == .top ? "singleFallback.top" : "singleFallback.bottom"
+        }
+    }
+
+    private static func frameObservationMarkerSourceTagId(
+        _ source: MarkerPoseSource
+    ) -> Int? {
+        guard case let .singleFallback(tagId, _) = source else {
+            return nil
+        }
+        return tagId
     }
 
     private static func isFiniteFrameObservationPose(_ pose: PoseResult) -> Bool {
@@ -9948,6 +10093,25 @@ final class ScannerViewModel: ObservableObject {
             frameObservationDiagnostics.frameObservationMissingIntrinsicsCount
         snapshot.frameObservationNonFinitePoseCount =
             frameObservationDiagnostics.frameObservationNonFinitePoseCount
+        let sessionCaptureDiagnostics = scanSessionObservationWriter.snapshot()
+        snapshot.scanSessionObservationCaptureEnabled = sessionCaptureDiagnostics.enabled
+        snapshot.scanSessionCaptureSchemaVersion = sessionCaptureDiagnostics.schemaVersion
+        snapshot.scanSessionCaptureActive = sessionCaptureDiagnostics.active
+        snapshot.scanSessionCaptureCompleted = sessionCaptureDiagnostics.completed
+        snapshot.scanSessionCaptureFramesEnqueued = sessionCaptureDiagnostics.framesEnqueued
+        snapshot.scanSessionCaptureFramesWritten = sessionCaptureDiagnostics.framesWritten
+        snapshot.scanSessionCaptureFrameWriteFailureCount =
+            sessionCaptureDiagnostics.frameWriteFailureCount
+        snapshot.scanSessionCaptureFrameOrderViolationCount =
+            sessionCaptureDiagnostics.frameOrderViolationCount
+        snapshot.scanSessionCaptureLimitReached = sessionCaptureDiagnostics.limitReached
+        snapshot.scanSessionCaptureFileSizeBytes = sessionCaptureDiagnostics.fileSizeBytes
+        snapshot.scanSessionCaptureLastEnqueuedFrameIndex =
+            sessionCaptureDiagnostics.lastEnqueuedFrameIndex
+        snapshot.scanSessionCaptureLastWrittenFrameIndex =
+            sessionCaptureDiagnostics.lastWrittenFrameIndex
+        snapshot.scanSessionCaptureFileAvailable = sessionCaptureDiagnostics.fileAvailable
+        snapshot.scanSessionCaptureFilename = sessionCaptureDiagnostics.filename
         let preAccumulationDiagnostics =
             preAccumulationObservationGateRecorder.diagnosticsSnapshot()
         snapshot.preAccumulationGateDiagnosticsEnabled = preAccumulationDiagnostics.diagnosticsEnabled
@@ -11049,6 +11213,7 @@ final class ScannerViewModel: ObservableObject {
     private func handleCameraError(_ error: Error) {
         cameraState = .failed
         shouldRunCamera = false
+        finalizeScanSessionObservationCapture(completed: false)
         resetBestFinalPoseCandidate()
         updateScreenAwakeState()
         errorMessage = makeErrorMessage(from: error)
@@ -11091,6 +11256,7 @@ final class ScannerViewModel: ObservableObject {
         lastSTLExportBottomCenterYMillimeters = exportSTLExporter.bottomTagCenterYMillimeters
 
         if let blockedReason = exportGate.blockedReason {
+            finalizeScanSessionObservationCapture(completed: true)
             recordDiagnosticEvent(name: "export_blocked", message: blockedReason)
             stlExportURL = nil
             stlExportedImplantCount = 0
@@ -11104,6 +11270,7 @@ final class ScannerViewModel: ObservableObject {
         }
 
         guard !currentTagPoses.isEmpty else {
+            finalizeScanSessionObservationCapture(completed: true)
             recordDiagnosticEvent(name: "export_blocked", message: "empty_tag_pose_list")
             stlExportURL = nil
             stlExportedImplantCount = 0
@@ -11118,28 +11285,12 @@ final class ScannerViewModel: ObservableObject {
             return nil
         }
 
-        let scanStorageManager = self.scanStorageManager
         let scanDate = Date()
         let scanName = ScanStorageManager.automaticScanFileName(date: scanDate)
-        let technicalReport = makeTechnicalScanReport(
-            createdAt: scanDate,
-            markerProfile: currentMarkerProfile,
-            tagPoses: currentTagPoses
-        )
         let blockingReasonBeforeExport = scanReadinessBlockerSummary
         lastBlockingReasonBeforeExport = blockingReasonBeforeExport
-        recordDiagnosticEvent(
-            name: "export_success",
-            metadata: ["lastBlockingReasonBeforeExport": blockingReasonBeforeExport]
-        )
-        recordDiagnosticEvent(name: "scan_finished")
-        let diagnosticsSnapshot = makeCurrentDiagnosticsSnapshot(
-            timestamp: lastFrameTimestamp ?? Date().timeIntervalSinceReferenceDate,
-            currentBlockingReasonOverride: "export_success",
-            lastBlockingReasonBeforeExportOverride: blockingReasonBeforeExport
-        )
-        let exportedTagCount = currentTagPoses.count
         let exportGenerationID = UUID()
+        let sessionCaptureURL = currentScanSessionCaptureURL
 
         stlExportGenerationID = exportGenerationID
         isGeneratingSTL = true
@@ -11156,6 +11307,63 @@ final class ScannerViewModel: ObservableObject {
         scanReadinessBlockerSummary = "Pronto: gerando STL"
         updateExportDiagnostics()
 
+        finalizeScanSessionObservationCapture(completed: true) { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      self.stlExportGenerationID == exportGenerationID
+                else {
+                    return
+                }
+
+                self.continueSTLExportAfterSessionCaptureFinalization(
+                    scanDate: scanDate,
+                    scanName: scanName,
+                    currentTagPoses: currentTagPoses,
+                    currentMarkerProfile: currentMarkerProfile,
+                    exportSTLExporter: exportSTLExporter,
+                    exportReferenceModelFileName: exportReferenceModelFileName,
+                    exportMarkerIds: exportMarkerIds,
+                    blockingReasonBeforeExport: blockingReasonBeforeExport,
+                    exportGenerationID: exportGenerationID,
+                    sessionCaptureURL: sessionCaptureURL
+                )
+            }
+        }
+
+        return nil
+    }
+
+    @MainActor
+    private func continueSTLExportAfterSessionCaptureFinalization(
+        scanDate: Date,
+        scanName: String,
+        currentTagPoses: [PoseResult],
+        currentMarkerProfile: MarkerProfile,
+        exportSTLExporter: STLExporter,
+        exportReferenceModelFileName: String,
+        exportMarkerIds: [Int],
+        blockingReasonBeforeExport: String,
+        exportGenerationID: UUID,
+        sessionCaptureURL: URL?
+    ) {
+        let scanStorageManager = self.scanStorageManager
+        let technicalReport = makeTechnicalScanReport(
+            createdAt: scanDate,
+            markerProfile: currentMarkerProfile,
+            tagPoses: currentTagPoses
+        )
+        recordDiagnosticEvent(
+            name: "export_success",
+            metadata: ["lastBlockingReasonBeforeExport": blockingReasonBeforeExport]
+        )
+        recordDiagnosticEvent(name: "scan_finished")
+        let diagnosticsSnapshot = makeCurrentDiagnosticsSnapshot(
+            timestamp: lastFrameTimestamp ?? Date().timeIntervalSinceReferenceDate,
+            currentBlockingReasonOverride: "export_success",
+            lastBlockingReasonBeforeExportOverride: blockingReasonBeforeExport
+        )
+        let exportedTagCount = currentTagPoses.count
+
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result: Result<ScanItem, Error>
 
@@ -11169,7 +11377,8 @@ final class ScannerViewModel: ObservableObject {
                     stlData: stlData,
                     name: scanName,
                     technicalReport: technicalReport,
-                    diagnostics: diagnosticsSnapshot
+                    diagnostics: diagnosticsSnapshot,
+                    sessionCaptureURL: sessionCaptureURL
                 )
                 result = .success(scan)
             } catch {
@@ -11229,8 +11438,6 @@ final class ScannerViewModel: ObservableObject {
                 }
             }
         }
-
-        return nil
     }
 
     private func makeSTLExportEventMessage(
@@ -11260,6 +11467,7 @@ final class ScannerViewModel: ObservableObject {
         let frameMaskDiagnostics = currentFrameMaskDiagnostics
         let experimentalQualityDiagnostics = currentExperimentalQualityDiagnostics
         let frameObservationDiagnostics = frameObservationRecorder.diagnosticsSnapshot()
+        let sessionCaptureDiagnostics = scanSessionObservationWriter.snapshot()
         let preAccumulationDiagnostics =
             preAccumulationObservationGateRecorder.diagnosticsSnapshot()
         let activeDistanceGuideConfiguration = distanceGuideConfiguration
@@ -11425,6 +11633,24 @@ final class ScannerViewModel: ObservableObject {
                 frameObservationDiagnostics.frameObservationMissingIntrinsicsCount,
             frameObservationNonFinitePoseCount:
                 frameObservationDiagnostics.frameObservationNonFinitePoseCount,
+            scanSessionObservationCaptureEnabled: sessionCaptureDiagnostics.enabled,
+            scanSessionCaptureSchemaVersion: sessionCaptureDiagnostics.schemaVersion,
+            scanSessionCaptureActive: sessionCaptureDiagnostics.active,
+            scanSessionCaptureCompleted: sessionCaptureDiagnostics.completed,
+            scanSessionCaptureFramesEnqueued: sessionCaptureDiagnostics.framesEnqueued,
+            scanSessionCaptureFramesWritten: sessionCaptureDiagnostics.framesWritten,
+            scanSessionCaptureFrameWriteFailureCount:
+                sessionCaptureDiagnostics.frameWriteFailureCount,
+            scanSessionCaptureFrameOrderViolationCount:
+                sessionCaptureDiagnostics.frameOrderViolationCount,
+            scanSessionCaptureLimitReached: sessionCaptureDiagnostics.limitReached,
+            scanSessionCaptureFileSizeBytes: sessionCaptureDiagnostics.fileSizeBytes,
+            scanSessionCaptureLastEnqueuedFrameIndex:
+                sessionCaptureDiagnostics.lastEnqueuedFrameIndex,
+            scanSessionCaptureLastWrittenFrameIndex:
+                sessionCaptureDiagnostics.lastWrittenFrameIndex,
+            scanSessionCaptureFileAvailable: sessionCaptureDiagnostics.fileAvailable,
+            scanSessionCaptureFilename: sessionCaptureDiagnostics.filename,
             preAccumulationGateDiagnosticsEnabled:
                 preAccumulationDiagnostics.diagnosticsEnabled,
             preAccumulationGateBlockingEnabled:

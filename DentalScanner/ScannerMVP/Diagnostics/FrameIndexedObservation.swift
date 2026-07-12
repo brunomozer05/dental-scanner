@@ -14,15 +14,21 @@ struct ObservationPoint3D: Codable, Equatable, Sendable {
 struct MarkerFrameObservation: Codable, Equatable, Sendable {
     let markerId: Int
     let markerSource: String
+    let markerSourceTagId: Int?
     let markerProfileId: String
 
     let imageCorners: [ObservationPoint2D]
     let objectPoints: [ObservationPoint3D]
 
     let rotationVector: ObservationPoint3D
+    let rotationMatrixRows: [ObservationPoint3D]
     let translationVector: ObservationPoint3D
     let reprojectionError: Double?
     let distanceMm: Double?
+    let markerAreaPixels: Double?
+    let usedPointCount: Int
+    let detectedTopTagId: Int?
+    let detectedBottomTagId: Int?
 
     let frameMaskState: String?
     let insideFrameMask: Bool?
@@ -107,7 +113,7 @@ final class FrameObservationRecorder {
         sourceFrameIndex: Int,
         expectedMarkerIds: [Int],
         poseInputMarkerIds: [Int]
-    ) {
+    ) -> FrameObservation {
         lock.lock()
         defer { lock.unlock() }
 
@@ -160,6 +166,8 @@ final class FrameObservationRecorder {
                 nonFinitePoseCount += 1
             }
         }
+
+        return observation
     }
 
     func reset() {

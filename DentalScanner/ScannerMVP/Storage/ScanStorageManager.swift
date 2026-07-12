@@ -7,6 +7,7 @@ struct ScanItem: Identifiable, Codable {
     let fileURL: URL
     let reportURL: URL?
     let diagnosticsURL: URL?
+    let sessionCaptureURL: URL?
 
     init(
         id: UUID,
@@ -14,7 +15,8 @@ struct ScanItem: Identifiable, Codable {
         date: Date,
         fileURL: URL,
         reportURL: URL? = nil,
-        diagnosticsURL: URL? = nil
+        diagnosticsURL: URL? = nil,
+        sessionCaptureURL: URL? = nil
     ) {
         self.id = id
         self.name = name
@@ -22,6 +24,7 @@ struct ScanItem: Identifiable, Codable {
         self.fileURL = fileURL
         self.reportURL = reportURL
         self.diagnosticsURL = diagnosticsURL
+        self.sessionCaptureURL = sessionCaptureURL
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -31,6 +34,7 @@ struct ScanItem: Identifiable, Codable {
         case fileURL
         case reportURL
         case diagnosticsURL
+        case sessionCaptureURL
     }
 
     init(from decoder: Decoder) throws {
@@ -41,6 +45,7 @@ struct ScanItem: Identifiable, Codable {
         fileURL = try container.decode(URL.self, forKey: .fileURL)
         reportURL = try container.decodeIfPresent(URL.self, forKey: .reportURL)
         diagnosticsURL = try container.decodeIfPresent(URL.self, forKey: .diagnosticsURL)
+        sessionCaptureURL = try container.decodeIfPresent(URL.self, forKey: .sessionCaptureURL)
     }
 }
 
@@ -76,7 +81,8 @@ final class ScanStorageManager {
         stlData: Data,
         name: String,
         technicalReport: ScanTechnicalReport? = nil,
-        diagnostics: ScanDiagnosticsSnapshot? = nil
+        diagnostics: ScanDiagnosticsSnapshot? = nil,
+        sessionCaptureURL: URL? = nil
     ) throws -> ScanItem {
         let documentsURL = try documentsDirectoryURL()
         let fileURL = uniqueFileURL(
@@ -101,7 +107,8 @@ final class ScanStorageManager {
             date: Date(),
             fileURL: fileURL,
             reportURL: reportURL,
-            diagnosticsURL: diagnosticsURL
+            diagnosticsURL: diagnosticsURL,
+            sessionCaptureURL: sessionCaptureURL
         )
         var scans = loadScans()
         scans.insert(scan, at: 0)
@@ -137,6 +144,11 @@ final class ScanStorageManager {
             try? fileManager.removeItem(at: diagnosticsURL)
         }
 
+        if let sessionCaptureURL = scan.sessionCaptureURL,
+           fileManager.fileExists(atPath: sessionCaptureURL.path) {
+            try? fileManager.removeItem(at: sessionCaptureURL)
+        }
+
         let scans = loadScans().filter { $0.id != scan.id }
         persist(scans)
     }
@@ -147,6 +159,16 @@ final class ScanStorageManager {
         formatter.dateFormat = "yyyy-MM-dd_HH-mm"
 
         return "Scan_\(formatter.string(from: date)).stl"
+    }
+
+    func makeSessionObservationCaptureFileURL(date: Date = Date()) throws -> URL {
+        let documentsURL = try documentsDirectoryURL()
+        let scanBaseName = Self.automaticScanFileName(date: date)
+            .replacingOccurrences(of: ".stl", with: "")
+        return uniqueFileURL(
+            in: documentsURL,
+            requestedFileName: "\(scanBaseName)_session.ndjson"
+        )
     }
 
     private func documentsDirectoryURL() throws -> URL {

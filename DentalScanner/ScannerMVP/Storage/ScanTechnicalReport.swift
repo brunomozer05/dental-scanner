@@ -96,6 +96,20 @@ struct ScanTechnicalReport: Codable {
     var frameObservationPointCountMismatchCount: Int?
     var frameObservationMissingIntrinsicsCount: Int?
     var frameObservationNonFinitePoseCount: Int?
+    var scanSessionObservationCaptureEnabled: Bool?
+    var scanSessionCaptureSchemaVersion: Int?
+    var scanSessionCaptureActive: Bool?
+    var scanSessionCaptureCompleted: Bool?
+    var scanSessionCaptureFramesEnqueued: Int?
+    var scanSessionCaptureFramesWritten: Int?
+    var scanSessionCaptureFrameWriteFailureCount: Int?
+    var scanSessionCaptureFrameOrderViolationCount: Int?
+    var scanSessionCaptureLimitReached: Bool?
+    var scanSessionCaptureFileSizeBytes: Int64?
+    var scanSessionCaptureLastEnqueuedFrameIndex: Int?
+    var scanSessionCaptureLastWrittenFrameIndex: Int?
+    var scanSessionCaptureFileAvailable: Bool?
+    var scanSessionCaptureFilename: String?
     var preAccumulationGateDiagnosticsEnabled: Bool?
     var preAccumulationGateBlockingEnabled: Bool?
     var preAccumulationRawObservationCount: Int?

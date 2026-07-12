@@ -125,6 +125,20 @@ struct ScanDiagnosticsSnapshot: Codable, Equatable {
     var frameObservationPointCountMismatchCount: Int?
     var frameObservationMissingIntrinsicsCount: Int?
     var frameObservationNonFinitePoseCount: Int?
+    var scanSessionObservationCaptureEnabled: Bool? = nil
+    var scanSessionCaptureSchemaVersion: Int? = nil
+    var scanSessionCaptureActive: Bool? = nil
+    var scanSessionCaptureCompleted: Bool? = nil
+    var scanSessionCaptureFramesEnqueued: Int? = nil
+    var scanSessionCaptureFramesWritten: Int? = nil
+    var scanSessionCaptureFrameWriteFailureCount: Int? = nil
+    var scanSessionCaptureFrameOrderViolationCount: Int? = nil
+    var scanSessionCaptureLimitReached: Bool? = nil
+    var scanSessionCaptureFileSizeBytes: Int64? = nil
+    var scanSessionCaptureLastEnqueuedFrameIndex: Int? = nil
+    var scanSessionCaptureLastWrittenFrameIndex: Int? = nil
+    var scanSessionCaptureFileAvailable: Bool? = nil
+    var scanSessionCaptureFilename: String? = nil
     var preAccumulationGateDiagnosticsEnabled: Bool?
     var preAccumulationGateBlockingEnabled: Bool?
     var preAccumulationRawObservationCount: Int?

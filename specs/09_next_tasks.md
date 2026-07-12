@@ -217,7 +217,7 @@ that 4K frames arrive but detection or pose acceptance fails.
 
 ## Roadmap arquitetural — observações e otimização multi-frame
 
-As próximas fundações arquiteturais devem ser executadas em commits separados e na ordem abaixo. A primeira fase diagnostics-only da Phase A e o shadow diagnostics da Phase B estão implementados; blocking da Phase B e as Phases C-D permanecem não implementados.
+As próximas fundações arquiteturais devem ser executadas em commits separados e na ordem abaixo. A primeira fase diagnostics-only da Phase A, o shadow diagnostics da Phase B e a captura progressiva Phase 18A da Phase C estão implementados; blocking da Phase B, reader/replay da Phase C e a Phase D permanecem não implementados.
 
 ### Phase A — Spec 16
 
@@ -236,7 +236,7 @@ quality metadata
 
 Não alterar acumulador, readiness, finalization ou export nessa fase.
 
-Status: primeira fase diagnostics-only implementada em 2026-07-12, com modelo explícito por frame, buffer limitado, diagnostics agregados e reset de sessão. Persistência/replay e qualquer consumo pelo pipeline primário permanecem pendentes.
+Status: primeira fase diagnostics-only implementada em 2026-07-12, com modelo explícito por frame, buffer limitado, diagnostics agregados e reset de sessão. A captura full-session passou à Phase 18A; reader/replay e qualquer consumo pelo pipeline primário permanecem pendentes.
 
 ### Phase B — Spec 17
 
@@ -260,6 +260,8 @@ Status: shadow diagnostics implementado em 2026-07-12. O gate avalia antes do ac
 `18_scan_session_replay.md`
 
 Persistir somente geometria e quality metadata suficientes para replay determinístico. Não salvar frames completos por padrão e não alterar o comparador Python nesta fase.
+
+Status: Phase 18A de captura progressiva full-session implementada em 2026-07-12. O mesmo `FrameObservation` autoritativo registrado antes do accumulator é persistido em NDJSON schema 1 por uma fila serial, separado do buffer circular de 600 frames. Reader determinístico, replay do accumulator, gate A/B, integração com comparador e optimizer continuam pendentes.
 
 ### Phase D — Spec 19
 
