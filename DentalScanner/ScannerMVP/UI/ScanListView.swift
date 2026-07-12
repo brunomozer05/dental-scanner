@@ -342,6 +342,16 @@ struct ScanListView: View {
         return inferredDiagnosticsURL
     }
 
+    private func sessionCaptureURLIfAvailable(for scan: ScanItem) -> URL? {
+        guard let sessionCaptureURL = scan.sessionCaptureURL,
+              fileManager.fileExists(atPath: sessionCaptureURL.path)
+        else {
+            return nil
+        }
+
+        return sessionCaptureURL
+    }
+
     private func shareURLs(for scans: [ScanItem]) -> [URL] {
         let urls = scans.flatMap { scan -> [URL] in
             var scanURLs = [scan.fileURL]
@@ -352,6 +362,10 @@ struct ScanListView: View {
 
             if let diagnosticsURL = diagnosticsURLIfAvailable(for: scan) {
                 scanURLs.append(diagnosticsURL)
+            }
+
+            if let sessionCaptureURL = sessionCaptureURLIfAvailable(for: scan) {
+                scanURLs.append(sessionCaptureURL)
             }
 
             return scanURLs
@@ -451,7 +465,10 @@ struct ScanListView: View {
 
         if let reportURL = reportURLIfAvailable(for: scan) {
             let packageURLs = uniqueURLs(
-                [scan.fileURL, reportURL] + [diagnosticsURLIfAvailable(for: scan)].compactMap { $0 }
+                [scan.fileURL, reportURL] + [
+                    diagnosticsURLIfAvailable(for: scan),
+                    sessionCaptureURLIfAvailable(for: scan)
+                ].compactMap { $0 }
             )
 
             Button {
@@ -503,7 +520,10 @@ struct ScanListView: View {
 
         if let reportURL = reportURLIfAvailable(for: scan) {
             let packageURLs = uniqueURLs(
-                [scan.fileURL, reportURL] + [diagnosticsURLIfAvailable(for: scan)].compactMap { $0 }
+                [scan.fileURL, reportURL] + [
+                    diagnosticsURLIfAvailable(for: scan),
+                    sessionCaptureURLIfAvailable(for: scan)
+                ].compactMap { $0 }
             )
 
             Button {
