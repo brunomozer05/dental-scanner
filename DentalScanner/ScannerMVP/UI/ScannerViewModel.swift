@@ -9358,23 +9358,6 @@ final class ScannerViewModel: ObservableObject {
                     y: poseResult.rotationVector.y,
                     z: poseResult.rotationVector.z
                 ),
-                rotationMatrixRows: [
-                    ObservationPoint3D(
-                        x: poseResult.rotationMatrix.columns.0.x,
-                        y: poseResult.rotationMatrix.columns.1.x,
-                        z: poseResult.rotationMatrix.columns.2.x
-                    ),
-                    ObservationPoint3D(
-                        x: poseResult.rotationMatrix.columns.0.y,
-                        y: poseResult.rotationMatrix.columns.1.y,
-                        z: poseResult.rotationMatrix.columns.2.y
-                    ),
-                    ObservationPoint3D(
-                        x: poseResult.rotationMatrix.columns.0.z,
-                        y: poseResult.rotationMatrix.columns.1.z,
-                        z: poseResult.rotationMatrix.columns.2.z
-                    )
-                ],
                 translationVector: ObservationPoint3D(
                     x: poseResult.translationVector.x,
                     y: poseResult.translationVector.y,
@@ -9500,6 +9483,23 @@ final class ScannerViewModel: ObservableObject {
                     y: poseResult.rotationVector.y,
                     z: poseResult.rotationVector.z
                 ),
+                rotationMatrixRows: [
+                    ObservationPoint3D(
+                        x: poseResult.rotationMatrix.columns.0.x,
+                        y: poseResult.rotationMatrix.columns.1.x,
+                        z: poseResult.rotationMatrix.columns.2.x
+                    ),
+                    ObservationPoint3D(
+                        x: poseResult.rotationMatrix.columns.0.y,
+                        y: poseResult.rotationMatrix.columns.1.y,
+                        z: poseResult.rotationMatrix.columns.2.y
+                    ),
+                    ObservationPoint3D(
+                        x: poseResult.rotationMatrix.columns.0.z,
+                        y: poseResult.rotationMatrix.columns.1.z,
+                        z: poseResult.rotationMatrix.columns.2.z
+                    )
+                ],
                 translationVector: ObservationPoint3D(
                     x: poseResult.translationVector.x,
                     y: poseResult.translationVector.y,
