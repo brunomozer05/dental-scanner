@@ -21,6 +21,15 @@ Estas specs são a fonte de verdade do projeto.
 * `08_known_issues.md` - problemas conhecidos.
 * `09_next_tasks.md` - backlog tecnico.
 * `10_best_final_pose_candidate.md` - plano futuro para exportar o melhor candidato de pose final.
+* `11_device_quality_pipeline.md` - perfis por device, frame mask e quality diagnostics.
+* `12_observation_quality_and_angle_diversity.md` - qualidade de observacoes e diversidade angular.
+* `13_camera_resolution_focus_intrinsics.md` - camera, foco, resolucao e intrinsics.
+* `14_marker_v3_and_robust_pnp.md` - marker futuro, pontos extras e PnP robusto.
+* `15_validation_protocol_and_accuracy.md` - protocolo de validacao e limites das afirmacoes de accuracy.
+* `16_frame_indexed_observations.md` - Frame Indexed Observation Model.
+* `17_pre_accumulation_observation_gate.md` - Pre-Accumulation Observation Quality Gate.
+* `18_scan_session_replay.md` - Scan Session Capture and Deterministic Replay.
+* `19_offline_frame_indexed_optimization.md` - Offline Frame Indexed Multi-Frame Optimization.
 
 ## Regras gerais
 
@@ -42,3 +51,33 @@ Estas specs são a fonte de verdade do projeto.
 6. Avaliar marker v3 híbrido futuramente.
 7. Adicionar ARKit Assist experimental.
 8. Refinar final pose/export quality gates.
+
+## Roadmap arquitetural frame-indexed
+
+As specs 16–19 ainda não estão implementadas e devem seguir esta ordem:
+
+### Phase A
+
+`16_frame_indexed_observations.md`
+
+Criar a fundação diagnostics/read-only que preserva a associação entre frame, intrinsics, correspondências e pose por frame.
+
+### Phase B
+
+`17_pre_accumulation_observation_gate.md`
+
+Avaliar e, atrás de feature flag desligada por padrão, impedir que observações rejeitadas entrem no acumulador primário.
+
+### Phase C
+
+`18_scan_session_replay.md`
+
+Persistir sessões geométricas versionadas para replay determinístico e comparação A/B sobre os mesmos dados.
+
+### Phase D
+
+`19_offline_frame_indexed_optimization.md`
+
+Comparar offline o acumulador atual com um otimizador que mantém uma pose de câmera por frame e uma pose compartilhada por marker.
+
+Somente depois dessas fases avaliar integração primária de diversidade angular, pose graph, marker v3 e otimização global.

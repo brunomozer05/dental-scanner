@@ -214,3 +214,69 @@ poseLastRejectReason
 
 Only consider downscale or intrinsics/corner scaling if the diagnostics prove
 that 4K frames arrive but detection or pose acceptance fails.
+
+## Roadmap arquitetural — observações e otimização multi-frame
+
+As próximas fundações arquiteturais devem ser executadas em commits separados e na ordem abaixo. Nenhuma está marcada como implementada.
+
+### Phase A — Spec 16
+
+`16_frame_indexed_observations.md`
+
+Adicionar um modelo de observação por frame, inicialmente diagnostics/read-only, preservando:
+
+```txt
+frame index e timestamp
+intrinsics e dimensões do frame
+observações por marker
+correspondências 2D/3D
+pose individual por frame
+quality metadata
+```
+
+Não alterar acumulador, readiness, finalization ou export nessa fase.
+
+### Phase B — Spec 17
+
+`17_pre_accumulation_observation_gate.md`
+
+Criar um quality gate antes da inserção no `MultiFramePoseAccumulator`, primeiro em shadow mode e depois atrás de feature flag desligada por padrão.
+
+Comparar obrigatoriamente:
+
+```txt
+gate OFF
+gate ON
+```
+
+Diversidade angular não entra no primeiro commit dessa fase.
+
+### Phase C — Spec 18
+
+`18_scan_session_replay.md`
+
+Persistir somente geometria e quality metadata suficientes para replay determinístico. Não salvar frames completos por padrão e não alterar o comparador Python nesta fase.
+
+### Phase D — Spec 19
+
+`19_offline_frame_indexed_optimization.md`
+
+Executar experimento A/B offline:
+
+```txt
+A = MultiFramePoseAccumulator atual
+B = otimizador com uma pose de câmera por frame e uma pose compartilhada por marker
+```
+
+Manter intrinsics fixos e usar residual reprojetivo robusto na primeira versão. O resultado B não controla export.
+
+### Depois das phases A–D
+
+Avaliar, em tarefas/specs separadas:
+
+1. integração primária de diversidade angular por marker;
+2. pose graph;
+3. marker v3 e pontos extras próprios;
+4. otimização global e eventual viabilidade runtime.
+
+Não implementar bundle adjustment, pose graph ou otimização de focal/distorção antes de existirem observações frame-indexed e replay determinístico.
