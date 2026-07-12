@@ -1214,6 +1214,7 @@ final class ScannerViewModel: ObservableObject {
     private let poseEstimator: PoseEstimator
     private let multiFramePoseAccumulator: MultiFramePoseAccumulator
     private let finalPoseRefiner: FinalPoseRefiner
+    private let enableLegacyConcatenatedMultiFramePnPForSingleArucoV1 = false
     private let motionFrameQualityService: MotionFrameQualityService
     private let arKitCaptureAssistService: ARKitCaptureAssistService
     private let poseSmoother = PoseSmoother()
@@ -6259,11 +6260,8 @@ final class ScannerViewModel: ObservableObject {
 
         updateFinalObservationDiagnosticsIfNeeded(force: true)
         let currentPoseResults = consolidatedPoseResults()
-        let refinedPoseResults = finalPoseRefiner.refine(
-            observations: finalPoseObservations,
-            currentPoseResults: currentPoseResults,
-            preferDualTagForFinalExport: preferDualTagForFinalExport,
-            maximumFinalNormalOutlierDegrees: scanMaximumFinalNormalOutlierDegrees
+        let refinedPoseResults = finalPoseResultsAfterLegacyRefinementIfEnabled(
+            currentPoseResults: currentPoseResults
         )
         guard !refinedPoseResults.isEmpty,
               refinedPoseResults != currentPoseResults
@@ -6283,6 +6281,22 @@ final class ScannerViewModel: ObservableObject {
         )
         updatePrecisionValidationCurrentError()
         updateExportDiagnostics()
+    }
+
+    private func finalPoseResultsAfterLegacyRefinementIfEnabled(
+        currentPoseResults: [PoseResult]
+    ) -> [PoseResult] {
+        if markerProfile == .singleArucoV1,
+           !enableLegacyConcatenatedMultiFramePnPForSingleArucoV1 {
+            return currentPoseResults
+        }
+
+        return finalPoseRefiner.refine(
+            observations: finalPoseObservations,
+            currentPoseResults: currentPoseResults,
+            preferDualTagForFinalExport: preferDualTagForFinalExport,
+            maximumFinalNormalOutlierDegrees: scanMaximumFinalNormalOutlierDegrees
+        )
     }
 
     private var minimumStabilizingFrameCount: Int {
