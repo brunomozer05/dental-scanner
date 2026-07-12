@@ -232,8 +232,12 @@ struct ScannerDebugPanelView: View {
                         debugRow(title: "M2 observations", value: snapshot.frameObservations.marker2Observations)
                         debugRow(title: "M3 observations", value: snapshot.frameObservations.marker3Observations)
                         debugRow(
-                            title: "Marker count mismatches",
-                            value: snapshot.frameObservations.markerCountMismatches
+                            title: "Incomplete expected pose sets",
+                            value: snapshot.frameObservations.incompleteExpectedPoseSets
+                        )
+                        debugRow(
+                            title: "Pose mapping mismatches",
+                            value: snapshot.frameObservations.poseMappingMismatches
                         )
                         debugRow(
                             title: "Point count mismatches",

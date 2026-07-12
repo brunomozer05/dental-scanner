@@ -72,7 +72,8 @@ struct FrameObservationDiagnosticsSnapshot: Equatable, Sendable {
     let framesWithAnyMarkerObservationCount: Int
     let framesWithExpectedMarkersObservationCount: Int
     let perMarkerFrameObservationCount: [Int: Int]
-    let frameObservationMarkerCountMismatchCount: Int
+    let frameObservationIncompleteExpectedPoseSetCount: Int
+    let frameObservationPoseMappingMismatchCount: Int
     let frameObservationPointCountMismatchCount: Int
     let frameObservationMissingIntrinsicsCount: Int
     let frameObservationNonFinitePoseCount: Int
@@ -91,7 +92,8 @@ final class FrameObservationRecorder {
     private var framesWithAnyMarkerCount = 0
     private var framesWithExpectedMarkersCount = 0
     private var perMarkerCount: [Int: Int] = [:]
-    private var markerCountMismatchCount = 0
+    private var incompleteExpectedPoseSetCount = 0
+    private var poseMappingMismatchCount = 0
     private var pointCountMismatchCount = 0
     private var missingIntrinsicsCount = 0
     private var nonFinitePoseCount = 0
@@ -103,7 +105,8 @@ final class FrameObservationRecorder {
     func append(
         _ sourceObservation: FrameObservation,
         sourceFrameIndex: Int,
-        expectedMarkerIds: [Int]
+        expectedMarkerIds: [Int],
+        poseInputMarkerIds: [Int]
     ) {
         lock.lock()
         defer { lock.unlock() }
@@ -136,8 +139,13 @@ final class FrameObservationRecorder {
            expectedMarkerIdSet.isSubset(of: observedMarkerIds) {
             framesWithExpectedMarkersCount += 1
         }
+        // Completeness: this frame's retained pose IDs versus the full configured expected set.
         if observedMarkerIds != expectedMarkerIdSet {
-            markerCountMismatchCount += 1
+            incompleteExpectedPoseSetCount += 1
+        }
+        // Structural mapping: exact identity, multiplicity, and order of accumulator pose inputs.
+        if poseInputMarkerIds != observation.markerObservations.map(\.markerId) {
+            poseMappingMismatchCount += 1
         }
         if !observation.intrinsicsAvailable {
             missingIntrinsicsCount += 1
@@ -165,7 +173,8 @@ final class FrameObservationRecorder {
         framesWithAnyMarkerCount = 0
         framesWithExpectedMarkersCount = 0
         perMarkerCount.removeAll(keepingCapacity: true)
-        markerCountMismatchCount = 0
+        incompleteExpectedPoseSetCount = 0
+        poseMappingMismatchCount = 0
         pointCountMismatchCount = 0
         missingIntrinsicsCount = 0
         nonFinitePoseCount = 0
@@ -191,7 +200,8 @@ final class FrameObservationRecorder {
             framesWithAnyMarkerObservationCount: framesWithAnyMarkerCount,
             framesWithExpectedMarkersObservationCount: framesWithExpectedMarkersCount,
             perMarkerFrameObservationCount: perMarkerCount,
-            frameObservationMarkerCountMismatchCount: markerCountMismatchCount,
+            frameObservationIncompleteExpectedPoseSetCount: incompleteExpectedPoseSetCount,
+            frameObservationPoseMappingMismatchCount: poseMappingMismatchCount,
             frameObservationPointCountMismatchCount: pointCountMismatchCount,
             frameObservationMissingIntrinsicsCount: missingIntrinsicsCount,
             frameObservationNonFinitePoseCount: nonFinitePoseCount

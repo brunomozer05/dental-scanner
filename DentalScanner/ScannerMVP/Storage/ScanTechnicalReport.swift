@@ -91,7 +91,8 @@ struct ScanTechnicalReport: Codable {
     var markerFrameObservationCountM1: Int?
     var markerFrameObservationCountM2: Int?
     var markerFrameObservationCountM3: Int?
-    var frameObservationMarkerCountMismatchCount: Int?
+    var frameObservationIncompleteExpectedPoseSetCount: Int?
+    var frameObservationPoseMappingMismatchCount: Int?
     var frameObservationPointCountMismatchCount: Int?
     var frameObservationMissingIntrinsicsCount: Int?
     var frameObservationNonFinitePoseCount: Int?

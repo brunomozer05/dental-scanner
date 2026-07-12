@@ -256,7 +256,8 @@ struct ScannerDebugSnapshot: Equatable {
         let marker1Observations: String
         let marker2Observations: String
         let marker3Observations: String
-        let markerCountMismatches: String
+        let incompleteExpectedPoseSets: String
+        let poseMappingMismatches: String
         let pointCountMismatches: String
         let missingIntrinsics: String
         let nonFinitePoses: String
@@ -591,8 +592,10 @@ extension ScannerViewModel {
                     "\(frameObservationDiagnostics.perMarkerFrameObservationCount[2, default: 0])",
                 marker3Observations:
                     "\(frameObservationDiagnostics.perMarkerFrameObservationCount[3, default: 0])",
-                markerCountMismatches:
-                    "\(frameObservationDiagnostics.frameObservationMarkerCountMismatchCount)",
+                incompleteExpectedPoseSets:
+                    "\(frameObservationDiagnostics.frameObservationIncompleteExpectedPoseSetCount)",
+                poseMappingMismatches:
+                    "\(frameObservationDiagnostics.frameObservationPoseMappingMismatchCount)",
                 pointCountMismatches:
                     "\(frameObservationDiagnostics.frameObservationPointCountMismatchCount)",
                 missingIntrinsics:

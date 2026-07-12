@@ -2708,11 +2708,12 @@ final class ScannerViewModel: ObservableObject {
         let shouldCollectScanFrame = scanStateForFrame.isCollectingFrames
         let shouldCollectStaticPoseFrame = staticPoseStabilityMode &&
             activeMarkerProfile == .dualArucoV2
+        let accumulatorInputPoseResults = poseMetrics.rawPoseResults
         let preAccumulationGateDecisions: [PreAccumulationObservationGateDecision]
         let fusedPoseResults: [PoseResult]
         if shouldCollectScanFrame {
             preAccumulationGateDecisions = makePreAccumulationObservationGateDecisions(
-                poseResults: poseMetrics.rawPoseResults,
+                poseResults: accumulatorInputPoseResults,
                 frame: frame,
                 frameIndex: metrics.totalFramesReceived,
                 timestamp: metrics.lastFrameTimestamp,
@@ -2726,10 +2727,31 @@ final class ScannerViewModel: ObservableObject {
                 decisions: preAccumulationGateDecisions
             )
 
+            let frameObservation = makeFrameObservation(
+                sourceFrameIndex: metrics.totalFramesReceived,
+                timestamp: metrics.lastFrameTimestamp,
+                frame: frame,
+                detections: arucoMetrics.detections,
+                poseResults: accumulatorInputPoseResults,
+                markerSizeMillimeters: markerSizeMillimeters,
+                markerProfile: activeMarkerProfile,
+                cameraProfile: activeCameraProfile,
+                dualMarkerDefinitions: dualMarkerDefinitions,
+                frameMaskDiagnostics: frameMaskDiagnostics,
+                motionQuality: motionQuality,
+                preAccumulationGateDecisions: preAccumulationGateDecisions
+            )
+            frameObservationRecorder.append(
+                frameObservation,
+                sourceFrameIndex: metrics.totalFramesReceived,
+                expectedMarkerIds: expectedMarkerIds,
+                poseInputMarkerIds: accumulatorInputPoseResults.map(\.markerId)
+            )
+
             // Shadow mode: every pose still reaches the unchanged primary accumulator.
-            fusedPoseResults = multiFramePoseAccumulator.update(with: poseMetrics.rawPoseResults)
+            fusedPoseResults = multiFramePoseAccumulator.update(with: accumulatorInputPoseResults)
             preAccumulationObservationGateRecorder.recordAccumulatorInputs(
-                markerIds: poseMetrics.rawPoseResults.map(\.markerId)
+                markerIds: accumulatorInputPoseResults.map(\.markerId)
             )
         } else {
             preAccumulationGateDecisions = []
@@ -2753,22 +2775,6 @@ final class ScannerViewModel: ObservableObject {
                 arKitQuality: arKitQuality
             )
             : []
-        let frameObservation = shouldCollectScanFrame
-            ? makeFrameObservation(
-                sourceFrameIndex: metrics.totalFramesReceived,
-                timestamp: metrics.lastFrameTimestamp,
-                frame: frame,
-                detections: arucoMetrics.detections,
-                poseResults: poseMetrics.rawPoseResults,
-                markerSizeMillimeters: markerSizeMillimeters,
-                markerProfile: activeMarkerProfile,
-                cameraProfile: activeCameraProfile,
-                dualMarkerDefinitions: dualMarkerDefinitions,
-                frameMaskDiagnostics: frameMaskDiagnostics,
-                motionQuality: motionQuality,
-                preAccumulationGateDecisions: preAccumulationGateDecisions
-            )
-            : nil
         let staticPoseObservations: [FinalPoseObservation]
         if shouldCollectStaticPoseFrame && shouldCollectScanFrame {
             staticPoseObservations = frameFinalPoseObservations
@@ -2877,13 +2883,6 @@ final class ScannerViewModel: ObservableObject {
             }
 
             if shouldCollectScanFrame && self.scanState.isCollectingFrames {
-                if let frameObservation {
-                    self.frameObservationRecorder.append(
-                        frameObservation,
-                        sourceFrameIndex: metrics.totalFramesReceived,
-                        expectedMarkerIds: expectedMarkerIds
-                    )
-                }
                 self.recordCameraFrameDiagnostics(
                     snapshot: frame.cameraDebugSnapshot,
                     quality: frame.cameraQuality
@@ -9939,8 +9938,10 @@ final class ScannerViewModel: ObservableObject {
             frameObservationDiagnostics.perMarkerFrameObservationCount[2, default: 0]
         snapshot.markerFrameObservationCountM3 =
             frameObservationDiagnostics.perMarkerFrameObservationCount[3, default: 0]
-        snapshot.frameObservationMarkerCountMismatchCount =
-            frameObservationDiagnostics.frameObservationMarkerCountMismatchCount
+        snapshot.frameObservationIncompleteExpectedPoseSetCount =
+            frameObservationDiagnostics.frameObservationIncompleteExpectedPoseSetCount
+        snapshot.frameObservationPoseMappingMismatchCount =
+            frameObservationDiagnostics.frameObservationPoseMappingMismatchCount
         snapshot.frameObservationPointCountMismatchCount =
             frameObservationDiagnostics.frameObservationPointCountMismatchCount
         snapshot.frameObservationMissingIntrinsicsCount =
@@ -11414,8 +11415,10 @@ final class ScannerViewModel: ObservableObject {
                 frameObservationDiagnostics.perMarkerFrameObservationCount[2, default: 0],
             markerFrameObservationCountM3:
                 frameObservationDiagnostics.perMarkerFrameObservationCount[3, default: 0],
-            frameObservationMarkerCountMismatchCount:
-                frameObservationDiagnostics.frameObservationMarkerCountMismatchCount,
+            frameObservationIncompleteExpectedPoseSetCount:
+                frameObservationDiagnostics.frameObservationIncompleteExpectedPoseSetCount,
+            frameObservationPoseMappingMismatchCount:
+                frameObservationDiagnostics.frameObservationPoseMappingMismatchCount,
             frameObservationPointCountMismatchCount:
                 frameObservationDiagnostics.frameObservationPointCountMismatchCount,
             frameObservationMissingIntrinsicsCount:

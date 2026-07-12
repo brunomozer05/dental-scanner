@@ -4,7 +4,7 @@
 
 Phase 1 diagnostics-only implemented on 2026-07-12.
 
-The bounded in-memory observation model, aggregate diagnostics, emergency debug summary, and session reset are implemented. The model remains read-only relative to the primary scan and export pipeline. Replay, pre-accumulation gating, and offline optimization are not implemented.
+The bounded in-memory observation model, aggregate diagnostics, emergency debug summary, and session reset are implemented. The model remains read-only relative to the primary scan and export pipeline. Pre-accumulation shadow annotations are implemented, while blocking, replay persistence, and offline optimization are not implemented.
 
 ## Goal
 
@@ -147,9 +147,29 @@ framesWithoutIntrinsicsCount
 invalidMarkerFrameObservationCount
 nonFiniteMarkerFrameObservationCount
 observationPointCountMismatchCount
+frameObservationIncompleteExpectedPoseSetCount
+frameObservationPoseMappingMismatchCount
 ```
 
 Diagnostics must be safe for empty buffers and missing values.
+
+`frameObservationIncompleteExpectedPoseSetCount` is a completeness diagnostic. It counts recorded frames whose retained per-frame pose marker ID set does not exactly match the complete configured expected marker ID set:
+
+```txt
+Set(markerObservations.markerId) != Set(expectedMarkerIds)
+```
+
+It is not a detection/pose count mismatch, point-count mismatch, corruption counter, or duplicate-marker counter.
+
+`frameObservationPoseMappingMismatchCount` is the structural recording diagnostic. It compares the ordered marker-ID sequence, including multiplicity, from the exact pose input array intended for the accumulator with the sequence in the resulting `MarkerFrameObservation` collection:
+
+```txt
+accumulatorInputPoseResults.map(markerId)
+!=
+frameObservation.markerObservations.map(markerId)
+```
+
+Missing expected markers alone do not increment the structural mapping counter.
 
 ## Implementation order
 
@@ -195,5 +215,6 @@ Implemented:
 - a thread-safe 600-frame buffer with oldest-first eviction;
 - aggregate consistency counters, diagnostics/report fields, and emergency debug rows;
 - reset with the primary scan-session reset.
+- authoritative `FrameObservation` recording from the exact accumulator input population before the accumulator update.
 
-The recorder is diagnostics-only. No primary pipeline component reads its buffer, and full observation persistence remains reserved for spec 18.
+The recorder is diagnostics-only. No primary pipeline component reads its buffer. The 600-frame in-memory buffer is a rolling diagnostics buffer, not an authoritative full-session replay store; full observation persistence remains reserved for spec 18.

@@ -88,9 +88,11 @@ If real sessions prove JSON too large or slow, a future binary encoding may be a
 
 Control size through data selection, not by silently dropping arbitrary fields.
 
+The current 600-frame `FrameObservationRecorder` buffer from spec 16 is a rolling diagnostics buffer only. It is not the authoritative full-session replay store. Spec 18 must introduce an explicit progressive or dedicated session-persistence path so replay completeness does not depend on the rolling buffer.
+
 - No full camera images by default.
 - No `CVPixelBuffer`, video, thumbnails, or external assets.
-- Reuse the bounded observation policy from spec 16.
+- Reuse the numeric-only observation model and explicit bounds from spec 16 without treating its rolling buffer as complete session history.
 - Record whether observations were evicted before serialization.
 - Define a maximum serialized session size and report truncation explicitly.
 - Optional compression may be evaluated later without changing replay semantics.
