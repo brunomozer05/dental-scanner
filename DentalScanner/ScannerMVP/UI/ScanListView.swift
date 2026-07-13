@@ -7,6 +7,7 @@ struct ScanListView: View {
     @State private var isSelectionModeActive = false
     @State private var selectedScanIDs: Set<ScanItem.ID> = []
     @State private var shareStatusText: String?
+    @State private var replayingScanID: ScanItem.ID?
 
     private let storageManager = ScanStorageManager()
     private let fileManager = FileManager.default
@@ -352,6 +353,45 @@ struct ScanListView: View {
         return sessionCaptureURL
     }
 
+    @MainActor
+    private func executeDiagnosticReplay(
+        for scan: ScanItem,
+        sessionCaptureURL: URL
+    ) {
+        guard replayingScanID == nil else {
+            return
+        }
+
+        replayingScanID = scan.id
+        shareStatusText = "Replay em andamento..."
+        let scanFileURL = scan.fileURL
+
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                do {
+                    let replayResult = try ScanSessionDeterministicReplayRunner()
+                        .verifyDeterminism(sessionFileURL: sessionCaptureURL)
+                    let outputURL = try ScanSessionReplaySummaryExporter.write(
+                        replayResult.summary,
+                        forScanFileURL: scanFileURL
+                    )
+                    return Result<URL, Error>.success(outputURL)
+                } catch {
+                    return Result<URL, Error>.failure(error)
+                }
+            }.value
+
+            replayingScanID = nil
+            switch result {
+            case let .success(outputURL):
+                shareStatusText = "Replay concluído"
+                shareFile(url: outputURL)
+            case let .failure(error):
+                shareStatusText = "Falha no replay: \(error.localizedDescription)"
+            }
+        }
+    }
+
     private func shareURLs(for scans: [ScanItem]) -> [URL] {
         let urls = scans.flatMap { scan -> [URL] in
             var scanURLs = [scan.fileURL]
@@ -493,6 +533,28 @@ struct ScanListView: View {
         } else {
             Button {} label: {
                 Label("Report indisponivel", systemImage: "doc.text")
+            }
+            .disabled(true)
+        }
+
+        if let sessionCaptureURL = sessionCaptureURLIfAvailable(for: scan) {
+            Button {
+                executeDiagnosticReplay(
+                    for: scan,
+                    sessionCaptureURL: sessionCaptureURL
+                )
+            } label: {
+                Label(
+                    replayingScanID == scan.id
+                        ? "Replay em andamento..."
+                        : "Executar replay diagnóstico",
+                    systemImage: "arrow.triangle.2.circlepath"
+                )
+            }
+            .disabled(replayingScanID != nil)
+        } else {
+            Button {} label: {
+                Label("Replay indisponível", systemImage: "arrow.triangle.2.circlepath")
             }
             .disabled(true)
         }

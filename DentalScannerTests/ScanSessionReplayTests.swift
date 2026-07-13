@@ -67,6 +67,39 @@ final class ScanSessionReplayTests: XCTestCase {
         )
     }
 
+    func testReplaySummaryExporterEncodesRunnerSummaryWithoutModifyingSession() throws {
+        let sessionURL = fixtureURL("valid_completed")
+        let sessionDataBeforeReplay = try Data(contentsOf: sessionURL)
+        let result = try ScanSessionDeterministicReplayRunner().verifyDeterminism(
+            sessionFileURL: sessionURL
+        )
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: temporaryDirectory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let scanURL = temporaryDirectory.appendingPathComponent("Scan_2026-07-12_20-49.stl")
+        let summaryURL = try ScanSessionReplaySummaryExporter.write(
+            result.summary,
+            forScanFileURL: scanURL
+        )
+
+        XCTAssertEqual(
+            summaryURL.lastPathComponent,
+            "Scan_2026-07-12_20-49_replay_summary.json"
+        )
+        let encodedSummary = try Data(contentsOf: summaryURL)
+        let decodedSummary = try JSONDecoder().decode(
+            ScanSessionDeterministicReplaySummary.self,
+            from: encodedSummary
+        )
+        XCTAssertEqual(decodedSummary, result.summary)
+        XCTAssertEqual(try Data(contentsOf: sessionURL), sessionDataBeforeReplay)
+    }
+
     func testUnsupportedSchemaIsRejected() {
         assertReplayError("unsupported_schema") { error in
             guard case .unsupportedSchemaVersion(_, 2) = error else { return false }

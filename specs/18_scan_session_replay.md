@@ -2,7 +2,7 @@
 
 ## Status
 
-Phase 18A full-session progressive observation capture and Phase 18B deterministic current-accumulator replay foundation implemented on 2026-07-12.
+Phase 18A full-session progressive observation capture and Phase 18B deterministic current-accumulator replay foundation implemented on 2026-07-12. A diagnostics-only saved-scan action can execute the existing replay runner off the main thread and export its existing Codable summary as `*_replay_summary.json`.
 
 Pre-gate OFF/ON replay, comparator integration, and offline optimizer integration remain pending. Capture and replay are diagnostic/offline infrastructure and do not create a new production scan pipeline.
 
@@ -233,9 +233,10 @@ CLI and comparator implementation are follow-up work. This spec does not authori
 1. **Implemented:** schema-1 progressive NDJSON capture behind `enableScanSessionObservationCapture = true` for the experimental development phase.
 2. **Implemented:** committed synthetic schema fixtures, streaming reader validation, exact `PoseResult` reconstruction, and current-accumulator replay.
 3. **Implemented:** fresh Replay A/Replay B execution and geometric determinism summary.
-4. Add broader old-schema compatibility only when a second supported schema exists; unknown schemas already fail explicitly.
-5. Add gate A/B replay only in its follow-up phase.
-6. Add comparator and offline optimizer consumers only in their own phases.
+4. **Implemented:** diagnostics-only on-device execution for a saved scan with an associated session capture, including JSON summary export/share. Physical-session execution and inspection remain an operator validation step.
+5. Add broader old-schema compatibility only when a second supported schema exists; unknown schemas already fail explicitly.
+6. Add gate A/B replay only in its follow-up phase.
+7. Add comparator and offline optimizer consumers only in their own phases.
 
 ## Acceptance criteria
 
