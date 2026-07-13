@@ -7,3 +7,4 @@ ThirdParty/OpenCV/opencv2.xcframework/**/*.plist -filter -diff -merge text
 *.xcframework/**/*.xcprivacy -filter -diff -merge text
 *.framework/**/*.xcprivacy -filter -diff -merge text
 ThirdParty/OpenCV/opencv2.xcframework/**/*.xcprivacy -filter -diff -merge text
+DentalScannerTests/Fixtures/*.ndjson -text

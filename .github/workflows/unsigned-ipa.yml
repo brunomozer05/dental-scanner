@@ -47,6 +47,34 @@ jobs:
           mise exec tuist -- tuist fetch
           mise exec tuist -- tuist generate
 
+      - name: Run unit tests
+        run: |
+          set -euo pipefail
+
+          simulator_id="$(
+            xcrun simctl list devices available -j |
+              python3 -c '
+          import json, sys
+          payload = json.load(sys.stdin)
+          for runtime, devices in sorted(payload["devices"].items(), reverse=True):
+              if "iOS" not in runtime:
+                  continue
+              for device in devices:
+                  if device.get("isAvailable") and device.get("name", "").startswith("iPhone"):
+                      print(device["udid"])
+                      raise SystemExit(0)
+          raise SystemExit("No available iPhone simulator")
+          '
+          )"
+
+          xcodebuild \
+            -workspace DentalScanner.xcworkspace \
+            -scheme DentalScannerTests \
+            -configuration Debug \
+            -destination "id=${simulator_id}" \
+            -derivedDataPath build-tests \
+            test
+
       - name: Build app for iphoneos
         run: |
           xcodebuild \

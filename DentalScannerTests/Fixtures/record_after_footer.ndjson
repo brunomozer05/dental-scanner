@@ -1,0 +1,3 @@
+{"recordType":"sessionHeader","schemaVersion":1,"sessionIdentifier":"AFTER-FOOTER","captureStartedTimestamp":1.0,"deviceModelIdentifier":"test","osVersion":"test","cameraProfileId":"p","cameraProfileName":"P","markerProfile":"singleArucoV1","expectedPhysicalMarkerIds":[],"featureFlags":{}}
+{"recordType":"sessionFooter","schemaVersion":1,"completed":true,"captureEndedTimestamp":2.0,"framesEnqueued":0,"framesWritten":0,"frameWriteFailureCount":0,"frameOrderViolationCount":0,"limitReached":false,"fileSizeBytes":0}
+{"recordType":"frameObservation","schemaVersion":1}

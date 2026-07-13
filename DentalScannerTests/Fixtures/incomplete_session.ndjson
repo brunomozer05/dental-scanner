@@ -1,0 +1,2 @@
+{"recordType":"sessionHeader","schemaVersion":1,"sessionIdentifier":"INCOMPLETE","captureStartedTimestamp":1.0,"deviceModelIdentifier":"test","osVersion":"test","cameraProfileId":"p","cameraProfileName":"P","markerProfile":"singleArucoV1","expectedPhysicalMarkerIds":[],"featureFlags":{}}
+{"recordType":"sessionFooter","schemaVersion":1,"completed":false,"captureEndedTimestamp":2.0,"framesEnqueued":0,"framesWritten":0,"frameWriteFailureCount":0,"frameOrderViolationCount":0,"limitReached":false,"fileSizeBytes":518}

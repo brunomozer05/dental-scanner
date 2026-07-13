@@ -1,0 +1,3 @@
+{"recordType":"sessionHeader","schemaVersion":1,"sessionIdentifier":"DUPLICATE-FRAME","captureStartedTimestamp":1.0,"deviceModelIdentifier":"test","osVersion":"test","cameraProfileId":"p","cameraProfileName":"P","markerProfile":"singleArucoV1","expectedPhysicalMarkerIds":[0],"featureFlags":{}}
+{"recordType":"frameObservation","schemaVersion":1,"frame":{"frameIndex":0,"timestampSeconds":1.1,"frameWidth":1,"frameHeight":1,"intrinsicsAvailable":false,"cameraProfileId":"p","cameraProfileName":"P","markerObservations":[]}}
+{"recordType":"frameObservation","schemaVersion":1,"frame":{"frameIndex":0,"timestampSeconds":1.2,"frameWidth":1,"frameHeight":1,"intrinsicsAvailable":false,"cameraProfileId":"p","cameraProfileName":"P","markerObservations":[]}}

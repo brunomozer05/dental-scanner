@@ -2,9 +2,9 @@
 
 ## Status
 
-Phase 18A full-session progressive observation capture implemented on 2026-07-12.
+Phase 18A full-session progressive observation capture and Phase 18B deterministic current-accumulator replay foundation implemented on 2026-07-12.
 
-The deterministic replay reader, accumulator replay, gate A/B replay, comparator integration, and offline optimizer integration remain pending. The capture artifact is diagnostic and does not create a new production scan pipeline.
+Pre-gate OFF/ON replay, comparator integration, and offline optimizer integration remain pending. Capture and replay are diagnostic/offline infrastructure and do not create a new production scan pipeline.
 
 ## Goal
 
@@ -120,6 +120,39 @@ Phase 18A records the complete numeric `PoseResult` inputs currently consumed by
 
 The remaining provenance caveat is that `appGitCommitHash` is optional until build tooling injects reliable commit metadata. A replay reader must report that gap and must not substitute the Git HEAD of the machine running the reader.
 
+## Phase 18B reader and current-accumulator replay
+
+Phase 18B provides a streaming schema-1 NDJSON reader. It reads bounded chunks, decodes one non-empty line at a time, preserves physical file order, and never sorts frames or marker observations.
+
+The default deterministic path requires:
+
+- one supported schema-1 header as the first non-empty record;
+- strictly increasing frame indices;
+- finite available capture timestamps preserved in file order (timestamps are not used as a second ordering key);
+- one footer as the last non-empty record;
+- `completed = true`;
+- footer frame counts matching decoded records;
+- zero writer failures and order violations;
+- no file-size-limit truncation;
+- footer `fileSizeBytes` matching the artifact.
+
+Incomplete captures may be opened only through an explicit diagnostic option. Integrity errors throw and never return a partial replay result.
+
+Each marker observation is reconstructed into `PoseResult` using persisted values only. The persisted three `rotationMatrixRows` are shape-checked, finite-checked, and passed explicitly to the `PoseResult` initializer. The replay path does not call PnP, Rodrigues conversion, image-point pose estimation, or current device/camera APIs.
+
+The runner opens the file twice. Each pass creates a fresh reader and fresh `MultiFramePoseAccumulator(scannerDefault)`, then calls `update(with:)` exactly once per frame record, including frames with an empty pose array. There is no random input in the current accumulator.
+
+Replay A and Replay B final poses are compared by marker using translation distance and the angular magnitude of the relative rotation matrix. Determinism tolerances are:
+
+```txt
+translation: 1e-9 mm
+rotation: 1e-9 degrees
+```
+
+The machine-readable replay summary records provenance, counts, final marker/pose summaries, per-marker A/B deltas, aggregate deltas, tolerances, and `replayDeterministic`.
+
+Schema 1 does not persist the exact final live `MultiFramePoseAccumulator` state. Downstream export/final-refinement poses are not semantically equivalent, so direct live-vs-replay comparison remains unavailable.
+
 ## Capture lifecycle — Phase 18A
 
 ```txt
@@ -198,9 +231,9 @@ CLI and comparator implementation are follow-up work. This spec does not authori
 ## Implementation order
 
 1. **Implemented:** schema-1 progressive NDJSON capture behind `enableScanSessionObservationCapture = true` for the experimental development phase.
-2. Add committed synthetic schema fixtures and reader validation.
-3. Add old-schema compatibility and unknown-schema rejection tests.
-4. Replay the current accumulator and verify deterministic input ordering/output.
+2. **Implemented:** committed synthetic schema fixtures, streaming reader validation, exact `PoseResult` reconstruction, and current-accumulator replay.
+3. **Implemented:** fresh Replay A/Replay B execution and geometric determinism summary.
+4. Add broader old-schema compatibility only when a second supported schema exists; unknown schemas already fail explicitly.
 5. Add gate A/B replay only in its follow-up phase.
 6. Add comparator and offline optimizer consumers only in their own phases.
 
@@ -210,7 +243,7 @@ CLI and comparator implementation are follow-up work. This spec does not authori
 - Frame and marker observations preserve ownership and coordinate conventions.
 - Full camera images are absent by default.
 - File size is bounded and truncation/eviction is reported.
-- Pending reader phase: the same session produces deterministic replay results within documented tolerance.
+- The same valid session can be replayed twice from fresh state and compared within documented tolerance.
 - Older supported schemas remain readable.
 - Unknown schemas fail clearly.
 - No credentials, private URLs, local paths, or external proprietary material are stored.

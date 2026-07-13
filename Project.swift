@@ -90,6 +90,16 @@ let project = Project(
                 "DentalScanner/Models/**/*.stl"
             ],
             dependencies: OpenCV.dependencies
+        ),
+        Target(
+            name: "DentalScannerTests",
+            destinations: [.iPhone],
+            product: Product.unitTests,
+            bundleId: "com.dentalscanner.mvp.tests",
+            deploymentTargets: DeploymentTargets.iOS("17.0"),
+            sources: ["DentalScannerTests/**/*.swift"],
+            resources: ["DentalScannerTests/Fixtures/**"],
+            dependencies: [.target(name: "DentalScanner")]
         )
     ]
 )

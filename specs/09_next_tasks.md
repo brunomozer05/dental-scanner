@@ -217,7 +217,7 @@ that 4K frames arrive but detection or pose acceptance fails.
 
 ## Roadmap arquitetural — observações e otimização multi-frame
 
-As próximas fundações arquiteturais devem ser executadas em commits separados e na ordem abaixo. A primeira fase diagnostics-only da Phase A, o shadow diagnostics da Phase B e a captura progressiva Phase 18A da Phase C estão implementados; blocking da Phase B, reader/replay da Phase C e a Phase D permanecem não implementados.
+As próximas fundações arquiteturais devem ser executadas em commits separados e na ordem abaixo. A primeira fase diagnostics-only da Phase A, o shadow diagnostics da Phase B e as fases 18A/18B da Phase C estão implementados; blocking/A-B da Phase B e a Phase D permanecem não implementados.
 
 ### Phase A — Spec 16
 
@@ -261,7 +261,7 @@ Status: shadow diagnostics implementado em 2026-07-12. O gate avalia antes do ac
 
 Persistir somente geometria e quality metadata suficientes para replay determinístico. Não salvar frames completos por padrão e não alterar o comparador Python nesta fase.
 
-Status: Phase 18A de captura progressiva full-session implementada em 2026-07-12. O mesmo `FrameObservation` autoritativo registrado antes do accumulator é persistido em NDJSON schema 1 por uma fila serial, separado do buffer circular de 600 frames. Reader determinístico, replay do accumulator, gate A/B, integração com comparador e optimizer continuam pendentes.
+Status: Phase 18A de captura progressiva full-session e Phase 18B de reader/replay determinístico do accumulator atual implementadas em 2026-07-12. O replay usa uma nova instância do accumulator por passe, preserva ordem e matriz persistida, e compara Replay A/B geometricamente. Gate OFF/ON replay, integração com comparador e optimizer continuam pendentes.
 
 ### Phase D — Spec 19
 
