@@ -69,7 +69,7 @@ jobs:
 
           xcodebuild \
             -workspace DentalScanner.xcworkspace \
-            -scheme DentalScannerTests \
+            -scheme DentalScanner \
             -configuration Debug \
             -destination "id=${simulator_id}" \
             -derivedDataPath build-tests \
