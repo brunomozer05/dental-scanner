@@ -34,11 +34,11 @@ final class ScanSessionReplayTests: XCTestCase {
     }
 
     func testReplayTwiceUsesFreshAccumulatorsAndIsDeterministic() throws {
-        var accumulatorIdentifiers: [ObjectIdentifier] = []
+        var accumulators: [MultiFramePoseAccumulator] = []
         let runner = ScanSessionDeterministicReplayRunner(
             accumulatorFactory: {
                 let accumulator = MultiFramePoseAccumulator()
-                accumulatorIdentifiers.append(ObjectIdentifier(accumulator))
+                accumulators.append(accumulator)
                 return accumulator
             }
         )
@@ -47,8 +47,8 @@ final class ScanSessionReplayTests: XCTestCase {
             sessionFileURL: fixtureURL("valid_completed")
         )
 
-        XCTAssertEqual(accumulatorIdentifiers.count, 2)
-        XCTAssertNotEqual(accumulatorIdentifiers[0], accumulatorIdentifiers[1])
+        XCTAssertEqual(accumulators.count, 2)
+        XCTAssertFalse(accumulators[0] === accumulators[1])
         XCTAssertEqual(result.summary.framesReplayed, 3)
         XCTAssertEqual(result.summary.markerObservationsReconstructed, 6)
         XCTAssertEqual(result.summary.finalMarkerIds, [0, 1])
