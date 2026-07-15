@@ -7,6 +7,11 @@ struct ScanSessionReplayOptions: Equatable, Sendable {
     static let deterministic = ScanSessionReplayOptions(requireCompletedSession: true)
 }
 
+enum ScanSessionReplayObservationPolicy: String, Codable, Equatable, Sendable {
+    case allPersisted
+    case preAccumulationGateAcceptedOnly
+}
+
 enum ScanSessionReplayError: Error, Equatable, LocalizedError {
     case unableToOpenFile(String)
     case lineTooLong(line: Int, maximumBytes: Int)
@@ -25,6 +30,7 @@ enum ScanSessionReplayError: Error, Equatable, LocalizedError {
     case nonIncreasingFrameIndex(line: Int, previous: Int, current: Int)
     case invalidFrame(line: Int, frameIndex: Int?, reason: String)
     case invalidPose(line: Int, frameIndex: Int, markerPosition: Int, reason: String)
+    case missingGateAnnotation(line: Int, frameIndex: Int, markerId: Int, reason: String)
     case incompleteSession
     case invalidFooter(reason: String)
     case replayPassMetadataMismatch
@@ -65,6 +71,8 @@ enum ScanSessionReplayError: Error, Equatable, LocalizedError {
             return "Invalid frameObservation at line \(line), frame \(frameIndex.map(String.init) ?? "unknown"): \(reason)"
         case let .invalidPose(line, frameIndex, markerPosition, reason):
             return "Invalid pose at line \(line), frame \(frameIndex), marker position \(markerPosition): \(reason)"
+        case let .missingGateAnnotation(line, frameIndex, markerId, reason):
+            return "Missing Pre-Accumulation Gate annotation at line \(line), frame \(frameIndex), marker \(markerId): \(reason)"
         case .incompleteSession:
             return "Deterministic replay requires sessionFooter.completed = true."
         case .invalidFooter(let reason):
@@ -73,6 +81,32 @@ enum ScanSessionReplayError: Error, Equatable, LocalizedError {
             return "Replay A and Replay B read different session metadata."
         }
     }
+}
+
+struct ScanSessionReplayMarkerSelectionDiagnostics: Codable, Equatable, Sendable {
+    let markerId: Int
+    let rawCount: Int
+    let acceptedCount: Int
+    let rejectedCount: Int
+    let acceptRatio: Double
+    let rejectRatio: Double
+}
+
+struct ScanSessionReplaySelectionDiagnostics: Codable, Equatable, Sendable {
+    let replayPolicy: String
+    let framesRead: Int
+    let rawMarkerObservationCount: Int
+    let acceptedMarkerObservationCount: Int
+    let rejectedMarkerObservationCount: Int
+    let framesWithAnyRawObservation: Int
+    let framesWithAnyAcceptedObservation: Int
+    let framesWithZeroAcceptedObservations: Int
+    let perMarker: [ScanSessionReplayMarkerSelectionDiagnostics]
+    let rejectReasonCounts: [String: Int]
+    let missingGateEvaluationCount: Int
+    let missingGateDecisionCount: Int
+    let rejectedWithoutReasonCount: Int
+    let unrecognizedRejectReasonCount: Int
 }
 
 struct ScanSessionReplayCaptureMetadata: Codable, Equatable, Sendable {
@@ -100,6 +134,7 @@ struct ScanSessionReplayReadSummary: Equatable, Sendable {
     let firstTimestampSeconds: Double?
     let lastTimestampSeconds: Double?
     let footerCompleted: Bool
+    let selectionDiagnostics: ScanSessionReplaySelectionDiagnostics
 }
 
 struct ScanSessionReplayFrameInput {
@@ -168,6 +203,7 @@ struct ScanSessionDeterministicReplayResult {
     let summary: ScanSessionDeterministicReplaySummary
     let replayAFinalPoses: [PoseResult]
     let replayBFinalPoses: [PoseResult]
+    let readSummary: ScanSessionReplayReadSummary
 }
 
 final class ScanSessionSchemaV1Reader {
@@ -231,6 +267,7 @@ final class ScanSessionSchemaV1Reader {
     func read(
         from fileURL: URL,
         options: ScanSessionReplayOptions = .deterministic,
+        observationPolicy: ScanSessionReplayObservationPolicy = .allPersisted,
         onFrame: (ScanSessionReplayFrameInput) throws -> Void
     ) throws -> ScanSessionReplayReadSummary {
         var header: HeaderRecord?
@@ -242,6 +279,22 @@ final class ScanSessionSchemaV1Reader {
         var lastFrameIndex: Int?
         var firstTimestamp: Double?
         var lastTimestamp: Double?
+        var rawMarkerObservationCount = 0
+        var acceptedMarkerObservationCount = 0
+        var rejectedMarkerObservationCount = 0
+        var framesWithAnyRawObservation = 0
+        var framesWithAnyAcceptedObservation = 0
+        var framesWithZeroAcceptedObservations = 0
+        var markerSelectionCounts: [Int: SelectionCounts] = [:]
+        var rejectReasonCounts = Dictionary(
+            uniqueKeysWithValues: PreAccumulationObservationRejectReason.allCases.map {
+                ($0.rawValue, 0)
+            }
+        )
+        var missingGateEvaluationCount = 0
+        var missingGateDecisionCount = 0
+        var rejectedWithoutReasonCount = 0
+        var unrecognizedRejectReasonCount = 0
 
         try forEachNonEmptyLine(in: fileURL) { [self] lineData, lineNumber in
             let envelope: Envelope
@@ -310,7 +363,70 @@ final class ScanSessionSchemaV1Reader {
                     )
                 }
 
-                let poseResults = try frame.markerObservations.enumerated().map {
+                if !frame.markerObservations.isEmpty {
+                    framesWithAnyRawObservation += 1
+                }
+                var selectedObservations: [(offset: Int, element: MarkerFrameObservation)] = []
+                var acceptedInFrame = 0
+                for (offset, observation) in frame.markerObservations.enumerated() {
+                    rawMarkerObservationCount += 1
+                    var counts = markerSelectionCounts[observation.markerId] ?? SelectionCounts()
+                    counts.raw += 1
+
+                    let gateEvaluated = observation.preAccumulationGateEvaluated == true
+                    let gateDecision = observation.preAccumulationGateWouldAccept
+                    if !gateEvaluated {
+                        missingGateEvaluationCount += 1
+                        if observationPolicy == .preAccumulationGateAcceptedOnly {
+                            throw ScanSessionReplayError.missingGateAnnotation(
+                                line: lineNumber,
+                                frameIndex: frame.frameIndex,
+                                markerId: observation.markerId,
+                                reason: "preAccumulationGateEvaluated is not true"
+                            )
+                        }
+                    } else if let gateDecision {
+                        if gateDecision {
+                            acceptedMarkerObservationCount += 1
+                            acceptedInFrame += 1
+                            counts.accepted += 1
+                        } else {
+                            rejectedMarkerObservationCount += 1
+                            counts.rejected += 1
+                            if let reason = observation.preAccumulationGateRejectReason {
+                                if PreAccumulationObservationRejectReason(rawValue: reason) != nil {
+                                    rejectReasonCounts[reason, default: 0] += 1
+                                } else {
+                                    unrecognizedRejectReasonCount += 1
+                                }
+                            } else {
+                                rejectedWithoutReasonCount += 1
+                            }
+                        }
+                    } else {
+                        missingGateDecisionCount += 1
+                        if observationPolicy == .preAccumulationGateAcceptedOnly {
+                            throw ScanSessionReplayError.missingGateAnnotation(
+                                line: lineNumber,
+                                frameIndex: frame.frameIndex,
+                                markerId: observation.markerId,
+                                reason: "preAccumulationGateWouldAccept is missing"
+                            )
+                        }
+                    }
+                    markerSelectionCounts[observation.markerId] = counts
+
+                    if observationPolicy == .allPersisted || gateDecision == true {
+                        selectedObservations.append((offset, observation))
+                    }
+                }
+                if acceptedInFrame > 0 {
+                    framesWithAnyAcceptedObservation += 1
+                } else {
+                    framesWithZeroAcceptedObservations += 1
+                }
+
+                let poseResults = try selectedObservations.map {
                     try reconstructPoseResult(
                         from: $0.element,
                         headerMarkerProfile: header.markerProfile,
@@ -374,6 +490,34 @@ final class ScanSessionSchemaV1Reader {
             appBuildIdentifier: header.appBuildIdentifier,
             appGitCommitHash: header.appGitCommitHash
         )
+        let perMarker = markerSelectionCounts.keys.sorted().map { markerId in
+            let counts = markerSelectionCounts[markerId] ?? SelectionCounts()
+            let denominator = Double(max(counts.raw, 1))
+            return ScanSessionReplayMarkerSelectionDiagnostics(
+                markerId: markerId,
+                rawCount: counts.raw,
+                acceptedCount: counts.accepted,
+                rejectedCount: counts.rejected,
+                acceptRatio: Double(counts.accepted) / denominator,
+                rejectRatio: Double(counts.rejected) / denominator
+            )
+        }
+        let selectionDiagnostics = ScanSessionReplaySelectionDiagnostics(
+            replayPolicy: observationPolicy.rawValue,
+            framesRead: framesRead,
+            rawMarkerObservationCount: rawMarkerObservationCount,
+            acceptedMarkerObservationCount: acceptedMarkerObservationCount,
+            rejectedMarkerObservationCount: rejectedMarkerObservationCount,
+            framesWithAnyRawObservation: framesWithAnyRawObservation,
+            framesWithAnyAcceptedObservation: framesWithAnyAcceptedObservation,
+            framesWithZeroAcceptedObservations: framesWithZeroAcceptedObservations,
+            perMarker: perMarker,
+            rejectReasonCounts: rejectReasonCounts,
+            missingGateEvaluationCount: missingGateEvaluationCount,
+            missingGateDecisionCount: missingGateDecisionCount,
+            rejectedWithoutReasonCount: rejectedWithoutReasonCount,
+            unrecognizedRejectReasonCount: unrecognizedRejectReasonCount
+        )
         return ScanSessionReplayReadSummary(
             metadata: metadata,
             framesRead: framesRead,
@@ -382,8 +526,15 @@ final class ScanSessionSchemaV1Reader {
             lastFrameIndex: lastFrameIndex,
             firstTimestampSeconds: firstTimestamp,
             lastTimestampSeconds: lastTimestamp,
-            footerCompleted: footer.completed
+            footerCompleted: footer.completed,
+            selectionDiagnostics: selectionDiagnostics
         )
+    }
+
+    private struct SelectionCounts {
+        var raw = 0
+        var accepted = 0
+        var rejected = 0
     }
 
     private func decode<T: Decodable>(
@@ -640,10 +791,19 @@ final class ScanSessionDeterministicReplayRunner {
 
     func verifyDeterminism(
         sessionFileURL: URL,
-        options: ScanSessionReplayOptions = .deterministic
+        options: ScanSessionReplayOptions = .deterministic,
+        observationPolicy: ScanSessionReplayObservationPolicy = .allPersisted
     ) throws -> ScanSessionDeterministicReplayResult {
-        let replayA = try replayOnce(sessionFileURL: sessionFileURL, options: options)
-        let replayB = try replayOnce(sessionFileURL: sessionFileURL, options: options)
+        let replayA = try replayOnce(
+            sessionFileURL: sessionFileURL,
+            options: options,
+            observationPolicy: observationPolicy
+        )
+        let replayB = try replayOnce(
+            sessionFileURL: sessionFileURL,
+            options: options,
+            observationPolicy: observationPolicy
+        )
         guard replayA.readSummary == replayB.readSummary else {
             throw ScanSessionReplayError.replayPassMetadataMismatch
         }
@@ -687,18 +847,24 @@ final class ScanSessionDeterministicReplayRunner {
         return ScanSessionDeterministicReplayResult(
             summary: summary,
             replayAFinalPoses: replayA.finalPoses,
-            replayBFinalPoses: replayB.finalPoses
+            replayBFinalPoses: replayB.finalPoses,
+            readSummary: replayA.readSummary
         )
     }
 
     private func replayOnce(
         sessionFileURL: URL,
-        options: ScanSessionReplayOptions
+        options: ScanSessionReplayOptions,
+        observationPolicy: ScanSessionReplayObservationPolicy
     ) throws -> ReplayPassResult {
         let reader = readerFactory()
         let accumulator = accumulatorFactory()
         var finalPoses: [PoseResult] = []
-        let readSummary = try reader.read(from: sessionFileURL, options: options) { frame in
+        let readSummary = try reader.read(
+            from: sessionFileURL,
+            options: options,
+            observationPolicy: observationPolicy
+        ) { frame in
             finalPoses = accumulator.update(with: frame.poseResults)
         }
         return ReplayPassResult(readSummary: readSummary, finalPoses: finalPoses)

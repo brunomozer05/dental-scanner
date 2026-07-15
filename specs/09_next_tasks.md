@@ -253,7 +253,7 @@ gate ON
 
 Diversidade angular não entra no primeiro commit dessa fase.
 
-Status: shadow diagnostics implementado em 2026-07-12. O gate avalia antes do accumulator e registra decisões/ comparação pareada, mas blocking permanece desligado e o A/B comportamental gate OFF versus gate ON continua pendente.
+Status: shadow diagnostics implementado em 2026-07-12. O gate avalia antes do accumulator e registra decisões/comparação pareada. O replay offline ALL versus decisões persistidas `wouldAccept` foi implementado, mas blocking ao vivo permanece desligado e sua validação física continua pendente.
 
 ### Phase C — Spec 18
 
@@ -261,7 +261,7 @@ Status: shadow diagnostics implementado em 2026-07-12. O gate avalia antes do ac
 
 Persistir somente geometria e quality metadata suficientes para replay determinístico. Não salvar frames completos por padrão e não alterar o comparador Python nesta fase.
 
-Status: Phase 18A de captura progressiva full-session e Phase 18B de reader/replay determinístico do accumulator atual implementadas em 2026-07-12. O replay usa uma nova instância do accumulator por passe, preserva ordem e matriz persistida, e compara Replay A/B geometricamente. Gate OFF/ON replay, integração com comparador e optimizer continuam pendentes.
+Status: Phase 18A de captura progressiva full-session, Phase 18B de reader/replay determinístico e replay diagnóstico ALL versus Pre-Gate aceito persistido implementados. Cada modo prova determinismo com accumulators novos; a comparação entre modos usa geometria relativa por pares. Validação física, integração com comparador e optimizer continuam pendentes.
 
 ### Phase D — Spec 19
 

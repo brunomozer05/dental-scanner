@@ -193,10 +193,10 @@ Implemented:
 - paired comparison with the existing experimental gate using `frameIndex + markerId`;
 - optional decision fields in `MarkerFrameObservation`;
 - aggregate diagnostics/report fields and emergency debug rows.
+- deterministic offline ALL versus persisted `wouldAccept` replay from spec 18, without re-evaluating gate criteria.
 
 Still pending:
 
 - blocking accumulator input;
-- gate OFF versus gate ON behavioral A/B;
-- deterministic replay validation from spec 18;
+- physical gate OFF versus simulated gate-accepted A/B validation;
 - any default change.

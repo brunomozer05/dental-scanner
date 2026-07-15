@@ -2,9 +2,9 @@
 
 ## Status
 
-Phase 18A full-session progressive observation capture and Phase 18B deterministic current-accumulator replay foundation implemented on 2026-07-12. A diagnostics-only saved-scan action can execute the existing replay runner off the main thread and export its existing Codable summary as `*_replay_summary.json`.
+Phase 18A full-session progressive observation capture, Phase 18B deterministic current-accumulator replay, and diagnostics-only persisted Pre-Gate ALL/FILTERED A/B replay are implemented. Saved-scan actions execute replay off the main thread and export Codable JSON summaries.
 
-Pre-gate OFF/ON replay, comparator integration, and offline optimizer integration remain pending. Capture and replay are diagnostic/offline infrastructure and do not create a new production scan pipeline.
+Physical Pre-Gate A/B validation, any live blocking decision, comparator integration, and offline optimizer integration remain pending. Capture and replay are diagnostic/offline infrastructure and do not create a new production scan pipeline.
 
 ## Goal
 
@@ -153,6 +153,35 @@ The machine-readable replay summary records provenance, counts, final marker/pos
 
 Schema 1 does not persist the exact final live `MultiFramePoseAccumulator` state. Downstream export/final-refinement poses are not semantically equivalent, so direct live-vs-replay comparison remains unavailable.
 
+## Persisted Pre-Accumulation Gate A/B replay
+
+The diagnostics-only A/B runner executes four fresh accumulator passes over the same schema-1 session:
+
+```txt
+ALL-A / ALL-B
+  all persisted marker observations
+
+FILTERED-A / FILTERED-B
+  only observations with persisted
+  preAccumulationGateEvaluated == true and
+  preAccumulationGateWouldAccept == true
+```
+
+The filtered policy never calls the gate implementation again and never reconstructs thresholds from historical quality metadata. A missing evaluation or missing accept/reject decision fails filtered replay with frame and marker identity. A persisted rejection without a reject reason remains replayable but is reported as an annotation-integrity inconsistency.
+
+Every persisted frame produces one accumulator update in both policies, including `update(with: [])` when a filtered frame has no accepted observations. Marker order among retained observations remains physical file order.
+
+ALL and FILTERED determinism are verified independently. Their primary geometry comparison is not the raw globally anchored pose delta. For each common unordered marker pair `(A, B)`, replay computes:
+
+```txt
+R_AB = transpose(R_A) * R_B
+t_AB = transpose(R_A) * (t_B - t_A)
+```
+
+It compares pair distance and relative rotation between modes. This cancels each result's global/anchor frame. An identity pose for the accumulator anchor, including M0 when selected as anchor, is not evidence that marker quality improved or remained unchanged.
+
+The A/B summary records global/per-marker selection counts, persisted reject-reason counts, annotation inconsistencies, independent determinism summaries, both final pose sets, pairwise relative geometry, capture provenance, and the captured live blocking flag. It emits measurements only and no better/worse verdict.
+
 ## Capture lifecycle — Phase 18A
 
 ```txt
@@ -235,8 +264,9 @@ CLI and comparator implementation are follow-up work. This spec does not authori
 3. **Implemented:** fresh Replay A/Replay B execution and geometric determinism summary.
 4. **Implemented:** diagnostics-only on-device execution for a saved scan with an associated session capture, including JSON summary export/share. Physical-session execution and inspection remain an operator validation step.
 5. Add broader old-schema compatibility only when a second supported schema exists; unknown schemas already fail explicitly.
-6. Add gate A/B replay only in its follow-up phase.
-7. Add comparator and offline optimizer consumers only in their own phases.
+6. **Implemented:** persisted Pre-Gate ALL versus accepted-only A/B replay with independent determinism checks, pairwise relative geometry, and on-device JSON export.
+7. Perform physical A/B validation before any live blocking decision.
+8. Add comparator and offline optimizer consumers only in their own phases.
 
 ## Acceptance criteria
 

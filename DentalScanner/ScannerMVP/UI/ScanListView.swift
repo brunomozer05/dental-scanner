@@ -392,6 +392,45 @@ struct ScanListView: View {
         }
     }
 
+    @MainActor
+    private func executePreAccumulationGateABReplay(
+        for scan: ScanItem,
+        sessionCaptureURL: URL
+    ) {
+        guard replayingScanID == nil else {
+            return
+        }
+
+        replayingScanID = scan.id
+        shareStatusText = "Replay A/B em andamento..."
+        let scanFileURL = scan.fileURL
+
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                do {
+                    let replayResult = try ScanSessionPreAccumulationGateABReplayRunner()
+                        .run(sessionFileURL: sessionCaptureURL)
+                    let outputURL = try ScanSessionReplaySummaryExporter.write(
+                        replayResult.summary,
+                        forScanFileURL: scanFileURL
+                    )
+                    return Result<URL, Error>.success(outputURL)
+                } catch {
+                    return Result<URL, Error>.failure(error)
+                }
+            }.value
+
+            replayingScanID = nil
+            switch result {
+            case let .success(outputURL):
+                shareStatusText = "Replay A/B concluído"
+                shareFile(url: outputURL)
+            case let .failure(error):
+                shareStatusText = "Falha no replay A/B: \(error.localizedDescription)"
+            }
+        }
+    }
+
     private func shareURLs(for scans: [ScanItem]) -> [URL] {
         let urls = scans.flatMap { scan -> [URL] in
             var scanURLs = [scan.fileURL]
@@ -549,6 +588,21 @@ struct ScanListView: View {
                         ? "Replay em andamento..."
                         : "Executar replay diagnóstico",
                     systemImage: "arrow.triangle.2.circlepath"
+                )
+            }
+            .disabled(replayingScanID != nil)
+
+            Button {
+                executePreAccumulationGateABReplay(
+                    for: scan,
+                    sessionCaptureURL: sessionCaptureURL
+                )
+            } label: {
+                Label(
+                    replayingScanID == scan.id
+                        ? "Replay em andamento..."
+                        : "Executar replay A/B Pre-Gate",
+                    systemImage: "arrow.left.arrow.right"
                 )
             }
             .disabled(replayingScanID != nil)
