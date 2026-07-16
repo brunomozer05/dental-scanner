@@ -125,8 +125,20 @@ struct ScanSessionReplayCaptureMetadata: Codable, Equatable, Sendable {
     let appGitCommitHash: String?
 }
 
+struct ScanSessionReplayCaptureFooter: Codable, Equatable, Sendable {
+    let completed: Bool
+    let captureEndedTimestamp: Double
+    let framesEnqueued: Int
+    let framesWritten: Int
+    let frameWriteFailureCount: Int
+    let frameOrderViolationCount: Int
+    let limitReached: Bool
+    let fileSizeBytes: Int64
+}
+
 struct ScanSessionReplayReadSummary: Equatable, Sendable {
     let metadata: ScanSessionReplayCaptureMetadata
+    let footer: ScanSessionReplayCaptureFooter
     let framesRead: Int
     let markerObservationsReconstructed: Int
     let firstFrameIndex: Int?
@@ -141,6 +153,26 @@ struct ScanSessionReplayFrameInput {
     let frameIndex: Int
     let timestampSeconds: Double?
     let poseResults: [PoseResult]
+}
+
+enum ScanSessionReplayMissingGateAnnotationBehavior: Equatable, Sendable {
+    case fail
+    case diagnoseAndExclude
+}
+
+struct ScanSessionReplayMarkerObservationInput {
+    let markerPosition: Int
+    let observation: MarkerFrameObservation
+    let poseResult: PoseResult
+}
+
+struct ScanSessionReplayObservationFrameInput {
+    let frame: FrameObservation
+    let selectedMarkerObservations: [ScanSessionReplayMarkerObservationInput]
+
+    var poseResults: [PoseResult] {
+        selectedMarkerObservations.map(\.poseResult)
+    }
 }
 
 struct ScanSessionReplayMarkerComparison: Codable, Equatable, Sendable {
@@ -270,6 +302,30 @@ final class ScanSessionSchemaV1Reader {
         observationPolicy: ScanSessionReplayObservationPolicy = .allPersisted,
         onFrame: (ScanSessionReplayFrameInput) throws -> Void
     ) throws -> ScanSessionReplayReadSummary {
+        try readObservationFrames(
+            from: fileURL,
+            options: options,
+            observationPolicy: observationPolicy,
+            missingGateAnnotationBehavior: .fail
+        ) { frameInput in
+            try onFrame(
+                ScanSessionReplayFrameInput(
+                    frameIndex: frameInput.frame.frameIndex,
+                    timestampSeconds: frameInput.frame.timestampSeconds,
+                    poseResults: frameInput.poseResults
+                )
+            )
+        }
+    }
+
+    func readObservationFrames(
+        from fileURL: URL,
+        options: ScanSessionReplayOptions = .deterministic,
+        observationPolicy: ScanSessionReplayObservationPolicy = .allPersisted,
+        missingGateAnnotationBehavior: ScanSessionReplayMissingGateAnnotationBehavior = .fail,
+        onMetadata: (ScanSessionReplayCaptureMetadata) throws -> Void = { _ in },
+        onFrame: (ScanSessionReplayObservationFrameInput) throws -> Void
+    ) throws -> ScanSessionReplayReadSummary {
         var header: HeaderRecord?
         var footer: FooterRecord?
         var nonEmptyRecordCount = 0
@@ -328,6 +384,7 @@ final class ScanSessionSchemaV1Reader {
                 let decodedHeader = try decode(HeaderRecord.self, from: lineData, line: lineNumber)
                 try validateHeader(decodedHeader, line: lineNumber)
                 header = decodedHeader
+                try onMetadata(captureMetadata(from: decodedHeader))
 
             case "frameObservation":
                 guard let header else {
@@ -377,7 +434,8 @@ final class ScanSessionSchemaV1Reader {
                     let gateDecision = observation.preAccumulationGateWouldAccept
                     if !gateEvaluated {
                         missingGateEvaluationCount += 1
-                        if observationPolicy == .preAccumulationGateAcceptedOnly {
+                        if observationPolicy == .preAccumulationGateAcceptedOnly,
+                           missingGateAnnotationBehavior == .fail {
                             throw ScanSessionReplayError.missingGateAnnotation(
                                 line: lineNumber,
                                 frameIndex: frame.frameIndex,
@@ -405,7 +463,8 @@ final class ScanSessionSchemaV1Reader {
                         }
                     } else {
                         missingGateDecisionCount += 1
-                        if observationPolicy == .preAccumulationGateAcceptedOnly {
+                        if observationPolicy == .preAccumulationGateAcceptedOnly,
+                           missingGateAnnotationBehavior == .fail {
                             throw ScanSessionReplayError.missingGateAnnotation(
                                 line: lineNumber,
                                 frameIndex: frame.frameIndex,
@@ -416,7 +475,8 @@ final class ScanSessionSchemaV1Reader {
                     }
                     markerSelectionCounts[observation.markerId] = counts
 
-                    if observationPolicy == .allPersisted || gateDecision == true {
+                    if observationPolicy == .allPersisted ||
+                        (gateEvaluated && gateDecision == true) {
                         selectedObservations.append((offset, observation))
                     }
                 }
@@ -426,24 +486,28 @@ final class ScanSessionSchemaV1Reader {
                     framesWithZeroAcceptedObservations += 1
                 }
 
-                let poseResults = try selectedObservations.map {
-                    try reconstructPoseResult(
+                let selectedMarkerInputs = try selectedObservations.map {
+                    let poseResult = try reconstructPoseResult(
                         from: $0.element,
                         headerMarkerProfile: header.markerProfile,
                         line: lineNumber,
                         frameIndex: frame.frameIndex,
                         markerPosition: $0.offset
                     )
+                    return ScanSessionReplayMarkerObservationInput(
+                        markerPosition: $0.offset,
+                        observation: $0.element,
+                        poseResult: poseResult
+                    )
                 }
                 try onFrame(
-                    ScanSessionReplayFrameInput(
-                        frameIndex: frame.frameIndex,
-                        timestampSeconds: frame.timestampSeconds,
-                        poseResults: poseResults
+                    ScanSessionReplayObservationFrameInput(
+                        frame: frame,
+                        selectedMarkerObservations: selectedMarkerInputs
                     )
                 )
                 framesRead += 1
-                markerObservationsReconstructed += poseResults.count
+                markerObservationsReconstructed += selectedMarkerInputs.count
                 firstFrameIndex = firstFrameIndex ?? frame.frameIndex
                 lastFrameIndex = frame.frameIndex
 
@@ -475,20 +539,16 @@ final class ScanSessionSchemaV1Reader {
             requireCompletedSession: options.requireCompletedSession
         )
 
-        let metadata = ScanSessionReplayCaptureMetadata(
-            sessionIdentifier: header.sessionIdentifier,
-            schemaVersion: header.schemaVersion,
-            captureStartedTimestamp: header.captureStartedTimestamp,
-            deviceModelIdentifier: header.deviceModelIdentifier,
-            osVersion: header.osVersion,
-            cameraProfileId: header.cameraProfileId,
-            cameraProfileName: header.cameraProfileName,
-            markerProfile: header.markerProfile,
-            expectedPhysicalMarkerIds: header.expectedPhysicalMarkerIds,
-            featureFlags: header.featureFlags,
-            appVersion: header.appVersion,
-            appBuildIdentifier: header.appBuildIdentifier,
-            appGitCommitHash: header.appGitCommitHash
+        let metadata = captureMetadata(from: header)
+        let captureFooter = ScanSessionReplayCaptureFooter(
+            completed: footer.completed,
+            captureEndedTimestamp: footer.captureEndedTimestamp,
+            framesEnqueued: footer.framesEnqueued,
+            framesWritten: footer.framesWritten,
+            frameWriteFailureCount: footer.frameWriteFailureCount,
+            frameOrderViolationCount: footer.frameOrderViolationCount,
+            limitReached: footer.limitReached,
+            fileSizeBytes: footer.fileSizeBytes
         )
         let perMarker = markerSelectionCounts.keys.sorted().map { markerId in
             let counts = markerSelectionCounts[markerId] ?? SelectionCounts()
@@ -520,6 +580,7 @@ final class ScanSessionSchemaV1Reader {
         )
         return ScanSessionReplayReadSummary(
             metadata: metadata,
+            footer: captureFooter,
             framesRead: framesRead,
             markerObservationsReconstructed: markerObservationsReconstructed,
             firstFrameIndex: firstFrameIndex,
@@ -535,6 +596,26 @@ final class ScanSessionSchemaV1Reader {
         var raw = 0
         var accepted = 0
         var rejected = 0
+    }
+
+    private func captureMetadata(
+        from header: HeaderRecord
+    ) -> ScanSessionReplayCaptureMetadata {
+        ScanSessionReplayCaptureMetadata(
+            sessionIdentifier: header.sessionIdentifier,
+            schemaVersion: header.schemaVersion,
+            captureStartedTimestamp: header.captureStartedTimestamp,
+            deviceModelIdentifier: header.deviceModelIdentifier,
+            osVersion: header.osVersion,
+            cameraProfileId: header.cameraProfileId,
+            cameraProfileName: header.cameraProfileName,
+            markerProfile: header.markerProfile,
+            expectedPhysicalMarkerIds: header.expectedPhysicalMarkerIds,
+            featureFlags: header.featureFlags,
+            appVersion: header.appVersion,
+            appBuildIdentifier: header.appBuildIdentifier,
+            appGitCommitHash: header.appGitCommitHash
+        )
     }
 
     private func decode<T: Decodable>(

@@ -2,9 +2,9 @@
 
 ## Status
 
-Phase 18A full-session progressive observation capture, Phase 18B deterministic current-accumulator replay, diagnostics-only persisted Pre-Gate ALL/FILTERED A/B replay, and common-frame diagnostic STL comparison export are implemented. Saved-scan actions execute replay off the main thread and export Codable JSON summaries or separately named diagnostic artifacts.
+Phase 18A full-session progressive observation capture, Phase 18B deterministic current-accumulator replay, diagnostics-only persisted Pre-Gate ALL/FILTERED A/B replay, common-frame diagnostic STL comparison export, and offline capture-maturity replay are implemented. Saved-scan actions execute replay off the main thread and export Codable JSON summaries or separately named diagnostic artifacts.
 
-Physical Pre-Gate A/B validation, any live blocking decision, comparator integration, and offline optimizer integration remain pending. Capture and replay are diagnostic/offline infrastructure and do not create a new production scan pipeline.
+Physical Pre-Gate A/B and capture-maturity validation, any live blocking/progress decision, comparator integration, and offline optimizer integration remain pending. Capture and replay are diagnostic/offline infrastructure and do not create a new production scan pipeline.
 
 ## Goal
 
@@ -261,11 +261,61 @@ The same replay should be able to evaluate:
 ```txt
 current MultiFramePoseAccumulator
 pre-accumulation gate OFF/ON
-future per-marker angle diversity
+offline per-marker capture maturity and angle diversity
 offline frame-indexed optimizer
 ```
 
 Each result must identify the algorithm/configuration version that produced it.
+
+## Offline capture-maturity replay
+
+Spec 20 reuses the schema-1 reader to evaluate capture support without changing current-accumulator replay semantics. An immutable complete-observation callback exposes the decoded `FrameObservation` plus the exact selected marker/`PoseResult` pairs. Existing readers retain their strict missing-gate behavior; the maturity consumer may diagnose and exclude missing persisted gate annotations from `FILTERED` without inferring a decision.
+
+The consumer runs two populations:
+
+```txt
+ALL
+  every persisted observation that can be structurally reconstructed
+
+FILTERED
+  only persisted observations where:
+  preAccumulationGateEvaluated == true
+  preAccumulationGateWouldAccept == true
+```
+
+It does not re-run the Pre-Gate. Physical frame order, marker order/multiplicity, frame timestamps, and explicit persisted pose matrices remain authoritative.
+
+Each population produces:
+
+```txt
+STRICT
+  fixed thresholds; primary result
+
+REFERENCE_LIKE
+  bounded connectivity-conditioned relaxation; adapted secondary result
+```
+
+The maturity artifact contains per-marker histories, selected versus redundant views, angular spread, diagnostic coverage bins, valid/selected frame-marker connectivity, slowest-marker state, a deterministic 0.5-second timeline, and optional comparison with associated live diagnostics. It never updates the accumulator or exports geometry.
+
+The default experimental values are documented with provenance in Spec 20:
+
+```txt
+minimum valid observations per marker    65
+minimum distinct views per marker        65 (DentalScanner adaptation)
+minimum distinct-view angle              1.5 deg
+target angular spread                     4.5 deg
+global selected-frame target              300
+```
+
+The `65 distinct views` interpretation, spherical RMS formula, coverage bins, and exact `REFERENCE_LIKE` schedule are original diagnostics. They are not represented as protected reference implementation details.
+
+On-device output:
+
+```txt
+<scan-basename>_capture_maturity_replay.json
+```
+
+The file is deterministically encoded with sorted keys and shared separately. It does not overwrite the session NDJSON, scan STL, reports, diagnostics, replay summaries, or STL-comparison artifacts.
 
 ## CLI and comparator follow-up
 
@@ -288,8 +338,9 @@ CLI and comparator implementation are follow-up work. This spec does not authori
 5. Add broader old-schema compatibility only when a second supported schema exists; unknown schemas already fail explicitly.
 6. **Implemented:** persisted Pre-Gate ALL versus accepted-only A/B replay with independent determinism checks, pairwise relative geometry, and on-device JSON export.
 7. **Implemented:** deterministic common-frame diagnostic STL export for ALL versus persisted Pre-Gate FILTERED, with a Codable comparison manifest and three-file share action.
-8. Perform physical visual A/B validation before any live blocking decision.
-9. Add comparator and offline optimizer consumers only in their own phases.
+8. **Implemented:** offline capture-maturity replay for ALL/FILTERED and STRICT/REFERENCE_LIKE, including deterministic timeline/connectivity diagnostics and a saved-scan JSON share action.
+9. Perform physical visual A/B and capture-maturity validation before any live blocking or live-progress decision.
+10. Add comparator and offline optimizer consumers only in their own phases.
 
 ## Acceptance criteria
 
@@ -298,6 +349,9 @@ CLI and comparator implementation are follow-up work. This spec does not authori
 - Full camera images are absent by default.
 - File size is bounded and truncation/eviction is reported.
 - The same valid session can be replayed twice from fresh state and compared within documented tolerance.
+- Capture maturity preserves complete frame/marker identity, diagnoses redundant viewpoints and connectivity, and never reaches diagnostic 100% before global maturity.
+- STRICT remains unchanged by any REFERENCE_LIKE relaxation.
+- Missing persisted gate annotations are diagnosed and never inferred for FILTERED maturity.
 - Older supported schemas remain readable.
 - Unknown schemas fail clearly.
 - No credentials, private URLs, local paths, or external proprietary material are stored.

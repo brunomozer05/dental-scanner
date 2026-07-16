@@ -31,6 +31,7 @@ Estas specs são a fonte de verdade do projeto.
 * `18_scan_session_replay.md` - Scan Session Capture and Deterministic Replay.
 * `19_frame_indexed_bundle_adjustment.md` - active frame-indexed bundle-adjustment investigation and implementation plan.
 * `19_offline_frame_indexed_optimization.md` - historical optimizer roadmap, superseded by the detailed Spec 19A design.
+* `20_capture_maturity_replay.md` - offline capture-maturity, angular-diversity, connectivity, and progress replay.
 
 ## Regras gerais
 
@@ -55,7 +56,7 @@ Estas specs são a fonte de verdade do projeto.
 
 ## Roadmap arquitetural frame-indexed
 
-As specs 16–19 seguem a ordem abaixo. As fundações diagnostics/shadow 16–17, as phases 18A/18B, o replay offline ALL/Pre-Gate persistido e o export diagnóstico de STLs ALL/FILTERED em frame comum estão implementados. A Spec 19A está especificada; validação física do A/B, blocking ao vivo e implementação 19B permanecem pendentes.
+As specs 16–20 seguem a ordem abaixo. As fundações diagnostics/shadow 16–17, as phases 18A/18B, o replay offline ALL/Pre-Gate persistido e o export diagnóstico de STLs ALL/FILTERED em frame comum estão implementados. A Spec 20 adiciona validação offline de maturidade da captura antes de qualquer mudança no progresso ao vivo. A Spec 19A está especificada; validação física dos replays, blocking ao vivo e implementação 19B permanecem pendentes.
 
 ### Phase A
 
@@ -75,10 +76,18 @@ Avaliar e, atrás de feature flag desligada por padrão, impedir que observaçõ
 
 Persistir sessões geométricas versionadas para replay determinístico e comparação A/B sobre os mesmos dados.
 
+### Offline maturity checkpoint
+
+`20_capture_maturity_replay.md`
+
+Reproduzir offline a maturidade por marker e global sobre o mesmo schema-1, separando observações ALL/FILTERED, vistas distintas, cobertura, conectividade e timeline. `STRICT` permanece o resultado principal; um modo `REFERENCE_LIKE` documenta relaxamento adaptado sem afirmar a fórmula protegida da referência.
+
+Esse diagnóstico deve ser executado sobre sessões físicas antes de alterar a barra ao vivo ou escolher a população de frames da futura Spec 19C. Ele não implementa BA e não conclui 19B.
+
 ### Phase D
 
 `19_frame_indexed_bundle_adjustment.md`
 
-Investigar, especificar e depois comparar offline o acumulador atual com um bundle adjustment que mantém uma pose de câmera por frame e uma pose compartilhada por marker. A implementação começa em 19B somente após revisão da Spec 19A.
+Investigar, especificar e depois comparar offline o acumulador atual com um bundle adjustment que mantém uma pose de câmera por frame e uma pose compartilhada por marker. A implementação começa em 19B somente após revisão da Spec 19A; qualquer população selecionada pelo replay de maturidade exige validação física antes de virar uma política da futura 19C.
 
-Somente depois dessas fases avaliar integração primária de diversidade angular, pose graph, marker v3 e otimização global.
+Somente depois dessas validações avaliar integração primária de diversidade angular, pose graph, marker v3 e otimização global.

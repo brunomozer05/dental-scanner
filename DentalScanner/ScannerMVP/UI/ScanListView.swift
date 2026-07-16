@@ -473,6 +473,59 @@ struct ScanListView: View {
         }
     }
 
+    @MainActor
+    private func executeCaptureMaturityReplay(
+        for scan: ScanItem,
+        sessionCaptureURL: URL
+    ) {
+        guard replayingScanID == nil else {
+            return
+        }
+
+        replayingScanID = scan.id
+        shareStatusText = "Analisando maturidade da captura..."
+        let scanFileURL = scan.fileURL
+        let diagnosticsFileURL = diagnosticsURLIfAvailable(for: scan)
+        let reportFileURL = reportURLIfAvailable(for: scan)
+
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                do {
+                    let replayResult =
+                        try ScanSessionCaptureMaturityReplayRunner().run(
+                            sessionFileURL: sessionCaptureURL,
+                            diagnosticsFileURL: diagnosticsFileURL,
+                            reportFileURL: reportFileURL
+                        )
+                    let protectedURLs = [
+                        Optional(sessionCaptureURL),
+                        diagnosticsFileURL,
+                        reportFileURL
+                    ].compactMap { $0 }
+                    let outputURL =
+                        try ScanSessionCaptureMaturityReplayExporter.write(
+                            replayResult.summary,
+                            forScanFileURL: scanFileURL,
+                            protectedSourceURLs: protectedURLs
+                        )
+                    return Result<URL, Error>.success(outputURL)
+                } catch {
+                    return Result<URL, Error>.failure(error)
+                }
+            }.value
+
+            replayingScanID = nil
+            switch result {
+            case let .success(outputURL):
+                shareStatusText = "Replay de maturidade concluído"
+                shareFile(url: outputURL)
+            case let .failure(error):
+                shareStatusText =
+                    "Falha no replay de maturidade: \(error.localizedDescription)"
+            }
+        }
+    }
+
     private func shareURLs(for scans: [ScanItem]) -> [URL] {
         let urls = scans.flatMap { scan -> [URL] in
             var scanURLs = [scan.fileURL]
@@ -660,6 +713,19 @@ struct ScanListView: View {
                         ? "Gerando STLs A/B..."
                         : "Exportar STLs A/B Pre-Gate",
                     systemImage: "shippingbox"
+                )
+            }
+            .disabled(replayingScanID != nil)
+
+            Button {
+                executeCaptureMaturityReplay(
+                    for: scan,
+                    sessionCaptureURL: sessionCaptureURL
+                )
+            } label: {
+                Label(
+                    "Executar replay de maturidade da captura",
+                    systemImage: "chart.xyaxis.line"
                 )
             }
             .disabled(replayingScanID != nil)

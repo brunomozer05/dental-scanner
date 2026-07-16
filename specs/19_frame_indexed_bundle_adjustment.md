@@ -2,7 +2,7 @@
 
 ## Status
 
-Spec 19A investigation and design complete. Implementation is pending review.
+Spec 19A investigation and design complete. Implementation is pending review. Spec 20 capture-maturity replay is a pre-BA diagnostic checkpoint; it does not implement or complete 19B.
 
 This document supersedes `19_offline_frame_indexed_optimization.md` as the active design. The earlier document remains a historical roadmap overview.
 
@@ -16,6 +16,8 @@ B = frame-indexed bundle-adjustment result
 ```
 
 Optimizer B has one camera pose per selected frame, one shared global pose per marker, fixed intrinsics per frame, persisted ordered 2D/3D correspondences, a 2D reprojection residual, Huber loss, and one explicitly fixed gauge. It is replay-only and does not control live accumulation, readiness, finalization, or normal export.
+
+Capture maturity, observation selection, and geometric optimization are separate layers. Spec 20 may provide measured candidate memberships for later 19C/19E experiments, but no maturity result automatically becomes BA input.
 
 ## 2. Authorization and reference scope
 
@@ -106,7 +108,7 @@ Object points/translations are millimetres; rotations are radians; image/intrins
 
 Schema 1 persists frame index/timestamp, frame dimensions, per-frame `fx/fy/cx/cy`, camera/marker profiles, ordered marker observations, ordered 2D/3D points, per-frame PnP vector/matrix/translation, reprojection/distance/area/point count/source/tag identity, quality metadata, and Pre-Gate shadow decisions.
 
-The replay reader currently exposes only frame identity, timestamp, and reconstructed `[PoseResult]`. Spec 19C needs a separate schema-1-to-BA adapter (or immutable decoded-frame callback) for intrinsics and correspondences. It must not infer them from `PoseResult` or alter live replay.
+The replay infrastructure now exposes an immutable complete-observation callback for Spec 20 while retaining existing replay behavior. Spec 19C may reuse that callback, but still needs a dedicated schema-1-to-BA problem adapter that validates intrinsics/correspondences and builds BA entities. It must not infer them from `PoseResult` or alter live replay.
 
 The explicit persisted rotation matrix is authoritative for initialization. Validate it as finite and approximately in SO(3), convert it once to the chosen solver representation, and report disagreement with the persisted rotation vector. Do not run PnP or regenerate the matrix from that vector.
 
@@ -411,9 +413,13 @@ This document. Acceptance: conventions, model, solver, failures, diagnostics, te
 
 Deliver isolated transform/projection/residual/Huber/gauge code and non-trivial ground-truth tests. Accept when exact/noisy recovery, Jacobian, gauge, depth, outlier, connectivity, and determinism tests pass without app/NDJSON integration.
 
+Spec 20 physical maturity review should precede any decision to promote a selected real-session population, but it does not block synthetic math work after explicit 19A review and does not change the 19B acceptance criteria.
+
 ### 19C — Schema-1 NDJSON to BA problem
 
 Deliver a streaming adapter preserving identities, order, intrinsics, points, pose, policy, and provenance. Accept when fixtures prove explicit-matrix initialization, ALL/FILTERED membership, validation, and components.
+
+The adapter must support an explicit, versioned membership policy. Initial required policies remain `ALL` and persisted Pre-Gate `FILTERED`. A future `captureMaturitySelected` policy may be added only after Spec 20 physical validation and must identify policy, mode, thresholds, selected frame/observation IDs, and connectivity. It must never be silently substituted for `ALL`.
 
 ### 19D — Synthetic accumulator A versus BA B
 
@@ -428,6 +434,8 @@ Run external physical ALL first, FILTERED second. Accept with complete integrity
 Produce separately named/provenanced offline diagnostic STLs from semantically comparable A/B states. Accept only with tested transforms and unchanged normal export.
 
 The pre-BA diagnostic ALL-versus-Pre-Gate-FILTERED replay STL exporter is implemented as reusable infrastructure. It proves common-marker coordinate normalization, existing marker-model reuse, manifest provenance, and isolated diagnostic artifact naming. This does **not** complete 19F: no BA result exists yet, and accumulator-versus-BA semantic-state equivalence and STL output remain pending.
+
+The Spec 20 maturity artifact is also pre-BA infrastructure: it can explain which frames are redundant or disconnected before 19C/19E, but it contains no optimized pose and cannot complete 19B, 19C, or 19F.
 
 ### 19G — Outlier and pose-graph evaluation
 
@@ -458,6 +466,7 @@ Python comparator integration
 - Units, sign, depth, parameterization, gauge, initialization, and disconnected behavior are defined.
 - Exactly one marker is fixed by deterministic policy; no hidden identities or M0 special case exist.
 - ALL/FILTERED are offline policies with ALL default.
+- Any future maturity-selected BA population is explicit, versioned, and physically validated; it never replaces ALL silently.
 - Huber pixel delta is justified; no second outlier pass is implied.
 - Ceres offline and the fallback are evaluated with dependency controls.
 - Non-trivial truth tests cover required success/failure modes.
@@ -479,3 +488,4 @@ Implementation starts only after review.
 8. Is iOS packaging justified after offline evidence? (after 19E)
 9. Which exactly comparable state drives diagnostic STL B? (19F)
 10. Do graph edges or second-pass outliers help after pure BA baseline? (19G)
+11. After Spec 20 physical validation, should 19C add a maturity-selected policy, and should it use STRICT per-marker or whole-frame membership?

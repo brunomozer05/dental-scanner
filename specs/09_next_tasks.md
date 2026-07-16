@@ -119,7 +119,7 @@ Ainda pendente:
 * atualizar o comparador para expor os novos campos;
 * decidir, com dados, se ROI/observacao util vira soft gate.
 
-O modo experimental registra 65 frames uteis por marker como meta inicial e 300 frames/observacoes como alvo de otimizacao, mas ainda nao altera export, readiness ou finalizacao.
+O replay offline de maturidade da Spec 20 agora separa observações válidas, vistas distintas, frames selecionados, conectividade e o alvo global de 300 frames. Os valores de 65/1,5°/4,5°/300 permanecem parâmetros diagnósticos com proveniência explícita e não alteram export, readiness, finalização ou progresso ao vivo.
 
 High Resolution Camera Profile esta preparado para teste manual e permanece desligado por padrao. Quando `Wide 1.5x High Resolution Experimental` for selecionado manualmente, o app deve tentar 3840x2160 e registrar fallback se o formato nao estiver disponivel.
 
@@ -217,7 +217,7 @@ that 4K frames arrive but detection or pose acceptance fails.
 
 ## Roadmap arquitetural — observações e otimização multi-frame
 
-As próximas fundações arquiteturais devem ser executadas em commits separados e na ordem abaixo. A primeira fase diagnostics-only da Phase A, o shadow diagnostics da Phase B e as fases 18A/18B da Phase C estão implementados; blocking/A-B da Phase B e a Phase D permanecem não implementados.
+As próximas fundações arquiteturais devem ser executadas em commits separados. A primeira fase diagnostics-only da Phase A, o shadow diagnostics da Phase B, as fases 18A/18B da Phase C e os replays offline A/B estão implementados. Blocking ao vivo permanece desligado. A Spec 20 fornece o checkpoint offline de maturidade da captura; a implementação BA da Phase D permanece pendente.
 
 ### Phase A — Spec 16
 
@@ -263,6 +263,27 @@ Persistir somente geometria e quality metadata suficientes para replay determin�
 
 Status: Phase 18A de captura progressiva full-session, Phase 18B de reader/replay determinístico, replay diagnóstico ALL versus Pre-Gate aceito persistido e export de STLs diagnósticos normalizados em um marker-base comum implementados. Cada modo prova determinismo com accumulators novos; a comparação produz geometria relativa, dois STLs separados e manifest sem alterar o STL normal. Validação física, integração com comparador e optimizer continuam pendentes.
 
+### Capture maturity checkpoint — Spec 20
+
+`20_capture_maturity_replay.md`
+
+Executar sobre o mesmo schema-1 um replay exclusivamente offline que mede:
+
+```txt
+observações ALL e FILTERED
+vistas distintas por marker
+redundância
+dispersão e cobertura angular
+seleção de frames e observações
+conectividade frame-marker
+marker limitante
+timeline e maturidade global
+```
+
+`STRICT` não relaxa thresholds e é o resultado principal. `REFERENCE_LIKE` é uma adaptação secundária com histórico explícito; não reproduz como fato uma fórmula protegida da referência. O progresso diagnóstico nunca chega a 100% antes da maturidade global.
+
+Status: implementação diagnóstica/offline e ação on-device introduzidas pela Spec 20. Validação sobre `Scan_2026-07-16_12-30_session.ndjson` permanece pendente e o artifact físico não entra no Git. Não alterar a UI ao vivo antes dessa validação.
+
 ### Phase D — Spec 19
 
 `19_frame_indexed_bundle_adjustment.md`
@@ -278,6 +299,8 @@ Manter intrinsics fixos e usar residual reprojetivo robusto na primeira versão.
 
 Status: Spec 19A de investigação e desenho concluída. Convenções de coordenadas, gauge, inicialização por conectividade, residual, políticas ALL/FILTERED, decisão de solver, falhas, métricas e fases 19B–19G estão especificadas. A infraestrutura pré-BA de export STL diagnóstico ALL/FILTERED está disponível para reutilização futura, mas núcleo matemático, adapter NDJSON, BA, A/B físico e a fase 19F accumulator-versus-BA permanecem não implementados e pendentes de revisão.
 
+A Spec 20 pode informar futuramente a política de seleção da Phase 19C, mas maturidade de captura, seleção de observações e otimização geométrica permanecem decisões separadas. A Phase 19B continua pendente; nenhum resultado da Spec 20 é entrada automática do BA.
+
 ### Depois das phases A–D
 
 Avaliar, em tarefas/specs separadas:
@@ -287,4 +310,4 @@ Avaliar, em tarefas/specs separadas:
 3. marker v3 e pontos extras próprios;
 4. otimização global e eventual viabilidade runtime.
 
-As fundações frame-indexed e o replay determinístico existem. Implementar bundle adjustment somente pelas fases revisadas da Spec 19; pose graph e otimização de focal/distorção continuam fora do primeiro BA.
+As fundações frame-indexed, o replay determinístico e o replay offline de maturidade existem. Primeiro revisar a evidência física de maturidade; implementar bundle adjustment somente pelas fases revisadas da Spec 19. Pose graph e otimização de focal/distorção continuam fora do primeiro BA.
