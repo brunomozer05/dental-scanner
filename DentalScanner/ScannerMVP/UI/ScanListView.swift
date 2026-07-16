@@ -431,6 +431,48 @@ struct ScanListView: View {
         }
     }
 
+    @MainActor
+    private func exportPreAccumulationGateABReplaySTLs(
+        for scan: ScanItem,
+        sessionCaptureURL: URL
+    ) {
+        guard replayingScanID == nil else {
+            return
+        }
+
+        replayingScanID = scan.id
+        shareStatusText = "Gerando STLs A/B..."
+        let scanFileURL = scan.fileURL
+
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                do {
+                    let replayResult = try ScanSessionPreAccumulationGateABReplayRunner()
+                        .run(sessionFileURL: sessionCaptureURL)
+                    let artifacts = try ScanSessionReplaySTLComparisonExporter().export(
+                        input: ScanSessionReplaySTLComparisonExportInput(
+                            replayResult: replayResult
+                        ),
+                        sourceSessionFileURL: sessionCaptureURL,
+                        sourceScanFileURL: scanFileURL
+                    )
+                    return Result<[URL], Error>.success(artifacts.shareURLs)
+                } catch {
+                    return Result<[URL], Error>.failure(error)
+                }
+            }.value
+
+            replayingScanID = nil
+            switch result {
+            case let .success(outputURLs):
+                shareStatusText = "STLs A/B concluídos"
+                shareFiles(urls: outputURLs)
+            case let .failure(error):
+                shareStatusText = "Falha ao gerar STLs A/B: \(error.localizedDescription)"
+            }
+        }
+    }
+
     private func shareURLs(for scans: [ScanItem]) -> [URL] {
         let urls = scans.flatMap { scan -> [URL] in
             var scanURLs = [scan.fileURL]
@@ -603,6 +645,21 @@ struct ScanListView: View {
                         ? "Replay em andamento..."
                         : "Executar replay A/B Pre-Gate",
                     systemImage: "arrow.left.arrow.right"
+                )
+            }
+            .disabled(replayingScanID != nil)
+
+            Button {
+                exportPreAccumulationGateABReplaySTLs(
+                    for: scan,
+                    sessionCaptureURL: sessionCaptureURL
+                )
+            } label: {
+                Label(
+                    replayingScanID == scan.id
+                        ? "Gerando STLs A/B..."
+                        : "Exportar STLs A/B Pre-Gate",
+                    systemImage: "shippingbox"
                 )
             }
             .disabled(replayingScanID != nil)

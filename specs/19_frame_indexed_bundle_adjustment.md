@@ -427,6 +427,8 @@ Run external physical ALL first, FILTERED second. Accept with complete integrity
 
 Produce separately named/provenanced offline diagnostic STLs from semantically comparable A/B states. Accept only with tested transforms and unchanged normal export.
 
+The pre-BA diagnostic ALL-versus-Pre-Gate-FILTERED replay STL exporter is implemented as reusable infrastructure. It proves common-marker coordinate normalization, existing marker-model reuse, manifest provenance, and isolated diagnostic artifact naming. This does **not** complete 19F: no BA result exists yet, and accumulator-versus-BA semantic-state equivalence and STL output remain pending.
+
 ### 19G — Outlier and pose-graph evaluation
 
 Evaluate second-pass outliers and/or relative graph separately. Each needs independent membership, thresholds, metrics, failure behavior, and review.

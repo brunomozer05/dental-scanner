@@ -55,7 +55,7 @@ Estas specs são a fonte de verdade do projeto.
 
 ## Roadmap arquitetural frame-indexed
 
-As specs 16–19 seguem a ordem abaixo. As fundações diagnostics/shadow 16–17, as phases 18A/18B e o replay offline ALL/Pre-Gate persistido estão implementados. A Spec 19A está especificada; validação física do A/B, blocking ao vivo e implementação 19B permanecem pendentes.
+As specs 16–19 seguem a ordem abaixo. As fundações diagnostics/shadow 16–17, as phases 18A/18B, o replay offline ALL/Pre-Gate persistido e o export diagnóstico de STLs ALL/FILTERED em frame comum estão implementados. A Spec 19A está especificada; validação física do A/B, blocking ao vivo e implementação 19B permanecem pendentes.
 
 ### Phase A
 

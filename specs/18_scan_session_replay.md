@@ -2,7 +2,7 @@
 
 ## Status
 
-Phase 18A full-session progressive observation capture, Phase 18B deterministic current-accumulator replay, and diagnostics-only persisted Pre-Gate ALL/FILTERED A/B replay are implemented. Saved-scan actions execute replay off the main thread and export Codable JSON summaries.
+Phase 18A full-session progressive observation capture, Phase 18B deterministic current-accumulator replay, diagnostics-only persisted Pre-Gate ALL/FILTERED A/B replay, and common-frame diagnostic STL comparison export are implemented. Saved-scan actions execute replay off the main thread and export Codable JSON summaries or separately named diagnostic artifacts.
 
 Physical Pre-Gate A/B validation, any live blocking decision, comparator integration, and offline optimizer integration remain pending. Capture and replay are diagnostic/offline infrastructure and do not create a new production scan pipeline.
 
@@ -182,6 +182,28 @@ It compares pair distance and relative rotation between modes. This cancels each
 
 The A/B summary records global/per-marker selection counts, persisted reject-reason counts, annotation inconsistencies, independent determinism summaries, both final pose sets, pairwise relative geometry, capture provenance, and the captured live blocking flag. It emits measurements only and no better/worse verdict.
 
+## Diagnostic replay STL comparison
+
+The saved-scan diagnostic action may reuse the persisted Pre-Gate A/B runner to create visual comparison artifacts without enabling live blocking. Export is allowed only after both ALL and FILTERED pass their independent Replay A/Replay B determinism checks.
+
+`MultiFramePoseAccumulator` results are output-frame-from-marker poses, but ALL and FILTERED may have selected different accumulator anchors. Before STL generation, both pose sets are independently rebased to the lowest common marker ID:
+
+```txt
+T_base_marker = inverse(T_output_base) * T_output_marker
+```
+
+The chosen base becomes identity in both sets. This changes only each set's output coordinate frame and preserves its internal marker distances and relative rotations. Absence of a common marker is an explicit failure; no marker ID, including M0, receives special handling.
+
+The diagnostic exporter delegates model lookup, marker-local axis mapping, triangle transformation, marker ordering, and ASCII STL serialization to the existing `STLExporter`. It writes, atomically per artifact:
+
+```txt
+<scan>_replay_all.stl
+<scan>_replay_pregate_filtered.stl
+<scan>_replay_stl_comparison.json
+```
+
+The manifest records capture provenance, policies, determinism, marker sets, common base, STL filenames/sizes, pairwise relative geometry, coordinate normalization, persisted-decision use, captured live blocking flag, integrity, and caveats. It never declares either mode better. The saved production STL, source NDJSON, reports, diagnostics, and existing replay summaries are not modified.
+
 ## Capture lifecycle — Phase 18A
 
 ```txt
@@ -265,8 +287,9 @@ CLI and comparator implementation are follow-up work. This spec does not authori
 4. **Implemented:** diagnostics-only on-device execution for a saved scan with an associated session capture, including JSON summary export/share. Physical-session execution and inspection remain an operator validation step.
 5. Add broader old-schema compatibility only when a second supported schema exists; unknown schemas already fail explicitly.
 6. **Implemented:** persisted Pre-Gate ALL versus accepted-only A/B replay with independent determinism checks, pairwise relative geometry, and on-device JSON export.
-7. Perform physical A/B validation before any live blocking decision.
-8. Add comparator and offline optimizer consumers only in their own phases.
+7. **Implemented:** deterministic common-frame diagnostic STL export for ALL versus persisted Pre-Gate FILTERED, with a Codable comparison manifest and three-file share action.
+8. Perform physical visual A/B validation before any live blocking decision.
+9. Add comparator and offline optimizer consumers only in their own phases.
 
 ## Acceptance criteria
 

@@ -261,7 +261,7 @@ Status: shadow diagnostics implementado em 2026-07-12. O gate avalia antes do ac
 
 Persistir somente geometria e quality metadata suficientes para replay determinístico. Não salvar frames completos por padrão e não alterar o comparador Python nesta fase.
 
-Status: Phase 18A de captura progressiva full-session, Phase 18B de reader/replay determinístico e replay diagnóstico ALL versus Pre-Gate aceito persistido implementados. Cada modo prova determinismo com accumulators novos; a comparação entre modos usa geometria relativa por pares. Validação física, integração com comparador e optimizer continuam pendentes.
+Status: Phase 18A de captura progressiva full-session, Phase 18B de reader/replay determinístico, replay diagnóstico ALL versus Pre-Gate aceito persistido e export de STLs diagnósticos normalizados em um marker-base comum implementados. Cada modo prova determinismo com accumulators novos; a comparação produz geometria relativa, dois STLs separados e manifest sem alterar o STL normal. Validação física, integração com comparador e optimizer continuam pendentes.
 
 ### Phase D — Spec 19
 
@@ -276,7 +276,7 @@ B = otimizador com uma pose de câmera por frame e uma pose compartilhada por ma
 
 Manter intrinsics fixos e usar residual reprojetivo robusto na primeira versão. O resultado B não controla export.
 
-Status: Spec 19A de investigação e desenho concluída. Convenções de coordenadas, gauge, inicialização por conectividade, residual, políticas ALL/FILTERED, decisão de solver, falhas, métricas e fases 19B–19G estão especificadas. Núcleo matemático, adapter NDJSON, BA, A/B físico e export diagnóstico permanecem não implementados e pendentes de revisão.
+Status: Spec 19A de investigação e desenho concluída. Convenções de coordenadas, gauge, inicialização por conectividade, residual, políticas ALL/FILTERED, decisão de solver, falhas, métricas e fases 19B–19G estão especificadas. A infraestrutura pré-BA de export STL diagnóstico ALL/FILTERED está disponível para reutilização futura, mas núcleo matemático, adapter NDJSON, BA, A/B físico e a fase 19F accumulator-versus-BA permanecem não implementados e pendentes de revisão.
 
 ### Depois das phases A–D
 
