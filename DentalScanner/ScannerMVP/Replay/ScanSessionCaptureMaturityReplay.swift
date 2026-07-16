@@ -1390,31 +1390,31 @@ final class CaptureMaturitySessionAnalyzer {
                 Double(configuration.targetSelectedFrameCount),
             1
         )
-        let state: GlobalCaptureMaturityState
+        let globalState: GlobalCaptureMaturityState
         let blockingReason: String?
         if framesProcessed == 0 {
-            state = .notStarted
+            globalState = .notStarted
             blockingReason = "no frame observations processed"
         } else if matureCount != expectedMarkerIds.count ||
                     expectedMarkerIds.isEmpty {
-            state = .insufficientMarkerMaturity
+            globalState = .insufficientMarkerMaturity
             blockingReason =
                 slowestMarker(from: markers)?.metrics.blockingReason ??
                 "one or more expected markers are not mature"
         } else if configuration.requireExpectedMarkersConnected &&
                     !connected {
-            state = .insufficientConnectivity
+            globalState = .insufficientConnectivity
             blockingReason =
                 "expected markers are disconnected in the selected frame-marker graph"
         } else if configuration
                     .requireSelectedFrameTargetForGlobalMaturity &&
                     selectedFrameIndices.count <
                         configuration.targetSelectedFrameCount {
-            state = .insufficientSelectedFrameSupport
+            globalState = .insufficientSelectedFrameSupport
             blockingReason =
                 "adapted selected-frame support target has not been reached"
         } else {
-            state = .mature
+            globalState = .mature
             blockingReason = nil
         }
 
@@ -1425,7 +1425,7 @@ final class CaptureMaturitySessionAnalyzer {
             .requireSelectedFrameTargetForGlobalMaturity
             ? min(minimumMarkerProgress, targetProgress)
             : minimumMarkerProgress
-        if state != .mature {
+        if globalState != .mature {
             progress = min(progress, 0.99)
         } else {
             progress = 1
@@ -1469,7 +1469,7 @@ final class CaptureMaturitySessionAnalyzer {
                 optimizationTargetReachedFrameIndex,
             optimizationTargetProgress: targetProgress,
             expectedMarkersConnected: connected,
-            globalMaturityState: state,
+            globalMaturityState: globalState,
             globalBlockingReason: blockingReason,
             globalProgressPercent: progress * 100.0,
             confirmedCriteriaSatisfied: confirmedCriteria,
