@@ -265,7 +265,7 @@ Status: Phase 18A de captura progressiva full-session, Phase 18B de reader/repla
 
 ### Phase D — Spec 19
 
-`19_offline_frame_indexed_optimization.md`
+`19_frame_indexed_bundle_adjustment.md`
 
 Executar experimento A/B offline:
 
@@ -276,6 +276,8 @@ B = otimizador com uma pose de câmera por frame e uma pose compartilhada por ma
 
 Manter intrinsics fixos e usar residual reprojetivo robusto na primeira versão. O resultado B não controla export.
 
+Status: Spec 19A de investigação e desenho concluída. Convenções de coordenadas, gauge, inicialização por conectividade, residual, políticas ALL/FILTERED, decisão de solver, falhas, métricas e fases 19B–19G estão especificadas. Núcleo matemático, adapter NDJSON, BA, A/B físico e export diagnóstico permanecem não implementados e pendentes de revisão.
+
 ### Depois das phases A–D
 
 Avaliar, em tarefas/specs separadas:
@@ -285,4 +287,4 @@ Avaliar, em tarefas/specs separadas:
 3. marker v3 e pontos extras próprios;
 4. otimização global e eventual viabilidade runtime.
 
-Não implementar bundle adjustment, pose graph ou otimização de focal/distorção antes de existirem observações frame-indexed e replay determinístico.
+As fundações frame-indexed e o replay determinístico existem. Implementar bundle adjustment somente pelas fases revisadas da Spec 19; pose graph e otimização de focal/distorção continuam fora do primeiro BA.

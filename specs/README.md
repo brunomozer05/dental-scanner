@@ -29,7 +29,8 @@ Estas specs são a fonte de verdade do projeto.
 * `16_frame_indexed_observations.md` - Frame Indexed Observation Model.
 * `17_pre_accumulation_observation_gate.md` - Pre-Accumulation Observation Quality Gate.
 * `18_scan_session_replay.md` - Scan Session Capture and Deterministic Replay.
-* `19_offline_frame_indexed_optimization.md` - Offline Frame Indexed Multi-Frame Optimization.
+* `19_frame_indexed_bundle_adjustment.md` - active frame-indexed bundle-adjustment investigation and implementation plan.
+* `19_offline_frame_indexed_optimization.md` - historical optimizer roadmap, superseded by the detailed Spec 19A design.
 
 ## Regras gerais
 
@@ -54,7 +55,7 @@ Estas specs são a fonte de verdade do projeto.
 
 ## Roadmap arquitetural frame-indexed
 
-As specs 16–19 seguem a ordem abaixo. As fundações diagnostics/shadow 16–17, as phases 18A/18B e o replay offline ALL/Pre-Gate persistido estão implementados; validação física do A/B, blocking ao vivo e spec 19 permanecem pendentes.
+As specs 16–19 seguem a ordem abaixo. As fundações diagnostics/shadow 16–17, as phases 18A/18B e o replay offline ALL/Pre-Gate persistido estão implementados. A Spec 19A está especificada; validação física do A/B, blocking ao vivo e implementação 19B permanecem pendentes.
 
 ### Phase A
 
@@ -76,8 +77,8 @@ Persistir sessões geométricas versionadas para replay determinístico e compar
 
 ### Phase D
 
-`19_offline_frame_indexed_optimization.md`
+`19_frame_indexed_bundle_adjustment.md`
 
-Comparar offline o acumulador atual com um otimizador que mantém uma pose de câmera por frame e uma pose compartilhada por marker.
+Investigar, especificar e depois comparar offline o acumulador atual com um bundle adjustment que mantém uma pose de câmera por frame e uma pose compartilhada por marker. A implementação começa em 19B somente após revisão da Spec 19A.
 
 Somente depois dessas fases avaliar integração primária de diversidade angular, pose graph, marker v3 e otimização global.
