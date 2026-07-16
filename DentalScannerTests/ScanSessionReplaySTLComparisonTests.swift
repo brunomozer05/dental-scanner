@@ -538,7 +538,7 @@ final class ScanSessionReplaySTLComparisonTests: XCTestCase {
             let lines = poses.sorted { $0.markerId < $1.markerId }.map { pose in
                 let rotationRows = (0..<3).map { row in
                     (0..<3).map {
-                        format(PoseMath.matrixElement(
+                        self.format(PoseMath.matrixElement(
                             pose.rotationMatrix,
                             row: row,
                             column: $0
@@ -549,9 +549,9 @@ final class ScanSessionReplaySTLComparisonTests: XCTestCase {
                     String(pose.markerId),
                     profile.rawValue,
                     rotationRows,
-                    format(pose.translationVector.x),
-                    format(pose.translationVector.y),
-                    format(pose.translationVector.z)
+                    self.format(pose.translationVector.x),
+                    self.format(pose.translationVector.y),
+                    self.format(pose.translationVector.z)
                 ].joined(separator: "|")
             }
             return lines.joined(separator: "\n") + "\n"
