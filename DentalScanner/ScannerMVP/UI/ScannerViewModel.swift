@@ -795,6 +795,9 @@ final class ScannerViewModel: ObservableObject {
     var debugUseBestFinalPoseCandidateForExport: Bool {
         ScanConfiguration.normalUseBestFinalPoseCandidateForExport
     }
+    var debugLegacyConcatenatedMultiFramePnPForSingleArucoV1Enabled: Bool {
+        enableLegacyConcatenatedMultiFramePnPForSingleArucoV1
+    }
     var debugUsedBestFinalPoseCandidate: Bool {
         usedBestFinalPoseCandidate
     }
