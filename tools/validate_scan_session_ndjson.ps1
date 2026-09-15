@@ -310,7 +310,11 @@ if ($null -ne $footer) {
 
 $sessionIdentifiers = @(
     $headers |
-        ForEach-Object { $_.Value.sessionIdentifier } |
+        ForEach-Object {
+            if (Has-Property $_.Value 'sessionIdentifier') {
+                $_.Value.sessionIdentifier
+            }
+        } |
         Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
         Sort-Object -Unique
 )
