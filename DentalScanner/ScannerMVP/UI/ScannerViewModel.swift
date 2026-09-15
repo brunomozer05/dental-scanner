@@ -1139,6 +1139,7 @@ final class ScannerViewModel: ObservableObject {
     @Published private(set) var normalFinalizationMaturityGatePassed: Bool = false
     @Published private(set) var normalFinalizationAutoExportReason: String?
     @Published private(set) var normalFinalizationBlockedReason: String?
+    @Published private(set) var normalFinalizationTimeoutDiagnosticReason: String?
     @Published private(set) var normalFinalizationMinObservationsByMarker: [Int: Int] = [:]
     @Published private(set) var normalFinalizationAverageObservationsPerMarker: Double?
     @Published private(set) var normalFinalizationWorstNormalStdDegrees: Double?
@@ -3256,6 +3257,7 @@ final class ScannerViewModel: ObservableObject {
         normalFinalizationMaturityGatePassed = false
         normalFinalizationAutoExportReason = nil
         normalFinalizationBlockedReason = nil
+        normalFinalizationTimeoutDiagnosticReason = nil
         normalFinalizationMinObservationsByMarker = [:]
         normalFinalizationAverageObservationsPerMarker = nil
         normalFinalizationWorstNormalStdDegrees = nil
@@ -4388,10 +4390,10 @@ final class ScannerViewModel: ObservableObject {
             return "Refinando orientacao; mantenha a camera estavel"
         case "waiting_reprojection":
             return "Refinando reprojecao; mova bem devagar"
-        case "maturity_gate_passed":
+        case NormalFinalizationDecision.successReason:
             return "Quase pronto... gerando STL em breve"
-        case "max_seconds_reached_export_gate_valid":
-            return "Tempo maximo atingido; finalizando com dados validos"
+        case NormalFinalizationDecision.timeoutReason:
+            return "Tempo maximo atingido sem maturidade; continue escaneando"
         default:
             return reason
         }
@@ -6312,17 +6314,34 @@ final class ScannerViewModel: ObservableObject {
             reprojectionGatePassed: reprojectionGatePassed
         )
 
-        let autoExportReason: String?
-        if hasStableWindow && maturityGatePassed {
-            autoExportReason = "maturity_gate_passed"
-        } else if hitMaxWindow {
-            autoExportReason = "max_seconds_reached_export_gate_valid"
-        } else {
-            autoExportReason = nil
-        }
-        normalFinalizationCanAutoExport = autoExportReason != nil && allExpectedMarkersAt100Percent
+        let finalizationDecision = NormalFinalizationDecision.evaluate(
+            hasExportableTagPoses: evaluation.hasExportableTagPoses,
+            allExpectedMarkersAt100Percent: allExpectedMarkersAt100Percent,
+            hasStableWindow: hasStableWindow,
+            maturityGatePassed: maturityGatePassed,
+            hitMaxWindow: hitMaxWindow,
+            timeoutDiagnosticAlreadyRecorded: normalFinalizationTimeoutDiagnosticReason != nil
+        )
+        normalFinalizationCanAutoExport = finalizationDecision.shouldAutoExport
 
-        if let autoExportReason, allExpectedMarkersAt100Percent {
+        if finalizationDecision.shouldRecordTimeoutDiagnostic,
+           let timeoutReason = finalizationDecision.timeoutDiagnosticReason {
+            normalFinalizationTimeoutDiagnosticReason = timeoutReason
+            recordDiagnosticEvent(
+                name: "normal_finalization_timeout_reached",
+                metadata: [
+                    "elapsedSeconds": String(format: "%.2f", elapsedSeconds),
+                    "stableSeconds": String(format: "%.2f", normalFinalizationStableSecondsCollected),
+                    "reason": timeoutReason,
+                    "blockedReason": blockedReason ?? "none",
+                    "allExpectedMarkersAt100Percent": "true",
+                    "maturityGatePassed": maturityGatePassed ? "true" : "false"
+                ],
+                timestamp: timestamp
+            )
+        }
+
+        if let autoExportReason = finalizationDecision.autoExportReason {
             normalFinalizationState = .exporting
             normalFinalizationAutoExportTriggered = true
             normalFinalizationAutoExportReason = autoExportReason
@@ -6359,14 +6378,24 @@ final class ScannerViewModel: ObservableObject {
             return true
         }
 
+        if finalizationDecision.shouldContinueStabilizing {
+            normalFinalizationState = .stabilizing
+        }
         setScanState(.stabilizing)
         scanProgress = 99
-        let finalizationMessage = refinementProgress >= 85
-            ? "Quase pronto..."
-            : "Todos capturados - mantenha parado para refinar"
-        let finalizationDetail = refinementProgress >= 85
-            ? "Gerando STL em breve"
-            : friendlyBlockingReason(blockedReason)
+        let finalizationMessage: String
+        let finalizationDetail: String
+        if finalizationDecision.timeoutDiagnosticReason != nil {
+            finalizationMessage = "Refinamento incompleto - continue escaneando"
+            finalizationDetail = friendlyBlockingReason(blockedReason)
+        } else {
+            finalizationMessage = refinementProgress >= 85
+                ? "Quase pronto..."
+                : "Todos capturados - mantenha parado para refinar"
+            finalizationDetail = refinementProgress >= 85
+                ? "Gerando STL em breve"
+                : friendlyBlockingReason(blockedReason)
+        }
         scanReadinessMessage = finalizationMessage
         scanQualityStatus = scanReadinessMessage
         scanReadinessBlockerSummary = blockedReason ?? "Pronto: finalizando scan normal"
