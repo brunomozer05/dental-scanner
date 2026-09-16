@@ -27,6 +27,10 @@ jobs:
         shell: pwsh
         run: ./tools/check_repository_hygiene.ps1
 
+      - name: Test repository hygiene policy
+        shell: pwsh
+        run: ./tools/test_repository_hygiene.ps1
+
       - name: Validate scan-session NDJSON fixtures
         shell: pwsh
         run: ./tools/test_scan_session_ndjson_validator.ps1
