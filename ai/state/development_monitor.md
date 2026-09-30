@@ -4,10 +4,10 @@
 - baseline established: 2026-09-23
 - relevant PRs: #33 merged at main HEAD; no newer product PR observed
 - relevant issues: #1 closed/completed; #22 closed/completed; #2 remains next P0 investigation; #19 roadmap remains open
-- checks at main HEAD: Repository hygiene = success; Deterministic tests and unsigned build = success; build-unsigned-ipa = success
-- latest objective evidence: scheduled Quality Watchdog run on 2026-09-21 passed repository hygiene and deterministic tests/unsigned build at the same main HEAD
+- checks at main HEAD: Repository hygiene = success; Deterministic tests and unsigned build = success; build-unsigned-ipa = success; scheduled Quality Watchdog run `36431791275` passed on 2026-09-28 at the same HEAD
+- latest objective evidence: Quality Watchdog run `36431791275` on 2026-09-28 passed at `3312a54b`; this is CI evidence only, not physical detection/stability/precision evidence
 - active hypothesis: none newly established by this monitor; Issue #2 retains the existing planar-IPPE/viewpoint-continuity hypothesis
-- attempts/results: baseline only; no new product commit or experimental evidence found beyond existing Issue evidence
+- attempts/results: no product commit or new public experimental evidence after `3312a54b`; latest scheduled CI remained green
 - blockers: #2 requires replay/offline investigation before #3 can safely advance; physical trueness remains dependent on #8 ground truth
 - reports: none created by Development Monitor
 - next step: inspect only the next delta after `3312a54b`; if product code is unchanged, watch for new CI/PR/Issue/experimental evidence without re-auditing architecture
